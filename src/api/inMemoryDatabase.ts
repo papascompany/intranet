@@ -132,6 +132,11 @@ export class InMemoryDatabase {
     return cloneList(this.overtimeRequests);
   }
 
+  addOvertimeRequest(request: OvertimeRequest) {
+    this.overtimeRequests.unshift(cloneItem(request));
+    return cloneItem(request);
+  }
+
   updateOvertimeRequest(request: OvertimeRequest) {
     const index = this.overtimeRequests.findIndex((item) => item.id === request.id);
     if (index < 0) {

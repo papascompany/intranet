@@ -83,6 +83,30 @@ const dashboard: AdminDashboardResponse = {
       status: "APPROVED"
     }
   ],
+  overtimeRequests: [
+    {
+      id: "ot-1",
+      employeeId: "emp-ops-1",
+      date: "2026-07-09",
+      startsAt: "2026-07-09T18:00:00+09:00",
+      endsAt: "2026-07-09T19:30:00+09:00",
+      minutes: 90,
+      reason: "월말 정산",
+      status: "PENDING",
+      payApproved: false
+    },
+    {
+      id: "ot-2",
+      employeeId: "emp-prod-1",
+      date: "2026-07-05",
+      startsAt: "2026-07-05T18:00:00+09:00",
+      endsAt: "2026-07-05T19:00:00+09:00",
+      minutes: 60,
+      reason: "배포 지원",
+      status: "APPROVED",
+      payApproved: true
+    }
+  ],
   corrections: [
     {
       id: "corr-1",
@@ -149,15 +173,43 @@ describe("buildAdminViewModel", () => {
     expect(viewModel.gpsFailedCountLabel).toBe("2건");
   });
 
+  it("builds pending leave request rows", () => {
+    const viewModel = buildAdminViewModel(dashboard, "emp-ops-1");
+
+    expect(viewModel.pendingRequestCountLabel).toBe("2건");
+    expect(viewModel.leaveRequestRows).toEqual([
+      {
+        id: "leave-1",
+        label: "김운영",
+        value: "2026-07-12 · 0.5일",
+        meta: "대기"
+      }
+    ]);
+  });
+
+  it("builds pending overtime rows", () => {
+    const viewModel = buildAdminViewModel(dashboard, "emp-ops-1");
+
+    expect(viewModel.overtimeRows).toEqual([
+      {
+        id: "ot-1",
+        label: "김운영",
+        value: "2026-07-09 · 1시간 30분",
+        meta: "대기"
+      }
+    ]);
+  });
+
   it("filters correction rows to the selected employee", () => {
     const viewModel = buildAdminViewModel(dashboard, "emp-ops-1");
 
     expect(viewModel.correctionRows).toEqual([
-      expect.objectContaining({
+      {
         id: "corr-2",
         label: "퇴근시각 보정",
-        value: "퇴근시각 승인 보정"
-      })
+        value: "퇴근시각 승인 보정",
+        meta: "17:10"
+      }
     ]);
   });
 

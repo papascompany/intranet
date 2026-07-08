@@ -4,6 +4,7 @@ import type {
   LeaveBalance,
   LeaveRequest,
   OvertimeOffsetResult,
+  OvertimeRequest,
   PayrollStatement,
   VerificationStatus
 } from "../domain/types";
@@ -18,6 +19,7 @@ type LeaveBalanceSnapshot = Pick<
   "advanceGrantedDays" | "advanceUsedDays" | "availableDays" | "pendingOffsetDays"
 >;
 type LeaveRequestSnapshot = Pick<LeaveRequest, "days" | "status">;
+type OvertimeRequestSnapshot = Pick<OvertimeRequest, "minutes" | "status">;
 type OvertimeOffsetSnapshot = Pick<
   OvertimeOffsetResult,
   "appliedMinutes" | "payEligibleMinutes" | "remainingEarlyLeaveMinutes" | "remainingOvertimeMinutes" | "status"
@@ -29,6 +31,7 @@ export type EmployeeViewModelSnapshot = {
   attendanceToday: AttendanceTodaySnapshot;
   leaveBalance: LeaveBalanceSnapshot;
   leaveRequests: LeaveRequestSnapshot[];
+  overtimeRequests?: OvertimeRequestSnapshot[];
   earlyLeaveTotalMinutes: number;
   overtimeOffset: OvertimeOffsetSnapshot;
   payrollStatements: PayrollStatementSnapshot[];
@@ -43,6 +46,7 @@ export type EmployeeViewModel = {
   earlyLeaveLabel: string;
   offsetLabel: string;
   pendingLeaveSummary: string;
+  pendingOvertimeSummary: string;
   overtimeSummary: string;
   payrollSummary: string;
 };
@@ -65,6 +69,8 @@ const statusLabels: Record<VerificationStatus, string> = {
 export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): EmployeeViewModel {
   const pendingLeaveRequests = snapshot.leaveRequests.filter((request) => request.status === "PENDING");
   const pendingLeaveDays = pendingLeaveRequests.reduce((total, request) => total + request.days, 0);
+  const pendingOvertimeRequests = (snapshot.overtimeRequests ?? []).filter((request) => request.status === "PENDING");
+  const pendingOvertimeMinutes = pendingOvertimeRequests.reduce((total, request) => total + request.minutes, 0);
   const activePayrollStatements = snapshot.payrollStatements.filter((statement) => !statement.deletedAt);
   const latestPayrollStatement = activePayrollStatements.sort(comparePayrollStatementsDesc)[0];
 
@@ -82,6 +88,10 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
       pendingLeaveRequests.length === 0
         ? "대기 중인 휴가 없음"
         : `대기 휴가 ${pendingLeaveRequests.length}건 · ${formatDays(pendingLeaveDays)}일`,
+    pendingOvertimeSummary:
+      pendingOvertimeRequests.length === 0
+        ? "대기 중인 야근 없음"
+        : `대기 야근 ${pendingOvertimeRequests.length}건 · ${formatMinutes(pendingOvertimeMinutes)}`,
     overtimeSummary: formatOvertimeSummary(snapshot.overtimeOffset),
     payrollSummary: latestPayrollStatement
       ? `${latestPayrollStatement.month} 급여명세서 · ${latestPayrollStatement.filename}`

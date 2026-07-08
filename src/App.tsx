@@ -18,7 +18,11 @@ import {
   getDashboard,
   getEmployeeSnapshot,
   getEmployees,
+  setOvertimePayApproval,
+  softDeletePayrollStatement,
   submitLeaveRequest,
+  submitOvertimeRequest,
+  updateRequestStatus,
   uploadPayrollStatement
 } from "./api/hrApi";
 import type { Dashboard, EmployeeSnapshot } from "./api/types";
@@ -122,6 +126,67 @@ function App() {
     await refresh(selectedEmployee.id);
   }
 
+  async function submitOvertime() {
+    if (!selectedEmployee) {
+      return;
+    }
+
+    const result = await submitOvertimeRequest({
+      employeeId: selectedEmployee.id,
+      date: "2026-07-16",
+      startsAt: "2026-07-16T17:30:00+09:00",
+      endsAt: "2026-07-16T19:00:00+09:00",
+      minutes: 90,
+      reason: "운영 마감 지원",
+      actorId: selectedEmployee.id
+    });
+
+    setNotice(`${selectedEmployee.name} 야근 신청 생성 · ${result.request.status}`);
+    await refresh(selectedEmployee.id);
+  }
+
+  async function approveLeave(requestId?: string) {
+    if (!requestId) {
+      setNotice("승인할 휴가 신청이 없습니다.");
+      return;
+    }
+
+    const result = await updateRequestStatus({
+      targetType: "LeaveRequest",
+      requestId,
+      status: "APPROVED",
+      actorId: "emp-ceo",
+      detail: "관리자 화면에서 휴가 승인"
+    });
+
+    setNotice(`휴가 신청 승인 · ${result.request.id}`);
+    await refresh(selectedEmployeeId);
+  }
+
+  async function approveOvertime(requestId?: string) {
+    if (!requestId) {
+      setNotice("승인할 야근 신청이 없습니다.");
+      return;
+    }
+
+    await updateRequestStatus({
+      targetType: "OvertimeRequest",
+      requestId,
+      status: "APPROVED",
+      actorId: "emp-ceo",
+      detail: "관리자 화면에서 야근 승인"
+    });
+    const result = await setOvertimePayApproval({
+      requestId,
+      payApproved: true,
+      actorId: "emp-ceo",
+      detail: "관리자 인정 초과근무수당 집계"
+    });
+
+    setNotice(`야근 승인 및 수당 인정 · ${result.request.id}`);
+    await refresh(selectedEmployeeId);
+  }
+
   async function createCorrection() {
     if (!selectedEmployee || !employeeSnapshot?.todayAttendance) {
       setNotice("보정할 오늘 출퇴근 기록이 없습니다.");
@@ -158,6 +223,22 @@ function App() {
 
     setNotice(`${selectedEmployee.name} 급여명세서 업로드 · ${result.statement.month}`);
     await refresh(selectedEmployee.id);
+  }
+
+  async function deletePayroll(statementId?: string) {
+    if (!statementId) {
+      setNotice("삭제할 급여명세서가 없습니다.");
+      return;
+    }
+
+    const result = await softDeletePayrollStatement({
+      statementId,
+      actorId: "emp-ceo",
+      deletedAt: "2026-07-08T12:00:00+09:00"
+    });
+
+    setNotice(`급여명세서 삭제 처리 · ${result.statement.month}`);
+    await refresh(selectedEmployeeId);
   }
 
   return (
@@ -197,14 +278,23 @@ function App() {
           </div>
 
           {mode === "employee" ? (
-            <EmployeeView viewModel={employeeViewModel} isLoading={isLoading} onClock={clock} onSubmitLeave={submitLeave} />
+            <EmployeeView
+              viewModel={employeeViewModel}
+              isLoading={isLoading}
+              onClock={clock}
+              onSubmitLeave={submitLeave}
+              onSubmitOvertime={submitOvertime}
+            />
           ) : (
             <AdminView
               viewModel={adminViewModel}
               isLoading={isLoading}
               selectedEmployee={selectedEmployee}
+              onApproveLeave={approveLeave}
+              onApproveOvertime={approveOvertime}
               onCreateCorrection={createCorrection}
               onUploadPayroll={uploadPayroll}
+              onDeletePayroll={deletePayroll}
             />
           )}
         </section>
@@ -218,6 +308,7 @@ function EmployeeView(props: {
   isLoading: boolean;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
   onSubmitLeave: () => void;
+  onSubmitOvertime: () => void;
 }) {
   const viewModel = props.viewModel;
 
@@ -285,12 +376,18 @@ function EmployeeView(props: {
       <section className="list-section">
         <div className="section-heading">
           <h3>신청 현황</h3>
-          <button className="pill-button" disabled={props.isLoading} onClick={props.onSubmitLeave}>
-            신청
-          </button>
+          <div className="button-cluster">
+            <button className="pill-button" disabled={props.isLoading} onClick={props.onSubmitLeave}>
+              휴가
+            </button>
+            <button className="pill-button" disabled={props.isLoading} onClick={props.onSubmitOvertime}>
+              야근
+            </button>
+          </div>
         </div>
         <DataRow label="휴가" value={viewModel?.pendingLeaveSummary ?? "로딩 중"} meta="API" />
-        <DataRow label="야근" value={viewModel?.overtimeSummary ?? "로딩 중"} meta="OFFSET" />
+        <DataRow label="야근 신청" value={viewModel?.pendingOvertimeSummary ?? "로딩 중"} meta="API" />
+        <DataRow label="야근 상계" value={viewModel?.overtimeSummary ?? "로딩 중"} meta="OFFSET" />
         <DataRow label="급여명세서" value={viewModel?.payrollSummary ?? "로딩 중"} meta="PAYROLL" />
       </section>
     </div>
@@ -301,9 +398,15 @@ function AdminView(props: {
   viewModel: AdminViewModel | null;
   isLoading: boolean;
   selectedEmployee?: Employee;
+  onApproveLeave: (requestId?: string) => void;
+  onApproveOvertime: (requestId?: string) => void;
   onCreateCorrection: () => void;
   onUploadPayroll: () => void;
+  onDeletePayroll: (statementId?: string) => void;
 }) {
+  const firstLeaveRequestId = props.viewModel?.leaveRequestRows[0]?.id;
+  const firstOvertimeRequestId = props.viewModel?.overtimeRows[0]?.id;
+
   return (
     <div className="admin-grid">
       <section className="metric-strip admin-metrics">
@@ -311,6 +414,33 @@ function AdminView(props: {
         <Metric icon={<MapPin size={18} />} label="GPS 실패 허용" value={props.viewModel?.gpsFailedCountLabel ?? "-"} />
         <Metric icon={<ListChecks size={18} />} label="승인 대기" value={props.viewModel?.pendingRequestCountLabel ?? "-"} />
         <Metric icon={<Upload size={18} />} label="급여 파일" value={props.viewModel?.payrollCountLabel ?? "-"} />
+      </section>
+
+      <section className="list-section">
+        <div className="section-heading">
+          <h3>승인 대기</h3>
+          <div className="button-cluster">
+            <button className="pill-button" disabled={props.isLoading || !firstLeaveRequestId} onClick={() => props.onApproveLeave(firstLeaveRequestId)}>
+              휴가 승인
+            </button>
+            <button
+              className="pill-button"
+              disabled={props.isLoading || !firstOvertimeRequestId}
+              onClick={() => props.onApproveOvertime(firstOvertimeRequestId)}
+            >
+              야근 승인
+            </button>
+          </div>
+        </div>
+        {props.viewModel?.leaveRequestRows.slice(0, 3).map((row) => (
+          <DataRow key={row.id} label={`휴가 · ${row.label}`} value={row.value} meta={row.meta} />
+        ))}
+        {props.viewModel?.overtimeRows.slice(0, 3).map((row) => (
+          <DataRow key={row.id} label={`야근 · ${row.label}`} value={row.value} meta={row.meta} />
+        ))}
+        {!props.viewModel?.leaveRequestRows.length && !props.viewModel?.overtimeRows.length ? (
+          <DataRow label="승인" value="대기 중인 신청이 없습니다." meta="EMPTY" />
+        ) : null}
       </section>
 
       <section className="list-section">
@@ -341,10 +471,19 @@ function AdminView(props: {
       <section className="list-section payroll-panel">
         <div className="section-heading">
           <h3>급여명세서</h3>
-          <button className="pill-button" disabled={props.isLoading || !props.selectedEmployee} onClick={props.onUploadPayroll}>
-            <FileText size={14} />
-            업로드
-          </button>
+          <div className="button-cluster">
+            <button className="pill-button" disabled={props.isLoading || !props.selectedEmployee} onClick={props.onUploadPayroll}>
+              <FileText size={14} />
+              업로드
+            </button>
+            <button
+              className="pill-button"
+              disabled={props.isLoading || !props.viewModel?.payrollRows[0]?.id}
+              onClick={() => props.onDeletePayroll(props.viewModel?.payrollRows[0]?.id)}
+            >
+              삭제
+            </button>
+          </div>
         </div>
         {props.viewModel?.payrollRows.map((row) => (
           <DataRow key={row.id} label={row.label} value={row.value} meta={row.meta} />
@@ -384,6 +523,7 @@ function toEmployeeViewModelSnapshot(snapshot: EmployeeSnapshot) {
     leaveRequests: snapshot.leaveRequests,
     earlyLeaveTotalMinutes: snapshot.earlyLeaveLedger.reduce((sum, entry) => sum + entry.minutes, 0),
     overtimeOffset: snapshot.overtimeOffset ?? null,
+    overtimeRequests: snapshot.overtimeRequests,
     payrollStatements: snapshot.payrollStatements
   };
 }
@@ -396,8 +536,9 @@ function toAdminDashboardResponse(
   return {
     employees,
     attendanceRecords: dashboard.todayAttendance,
-    leaveRequests: dashboard.pendingLeaveRequests,
-    corrections: employeeSnapshot.attendanceCorrections,
+    leaveRequests: dashboard.leaveRequests,
+    overtimeRequests: dashboard.overtimeRequests,
+    corrections: dashboard.corrections,
     payrollStatements: dashboard.activePayrollStatements,
     auditLogs: dashboard.recentAuditLogs
   };

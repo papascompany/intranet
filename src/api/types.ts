@@ -53,10 +53,28 @@ export type SubmitLeaveRequestInput = {
   status?: Extract<RequestStatus, "DRAFT" | "PENDING">;
 };
 
+export type SubmitOvertimeRequestInput = {
+  employeeId: string;
+  date: string;
+  startsAt: string;
+  endsAt: string;
+  minutes: number;
+  reason: string;
+  actorId?: string;
+  status?: RequestStatus;
+};
+
 export type UpdateRequestStatusInput = {
   targetType: "LeaveRequest" | "OvertimeRequest";
   requestId: string;
   status: Extract<RequestStatus, "APPROVED" | "REJECTED" | "PENDING">;
+  actorId: string;
+  detail?: string;
+};
+
+export type SetOvertimePayApprovalInput = {
+  requestId: string;
+  payApproved: boolean;
   actorId: string;
   detail?: string;
 };
@@ -99,7 +117,10 @@ export type Dashboard = {
   employeesTotal: number;
   pilotEmployees: number;
   todayAttendance: AttendanceRecord[];
+  leaveRequests: LeaveRequest[];
   pendingLeaveRequests: LeaveRequest[];
+  overtimeRequests: OvertimeRequest[];
+  corrections: AttendanceCorrection[];
   gpsFailedAttendance: AttendanceRecord[];
   activePayrollStatements: PayrollStatement[];
   recentAuditLogs: AuditLog[];

@@ -17,8 +17,10 @@ import type {
   CreateAttendanceCorrectionInput,
   Dashboard,
   EmployeeSnapshot,
+  SetOvertimePayApprovalInput,
   SoftDeletePayrollStatementInput,
   SubmitLeaveRequestInput,
+  SubmitOvertimeRequestInput,
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
 } from "./types";
@@ -42,13 +44,17 @@ export class HrApi {
     const employees = this.db.listEmployees();
     const attendance = this.db.listAttendanceRecords();
     const leaveRequests = this.db.listLeaveRequests();
+    const overtimeRequests = this.db.listOvertimeRequests();
 
     return {
       asOf,
       employeesTotal: employees.length,
       pilotEmployees: employees.filter((employee) => employee.pilot).length,
       todayAttendance: attendance.filter((record) => record.date === today),
+      leaveRequests,
       pendingLeaveRequests: leaveRequests.filter((request) => request.status === "PENDING"),
+      overtimeRequests,
+      corrections: this.db.listCorrections(),
       gpsFailedAttendance: attendance.filter((record) => record.status.includes("GPS_FAILED")),
       activePayrollStatements: this.db.listPayrollStatements(false),
       recentAuditLogs: this.db.listAuditLogs().slice(0, 10)
@@ -170,6 +176,35 @@ export class HrApi {
     return { request: saved, auditLog };
   }
 
+  async submitOvertimeRequest(input: SubmitOvertimeRequestInput) {
+    this.assertEmployee(input.employeeId);
+    if (input.actorId) {
+      this.assertEmployee(input.actorId);
+    }
+
+    const request: OvertimeRequest = {
+      id: this.db.nextId("ot"),
+      employeeId: input.employeeId,
+      date: input.date,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      minutes: input.minutes,
+      reason: input.reason,
+      status: input.status ?? "PENDING",
+      payApproved: false
+    };
+    const saved = this.db.addOvertimeRequest(request);
+    const auditLog = this.addAuditLog({
+      actorId: input.actorId ?? input.employeeId,
+      action: "OVERTIME_REQUEST_SUBMITTED",
+      targetType: "OvertimeRequest",
+      targetId: saved.id,
+      detail: `${saved.date} ${saved.startsAt}~${saved.endsAt} ${saved.minutes} minutes`
+    });
+
+    return { request: saved, auditLog };
+  }
+
   async updateRequestStatus(input: UpdateRequestStatusInput) {
     this.assertEmployee(input.actorId);
 
@@ -184,6 +219,22 @@ export class HrApi {
     const request = this.findOvertimeRequest(input.requestId);
     const saved = this.db.updateOvertimeRequest({ ...request, status: input.status });
     const auditLog = this.auditStatusChange(input.actorId, input.targetType, saved.id, input.status, input.detail);
+
+    return { request: saved, auditLog };
+  }
+
+  async setOvertimePayApproval(input: SetOvertimePayApprovalInput) {
+    this.assertEmployee(input.actorId);
+
+    const request = this.findOvertimeRequest(input.requestId);
+    const saved = this.db.updateOvertimeRequest({ ...request, payApproved: input.payApproved });
+    const auditLog = this.addAuditLog({
+      actorId: input.actorId,
+      action: input.payApproved ? "OVERTIME_PAY_APPROVED" : "OVERTIME_PAY_UNAPPROVED",
+      targetType: "OvertimeRequest",
+      targetId: saved.id,
+      detail: input.detail ?? `Overtime pay approval set to ${input.payApproved}`
+    });
 
     return { request: saved, auditLog };
   }
@@ -354,7 +405,9 @@ export const getDashboard = defaultHrApi.getDashboard.bind(defaultHrApi);
 export const getEmployeeSnapshot = defaultHrApi.getEmployeeSnapshot.bind(defaultHrApi);
 export const clockAttendance = defaultHrApi.clockAttendance.bind(defaultHrApi);
 export const submitLeaveRequest = defaultHrApi.submitLeaveRequest.bind(defaultHrApi);
+export const submitOvertimeRequest = defaultHrApi.submitOvertimeRequest.bind(defaultHrApi);
 export const updateRequestStatus = defaultHrApi.updateRequestStatus.bind(defaultHrApi);
+export const setOvertimePayApproval = defaultHrApi.setOvertimePayApproval.bind(defaultHrApi);
 export const createAttendanceCorrection = defaultHrApi.createAttendanceCorrection.bind(defaultHrApi);
 export const uploadPayrollStatement = defaultHrApi.uploadPayrollStatement.bind(defaultHrApi);
 export const softDeletePayrollStatement = defaultHrApi.softDeletePayrollStatement.bind(defaultHrApi);

@@ -4,6 +4,7 @@ import type {
   AuditLog,
   Employee,
   LeaveRequest,
+  OvertimeRequest,
   PayrollStatement
 } from "../domain/types";
 
@@ -11,6 +12,7 @@ export type AdminDashboardResponse = {
   employees: Employee[];
   attendanceRecords: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
+  overtimeRequests?: OvertimeRequest[];
   corrections: AttendanceCorrection[];
   payrollStatements: PayrollStatement[];
   auditLogs: AuditLog[];
@@ -29,6 +31,8 @@ export type AdminViewModel = {
   pendingRequestCountLabel: string;
   payrollCountLabel: string;
   attendanceRows: AdminViewModelRow[];
+  leaveRequestRows: AdminViewModelRow[];
+  overtimeRows: AdminViewModelRow[];
   correctionRows: AdminViewModelRow[];
   payrollRows: AdminViewModelRow[];
   auditRows: AdminViewModelRow[];
@@ -50,14 +54,25 @@ const correctionLabels = {
   MISSING_RECORD_CREATED: "누락 기록 추가"
 } satisfies Record<AttendanceCorrection["type"], string>;
 
+const requestStatusLabels = {
+  PENDING: "대기",
+  APPROVED: "승인",
+  REJECTED: "반려",
+  DRAFT: "초안"
+} satisfies Record<LeaveRequest["status"], string>;
+
 export function buildAdminViewModel(
   dashboard: AdminDashboardResponse,
   selectedEmployeeId: string
 ): AdminViewModel {
+  const overtimeRequests = dashboard.overtimeRequests ?? [];
+  const pendingLeaveRequests = dashboard.leaveRequests.filter((request) => request.status === "PENDING");
+  const pendingOvertimeRequests = overtimeRequests.filter((request) => request.status === "PENDING");
+
   return {
     pilotCountLabel: `${dashboard.employees.filter((employee) => employee.pilot).length}명`,
     gpsFailedCountLabel: `${dashboard.attendanceRecords.filter((record) => record.status.includes("GPS_FAILED")).length}건`,
-    pendingRequestCountLabel: `${dashboard.leaveRequests.filter((request) => request.status === "PENDING").length}건`,
+    pendingRequestCountLabel: `${pendingLeaveRequests.length + pendingOvertimeRequests.length}건`,
     payrollCountLabel: `${dashboard.payrollStatements.length}개`,
     attendanceRows: dashboard.attendanceRecords.map((record) => {
       const employee = findEmployee(dashboard.employees, record.employeeId);
@@ -67,6 +82,26 @@ export function buildAdminViewModel(
         label: employee?.name ?? record.employeeId,
         value: `${formatTime(record.clockInAt)} / ${formatTime(record.clockOutAt)}`,
         meta: statusLabels[record.status]
+      };
+    }),
+    leaveRequestRows: pendingLeaveRequests.map((request) => {
+      const employee = findEmployee(dashboard.employees, request.employeeId);
+
+      return {
+        id: request.id,
+        label: employee?.name ?? request.employeeId,
+        value: `${formatDateRange(request.startsOn, request.endsOn)} · ${formatDays(request.days)}일`,
+        meta: requestStatusLabels[request.status]
+      };
+    }),
+    overtimeRows: pendingOvertimeRequests.map((request) => {
+      const employee = findEmployee(dashboard.employees, request.employeeId);
+
+      return {
+        id: request.id,
+        label: employee?.name ?? request.employeeId,
+        value: `${request.date} · ${formatMinutes(request.minutes)}`,
+        meta: requestStatusLabels[request.status]
       };
     }),
     correctionRows: dashboard.corrections
@@ -111,4 +146,31 @@ function formatTime(value?: string) {
     hour12: false,
     timeZone: "Asia/Seoul"
   }).format(new Date(value));
+}
+
+function formatDateRange(startsOn: string, endsOn: string) {
+  return startsOn === endsOn ? startsOn : `${startsOn}~${endsOn}`;
+}
+
+function formatDays(days: number) {
+  return Number.isInteger(days) ? String(days) : days.toFixed(1);
+}
+
+function formatMinutes(minutes: number) {
+  if (minutes <= 0) {
+    return "0분";
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (hours === 0) {
+    return `${remainingMinutes}분`;
+  }
+
+  if (remainingMinutes === 0) {
+    return `${hours}시간`;
+  }
+
+  return `${hours}시간 ${remainingMinutes}분`;
 }

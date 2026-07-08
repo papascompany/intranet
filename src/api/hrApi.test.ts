@@ -67,6 +67,91 @@ describe("hr api", () => {
     );
   });
 
+  it("submits overtime as pending with pay approval off and records the write", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-10",
+      startsAt: "2026-07-10T17:30:00+09:00",
+      endsAt: "2026-07-10T19:00:00+09:00",
+      minutes: 90,
+      reason: "정산 마감"
+    });
+
+    expect(result.request.status).toBe("PENDING");
+    expect(result.request.payApproved).toBe(false);
+    expect(result.auditLog.action).toBe("OVERTIME_REQUEST_SUBMITTED");
+    await expect(
+      hrApi.getAuditLogs({ targetType: "OvertimeRequest", targetId: result.request.id })
+    ).resolves.toHaveLength(1);
+  });
+
+  it("updates overtime approval status and writes audit history", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-10",
+      startsAt: "2026-07-10T17:30:00+09:00",
+      endsAt: "2026-07-10T19:00:00+09:00",
+      minutes: 90,
+      reason: "정산 마감"
+    });
+
+    const result = await hrApi.updateRequestStatus({
+      targetType: "OvertimeRequest",
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: "emp-ceo",
+      detail: "관리자 승인"
+    });
+
+    expect(result.request.status).toBe("APPROVED");
+    expect(result.auditLog.targetId).toBe(submitted.request.id);
+    expect(result.auditLog.detail).toBe("관리자 승인");
+    await expect(
+      hrApi.getAuditLogs({ targetType: "OvertimeRequest", targetId: submitted.request.id })
+    ).resolves.toHaveLength(2);
+  });
+
+  it("sets overtime pay approval and records the change", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-10",
+      startsAt: "2026-07-10T17:30:00+09:00",
+      endsAt: "2026-07-10T19:00:00+09:00",
+      minutes: 90,
+      reason: "정산 마감",
+      status: "APPROVED"
+    });
+
+    const result = await hrApi.setOvertimePayApproval({
+      requestId: submitted.request.id,
+      payApproved: true,
+      actorId: "emp-ceo",
+      detail: "수당 지급 대상"
+    });
+
+    expect(result.request.payApproved).toBe(true);
+    expect(result.auditLog.action).toBe("OVERTIME_PAY_APPROVED");
+    expect(result.auditLog.detail).toBe("수당 지급 대상");
+    await expect(hrApi.getAuditLogs({ action: "OVERTIME_PAY_APPROVED" })).resolves.toHaveLength(1);
+  });
+
+  it("returns admin dashboard lists for leave, overtime, and corrections", async () => {
+    const hrApi = api();
+
+    const dashboard = await hrApi.getDashboard(fixedNow);
+
+    expect(dashboard.leaveRequests.map((request) => request.id)).toEqual(
+      expect.arrayContaining(["leave-1", "leave-2"])
+    );
+    expect(dashboard.pendingLeaveRequests.map((request) => request.id)).toContain("leave-1");
+    expect(dashboard.overtimeRequests.map((request) => request.id)).toContain("ot-1");
+    expect(dashboard.corrections.map((correction) => correction.id)).toContain("corr-1");
+  });
+
   it("creates attendance correction audit history", async () => {
     const hrApi = api();
 
@@ -100,9 +185,11 @@ describe("hr api", () => {
       deletedAt: "2026-07-08T10:00:00+09:00"
     });
     const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
+    const dashboard = await hrApi.getDashboard(fixedNow);
 
     expect(deleted.statement.deletedAt).toBe("2026-07-08T10:00:00+09:00");
     expect(snapshot.payrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
+    expect(dashboard.activePayrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
     await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_SOFT_DELETED" })).resolves.toHaveLength(1);
   });
 });

@@ -19,6 +19,7 @@ const baseSnapshot: EmployeeViewModelSnapshot = {
     pendingOffsetDays: 0
   },
   leaveRequests: [],
+  overtimeRequests: [],
   earlyLeaveTotalMinutes: 30,
   overtimeOffset: {
     appliedMinutes: 30,
@@ -82,6 +83,28 @@ describe("buildEmployeeViewModel", () => {
     });
 
     expect(viewModel.pendingLeaveSummary).toBe("대기 휴가 2건 · 1.5일");
+  });
+
+  it("summarizes pending overtime requests", () => {
+    const viewModel = buildEmployeeViewModel({
+      ...baseSnapshot,
+      overtimeRequests: [
+        {
+          minutes: 90,
+          status: "PENDING"
+        },
+        {
+          minutes: 30,
+          status: "PENDING"
+        },
+        {
+          minutes: 60,
+          status: "APPROVED"
+        }
+      ]
+    });
+
+    expect(viewModel.pendingOvertimeSummary).toBe("대기 야근 2건 · 2시간");
   });
 
   it("shows an empty payroll summary when there are no active payroll statements", () => {
