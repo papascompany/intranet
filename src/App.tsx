@@ -21,6 +21,7 @@ import {
   clockAttendance,
   createAttendanceCorrection,
   getDashboard,
+  getEmployeeDirectory,
   getEmployeeSnapshot,
   getEmployees,
   setOvertimePayApproval,
@@ -32,6 +33,7 @@ import {
   uploadPayrollStatement
 } from "./api/hrApi";
 import type { Dashboard, EmployeeSnapshot } from "./api/types";
+import { createDemoAuthSession, isAdminSession, type AuthSession } from "./api/auth";
 import {
   DataTable,
   DetailPanel,
@@ -98,7 +100,8 @@ const employeeCardColumns: DataTableColumn<EmployeeCardRow>[] = [
 function App() {
   const [activeSection, setActiveSection] = useState<ErpActiveSection>("self-service");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => localStorage.getItem("intranet:employee-id") ?? "emp-ops-1");
-  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem("intranet:remember-login") === "true");
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredSession());
+  const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(readStoredSession()));
   const [rememberLogin, setRememberLogin] = useState(() => localStorage.getItem("intranet:remember-login") === "true");
   const [userMode, setUserMode] = useState<UserMode>("EMPLOYEE");
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -110,18 +113,21 @@ function App() {
   const refresh = useCallback(
     async (employeeId = selectedEmployeeId) => {
       setIsLoading(true);
+      const session = isLoggedIn ? authSession ?? undefined : undefined;
+      const snapshotEmployeeId = session && !isAdminSession(session) ? session.employeeId : employeeId;
       const [nextEmployees, nextDashboard, nextSnapshot] = await Promise.all([
-        getEmployees(),
-        getDashboard(today),
-        getEmployeeSnapshot(employeeId, today)
+        session ? getEmployeeDirectory({ session }) : getEmployees(),
+        getDashboard({ asOf: today, session }),
+        getEmployeeSnapshot(snapshotEmployeeId, today, session)
       ]);
 
       setEmployees(nextEmployees);
+      setSelectedEmployeeId(snapshotEmployeeId);
       setDashboard(nextDashboard);
       setEmployeeSnapshot(nextSnapshot);
       setIsLoading(false);
     },
-    [selectedEmployeeId]
+    [authSession, isLoggedIn, selectedEmployeeId]
   );
 
   useEffect(() => {
@@ -129,7 +135,7 @@ function App() {
   }, [refresh]);
 
   const selectedEmployee = employeeSnapshot?.employee ?? employees.find((employee) => employee.id === selectedEmployeeId);
-  const isAdminAccount = isAdminEmployee(selectedEmployee);
+  const isAdminAccount = isAdminSession(authSession ?? undefined);
   const effectiveMode: UserMode = userMode === "ADMIN" && isAdminAccount ? "ADMIN" : "EMPLOYEE";
   const allowedSections = effectiveMode === "ADMIN" ? adminSections : employeeSections;
   const employeeViewModel = useMemo(
@@ -166,6 +172,11 @@ function App() {
   }, [isAdminAccount, selectedEmployee, userMode]);
 
   async function handleEmployeeChange(employeeId: string) {
+    if (authSession && !isAdminSession(authSession) && employeeId !== authSession.employeeId) {
+      setNotice("직원 계정은 본인 데이터만 조회할 수 있습니다.");
+      return;
+    }
+
     setSelectedEmployeeId(employeeId);
     if (rememberLogin) {
       localStorage.setItem("intranet:employee-id", employeeId);
@@ -174,14 +185,28 @@ function App() {
   }
 
   function handleLogin() {
+    const employee = employees.find((item) => item.id === selectedEmployeeId);
+    if (!employee) {
+      setNotice("로그인할 계정을 찾을 수 없습니다.");
+      return;
+    }
+
+    const nextSession = createDemoAuthSession(employee, {
+      now: new Date().toISOString(),
+      rememberLogin
+    });
+
     if (rememberLogin) {
       localStorage.setItem("intranet:remember-login", "true");
       localStorage.setItem("intranet:employee-id", selectedEmployeeId);
+      localStorage.setItem("intranet:auth-session", JSON.stringify(nextSession));
     } else {
       localStorage.removeItem("intranet:remember-login");
       localStorage.removeItem("intranet:employee-id");
+      localStorage.removeItem("intranet:auth-session");
     }
 
+    setAuthSession(nextSession);
     setIsLoggedIn(true);
     setNotice("로그인되었습니다. 직원모드에서 본인 업무를 시작합니다.");
   }
@@ -189,6 +214,8 @@ function App() {
   function handleLogout() {
     localStorage.removeItem("intranet:remember-login");
     localStorage.removeItem("intranet:employee-id");
+    localStorage.removeItem("intranet:auth-session");
+    setAuthSession(null);
     setRememberLogin(false);
     setIsLoggedIn(false);
     setUserMode("EMPLOYEE");
@@ -220,6 +247,7 @@ function App() {
       employeeId: selectedEmployee.id,
       type,
       method,
+      session: authSession ?? undefined,
       now,
       gpsError,
       coordinate: gpsError ? undefined : { latitude: 37.5667, longitude: 126.9782, accuracyMeters: 18 }
@@ -239,7 +267,8 @@ function App() {
       endsOn: "2026-07-15",
       days: 0.5,
       reason: "오후 개인 일정",
-      actorId: selectedEmployee.id
+      actorId: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined
     });
 
     setNotice(`${selectedEmployee.name} 휴가 신청 생성 · ${result.request.status}`);
@@ -257,7 +286,8 @@ function App() {
       endsAt: "2026-07-16T19:00:00+09:00",
       minutes: 90,
       reason: "운영 마감 지원",
-      actorId: selectedEmployee.id
+      actorId: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined
     });
 
     setNotice(`${selectedEmployee.name} 야근 신청 생성 · ${result.request.status}`);
@@ -275,7 +305,8 @@ function App() {
       targetType: "LeaveRequest",
       requestId,
       status,
-      actorId: adminActorId(selectedEmployee),
+      actorId: authActorId(authSession, selectedEmployee?.id),
+      session: authSession ?? undefined,
       detail: `관리자 화면에서 휴가 ${status === "APPROVED" ? "승인" : "반려"}`
     });
 
@@ -293,7 +324,8 @@ function App() {
       targetType: "OvertimeRequest",
       requestId,
       status,
-      actorId: adminActorId(selectedEmployee),
+      actorId: authActorId(authSession, selectedEmployee?.id),
+      session: authSession ?? undefined,
       detail: `관리자 화면에서 야근 ${status === "APPROVED" ? "승인" : "반려"}`
     });
 
@@ -301,7 +333,8 @@ function App() {
       await setOvertimePayApproval({
         requestId,
         payApproved: true,
-        actorId: adminActorId(selectedEmployee),
+        actorId: authActorId(authSession, selectedEmployee?.id),
+        session: authSession ?? undefined,
         detail: "관리자 인정 초과근무수당 집계"
       });
     }
@@ -319,7 +352,8 @@ function App() {
     const result = await createAttendanceCorrection({
       attendanceId: employeeSnapshot.todayAttendance.id,
       employeeId: selectedEmployee.id,
-      correctedById: adminActorId(selectedEmployee),
+      correctedById: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined,
       type: "APPROVED_LATE",
       beforeValue: employeeSnapshot.todayAttendance.clockInAt,
       afterValue: "2026-07-08T08:00:00+09:00",
@@ -338,7 +372,8 @@ function App() {
       employeeId: selectedEmployee.id,
       month: "2026-07",
       filename: `2026-07-payroll-${selectedEmployee.id}.pdf`,
-      actorId: adminActorId(selectedEmployee),
+      actorId: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined,
       uploadedAt: "2026-07-08T11:00:00+09:00"
     });
 
@@ -354,7 +389,8 @@ function App() {
 
     const result = await softDeletePayrollStatement({
       statementId,
-      actorId: adminActorId(selectedEmployee),
+      actorId: authActorId(authSession, selectedEmployee?.id),
+      session: authSession ?? undefined,
       deletedAt: "2026-07-08T12:00:00+09:00"
     });
 
@@ -369,7 +405,8 @@ function App() {
     }
 
     const result = await updateSettings({
-      actorId: selectedEmployee.id,
+      actorId: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined,
       settings: {
         gpsAllowedRadiusMeters: radius
       }
@@ -948,12 +985,26 @@ function filterRowsForMode(rows: ErpViewModelRow[], employeeName: string, canAdm
   return canAdmin ? rows : rows.filter((row) => row.label === employeeName);
 }
 
-function isAdminEmployee(employee?: Employee) {
-  return employee?.role === "HR_ADMIN" || employee?.role === "SYSTEM_ADMIN";
+function authActorId(session: AuthSession | null, fallbackEmployeeId?: string) {
+  return session?.employeeId ?? fallbackEmployeeId ?? "emp-ceo";
 }
 
-function adminActorId(employee?: Employee) {
-  return employee && isAdminEmployee(employee) ? employee.id : "emp-ceo";
+function readStoredSession(): AuthSession | null {
+  try {
+    const stored = localStorage.getItem("intranet:auth-session");
+    if (!stored || localStorage.getItem("intranet:remember-login") !== "true") {
+      return null;
+    }
+
+    const parsed = JSON.parse(stored) as AuthSession;
+    if (!parsed.employeeId || !parsed.role || !parsed.authenticatedAt) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function roleLabel(role: Employee["role"]) {

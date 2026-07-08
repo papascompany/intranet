@@ -1,12 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { InMemoryDatabase } from "./inMemoryDatabase";
 import { createHrApi } from "./hrApi";
+import type { AuthSession } from "./auth";
 
 const fixedNow = "2026-07-08T09:00:00+09:00";
 
 function api() {
   return createHrApi(new InMemoryDatabase(), () => fixedNow);
 }
+
+const employeeSession: AuthSession = {
+  employeeId: "emp-ops-1",
+  role: "EMPLOYEE",
+  authenticatedAt: fixedNow,
+  rememberLogin: false
+};
+
+const approverSession: AuthSession = {
+  employeeId: "emp-ops-2",
+  role: "APPROVER",
+  authenticatedAt: fixedNow,
+  rememberLogin: false
+};
+
+const adminSession: AuthSession = {
+  employeeId: "emp-ceo",
+  role: "HR_ADMIN",
+  authenticatedAt: fixedNow,
+  rememberLogin: false
+};
 
 describe("hr api", () => {
   it("clocks attendance with GPS, calculates early leave, and writes an audit log", async () => {
@@ -139,6 +161,51 @@ describe("hr api", () => {
     ).resolves.toHaveLength(2);
   });
 
+  it("allows approver sessions to change request status", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitLeaveRequest({
+      employeeId: "emp-ops-1",
+      type: "ANNUAL",
+      startsOn: "2026-07-22",
+      endsOn: "2026-07-22",
+      days: 1,
+      reason: "승인자 세션 확인"
+    });
+
+    const result = await hrApi.updateRequestStatus({
+      targetType: "LeaveRequest",
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: approverSession.employeeId,
+      session: approverSession
+    });
+
+    expect(result.request.status).toBe("APPROVED");
+    expect(result.auditLog.actorId).toBe(approverSession.employeeId);
+  });
+
+  it("rejects employee sessions from changing request status", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitLeaveRequest({
+      employeeId: "emp-ops-1",
+      type: "ANNUAL",
+      startsOn: "2026-07-23",
+      endsOn: "2026-07-23",
+      days: 1,
+      reason: "직원 승인 차단 확인"
+    });
+
+    await expect(
+      hrApi.updateRequestStatus({
+        targetType: "LeaveRequest",
+        requestId: submitted.request.id,
+        status: "APPROVED",
+        actorId: employeeSession.employeeId,
+        session: employeeSession
+      })
+    ).rejects.toThrow("Approval permission required");
+  });
+
   it("sets overtime pay approval and records the change", async () => {
     const hrApi = api();
     const submitted = await hrApi.submitOvertimeRequest({
@@ -208,6 +275,36 @@ describe("hr api", () => {
     expect(dashboard.corrections.map((correction) => correction.id)).toContain("corr-1");
   });
 
+  it("scopes dashboard lists to the authenticated employee", async () => {
+    const hrApi = api();
+
+    const dashboard = await hrApi.getDashboard({ asOf: fixedNow, session: employeeSession });
+
+    expect(dashboard.employeesTotal).toBe(1);
+    expect(dashboard.pilotEmployees).toBe(1);
+    expect(dashboard.leaveRequests.every((request) => request.employeeId === employeeSession.employeeId)).toBe(true);
+    expect(dashboard.overtimeRequests.every((request) => request.employeeId === employeeSession.employeeId)).toBe(true);
+    expect(dashboard.activePayrollStatements.every((statement) => statement.employeeId === employeeSession.employeeId)).toBe(
+      true
+    );
+  });
+
+  it("rejects employee access to another employee snapshot", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.getEmployeeSnapshot("emp-ops-2", fixedNow, employeeSession)).rejects.toThrow(
+      "Employee access denied"
+    );
+  });
+
+  it("returns only self in the employee directory for employee sessions", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.getEmployeeDirectory({ session: employeeSession })).resolves.toEqual([
+      expect.objectContaining({ id: "emp-ops-1" })
+    ]);
+  });
+
   it("allows admins to update settings", async () => {
     const hrApi = api();
 
@@ -240,6 +337,20 @@ describe("hr api", () => {
       gpsAllowedRadiusMeters: 300,
       payrollEmployeeAccess: "VIEW_ONLY"
     });
+  });
+
+  it("rejects session actor mismatch on admin writes", async () => {
+    const hrApi = api();
+
+    await expect(
+      hrApi.updateSettings({
+        actorId: "emp-ceo",
+        session: employeeSession,
+        settings: {
+          gpsAllowedRadiusMeters: 250
+        }
+      })
+    ).rejects.toThrow("Session actor mismatch");
   });
 
   it("includes settings in the dashboard", async () => {
@@ -338,6 +449,35 @@ describe("hr api", () => {
     const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
 
     expect(snapshot.payrollStatements.map((statement) => statement.id)).toContain(upload.statement.id);
+  });
+
+  it("rejects employee payroll uploads", async () => {
+    const hrApi = api();
+
+    await expect(
+      hrApi.uploadPayrollStatement({
+        employeeId: "emp-ops-1",
+        actorId: employeeSession.employeeId,
+        session: employeeSession,
+        month: "2026-07",
+        filename: "2026-07-payroll-kim.pdf"
+      })
+    ).rejects.toThrow("Admin permission required");
+  });
+
+  it("allows admin payroll uploads with an admin session", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.uploadPayrollStatement({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      month: "2026-07",
+      filename: "2026-07-payroll-kim.pdf"
+    });
+
+    expect(result.statement.employeeId).toBe("emp-ops-1");
+    expect(result.auditLog.actorId).toBe(adminSession.employeeId);
   });
 
   it("rejects employee overtime pay approval", async () => {

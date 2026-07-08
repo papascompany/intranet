@@ -5,17 +5,20 @@ import type {
   AttendanceCorrection,
   AuditLog,
   EarlyLeaveLedger,
+  Employee,
   LeaveRequest,
   OvertimeRequest,
   PayrollStatement,
   RequestStatus
 } from "../domain/types";
+import { canApproveRequests, isAdminSession, type AuthSession } from "./auth";
 import { InMemoryDatabase } from "./inMemoryDatabase";
 import type {
   AuditLogFilter,
   ClockAttendanceInput,
   CreateAttendanceCorrectionInput,
   Dashboard,
+  DashboardInput,
   EmployeeSnapshot,
   SetOvertimePayApprovalInput,
   SoftDeletePayrollStatementInput,
@@ -40,39 +43,72 @@ export class HrApi {
     return this.db.listEmployees();
   }
 
-  async getDashboard(asOf = this.clock()): Promise<Dashboard> {
+  async getEmployeeDirectory(input: { session?: AuthSession } = {}) {
+    const employees = this.db.listEmployees();
+    if (!input.session || isAdminSession(input.session)) {
+      return employees;
+    }
+
+    return employees.filter((employee) => employee.id === input.session?.employeeId);
+  }
+
+  async getDashboard(input: string | DashboardInput = this.clock()): Promise<Dashboard> {
+    const { asOf, session } = parseDashboardInput(input, this.clock);
     const today = asOf.slice(0, 10);
     const employees = this.db.listEmployees();
-    const attendance = this.db.listAttendanceRecords();
-    const leaveRequests = this.db.listLeaveRequests();
-    const overtimeRequests = this.db.listOvertimeRequests();
+    const visibleEmployeeIds = this.visibleEmployeeIds(session, employees);
+    const attendance = this.db
+      .listAttendanceRecords()
+      .filter((record) => visibleEmployeeIds.has(record.employeeId));
+    const leaveRequests = this.db
+      .listLeaveRequests()
+      .filter((request) => visibleEmployeeIds.has(request.employeeId));
+    const overtimeRequests = this.db
+      .listOvertimeRequests()
+      .filter((request) => visibleEmployeeIds.has(request.employeeId));
+    const corrections = this.db
+      .listCorrections()
+      .filter((correction) => visibleEmployeeIds.has(correction.employeeId));
+    const activePayrollStatements = this.db
+      .listPayrollStatements(false)
+      .filter((statement) => visibleEmployeeIds.has(statement.employeeId));
+    const visibleEmployees = employees.filter((employee) => visibleEmployeeIds.has(employee.id));
+    const visibleTargetIds = new Set([
+      ...attendance.map((record) => record.id),
+      ...leaveRequests.map((request) => request.id),
+      ...overtimeRequests.map((request) => request.id),
+      ...corrections.map((correction) => correction.id),
+      ...corrections.map((correction) => correction.attendanceId),
+      ...activePayrollStatements.map((statement) => statement.id)
+    ]);
 
     return {
       asOf,
-      employeesTotal: employees.length,
-      pilotEmployees: employees.filter((employee) => employee.pilot).length,
+      employeesTotal: visibleEmployees.length,
+      pilotEmployees: visibleEmployees.filter((employee) => employee.pilot).length,
       todayAttendance: attendance.filter((record) => record.date === today),
       leaveRequests,
       pendingLeaveRequests: leaveRequests.filter((request) => request.status === "PENDING"),
       overtimeRequests,
-      corrections: this.db.listCorrections(),
+      corrections,
       gpsFailedAttendance: attendance.filter((record) => record.status.includes("GPS_FAILED")),
-      activePayrollStatements: this.db.listPayrollStatements(false),
+      activePayrollStatements,
       settings: this.db.getSettings(),
-      recentAuditLogs: this.db.listAuditLogs().slice(0, 10)
+      recentAuditLogs: this.filterAuditLogsBySession(this.db.listAuditLogs(), session, visibleTargetIds).slice(0, 10)
     };
   }
 
-  async getSettings() {
+  async getSettings(_input: { session?: AuthSession } = {}) {
     return this.db.getSettings();
   }
 
   async updateSettings(input: UpdateSettingsInput) {
-    this.assertAdmin(input.actorId);
+    const actorId = this.resolveActorId(input, input.actorId);
+    this.assertAdmin(actorId, input.session);
 
     const settings = this.db.updateSettings(input.settings);
     const auditLog = this.addAuditLog({
-      actorId: input.actorId,
+      actorId,
       action: "SETTINGS_UPDATED",
       targetType: "SystemPolicy",
       targetId: "system-policy",
@@ -82,7 +118,8 @@ export class HrApi {
     return { settings, auditLog };
   }
 
-  async getEmployeeSnapshot(employeeId: string, asOf = this.clock()): Promise<EmployeeSnapshot> {
+  async getEmployeeSnapshot(employeeId: string, asOf = this.clock(), session?: AuthSession): Promise<EmployeeSnapshot> {
+    this.assertCanReadEmployee(employeeId, session);
     const employee = this.db.listEmployees().find((item) => item.id === employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
@@ -132,11 +169,12 @@ export class HrApi {
 
   async clockAttendance(input: ClockAttendanceInput) {
     this.assertEmployee(input.employeeId);
+    this.assertCanReadEmployee(input.employeeId, input.session);
 
     const now = input.now ?? this.clock();
     const verification = evaluateVerification({
       employeeId: input.employeeId,
-      workplaces: this.db.listWorkplaces(),
+      workplaces: this.workplacesWithPolicyRadius(),
       coordinate: input.coordinate,
       method: input.method,
       now,
@@ -156,8 +194,9 @@ export class HrApi {
     const earlyLeaveEntry = this.syncEarlyLeaveLedger(attendance);
 
     this.db.addVerificationAttempt(verification);
+    const actorId = this.resolveActorId(input, input.employeeId);
     const auditLog = this.addAuditLog({
-      actorId: input.actorId ?? input.employeeId,
+      actorId,
       action: input.type === "CLOCK_IN" ? "ATTENDANCE_CLOCKED_IN" : "ATTENDANCE_CLOCKED_OUT",
       targetType: "AttendanceRecord",
       targetId: attendance.id,
@@ -174,6 +213,8 @@ export class HrApi {
 
   async submitLeaveRequest(input: SubmitLeaveRequestInput) {
     this.assertEmployee(input.employeeId);
+    this.assertCanReadEmployee(input.employeeId, input.session);
+    const actorId = this.resolveActorId(input, input.employeeId);
 
     const request: LeaveRequest = {
       id: this.db.nextId("leave"),
@@ -187,7 +228,7 @@ export class HrApi {
     };
     const saved = this.db.addLeaveRequest(request);
     const auditLog = this.addAuditLog({
-      actorId: input.actorId ?? input.employeeId,
+      actorId,
       action: "LEAVE_REQUEST_SUBMITTED",
       targetType: "LeaveRequest",
       targetId: saved.id,
@@ -199,9 +240,9 @@ export class HrApi {
 
   async submitOvertimeRequest(input: SubmitOvertimeRequestInput) {
     this.assertEmployee(input.employeeId);
-    if (input.actorId) {
-      this.assertEmployee(input.actorId);
-    }
+    this.assertCanReadEmployee(input.employeeId, input.session);
+    const actorId = this.resolveActorId(input, input.employeeId);
+    this.assertEmployee(actorId);
 
     const request: OvertimeRequest = {
       id: this.db.nextId("ot"),
@@ -216,7 +257,7 @@ export class HrApi {
     };
     const saved = this.db.addOvertimeRequest(request);
     const auditLog = this.addAuditLog({
-      actorId: input.actorId ?? input.employeeId,
+      actorId,
       action: "OVERTIME_REQUEST_SUBMITTED",
       targetType: "OvertimeRequest",
       targetId: saved.id,
@@ -227,30 +268,32 @@ export class HrApi {
   }
 
   async updateRequestStatus(input: UpdateRequestStatusInput) {
-    this.assertEmployee(input.actorId);
+    const actorId = this.resolveActorId(input, input.actorId);
+    this.assertCanApprove(actorId, input.session);
 
     if (input.targetType === "LeaveRequest") {
       const request = this.findLeaveRequest(input.requestId);
       const saved = this.db.updateLeaveRequest({ ...request, status: input.status });
-      const auditLog = this.auditStatusChange(input.actorId, input.targetType, saved.id, input.status, input.detail);
+      const auditLog = this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
 
       return { request: saved, auditLog };
     }
 
     const request = this.findOvertimeRequest(input.requestId);
     const saved = this.db.updateOvertimeRequest({ ...request, status: input.status });
-    const auditLog = this.auditStatusChange(input.actorId, input.targetType, saved.id, input.status, input.detail);
+    const auditLog = this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
 
     return { request: saved, auditLog };
   }
 
   async setOvertimePayApproval(input: SetOvertimePayApprovalInput) {
-    this.assertAdmin(input.actorId);
+    const actorId = this.resolveActorId(input, input.actorId);
+    this.assertAdmin(actorId, input.session);
 
     const request = this.findOvertimeRequest(input.requestId);
     const saved = this.db.updateOvertimeRequest({ ...request, payApproved: input.payApproved });
     const auditLog = this.addAuditLog({
-      actorId: input.actorId,
+      actorId,
       action: input.payApproved ? "OVERTIME_PAY_APPROVED" : "OVERTIME_PAY_UNAPPROVED",
       targetType: "OvertimeRequest",
       targetId: saved.id,
@@ -262,13 +305,14 @@ export class HrApi {
 
   async createAttendanceCorrection(input: CreateAttendanceCorrectionInput) {
     this.assertEmployee(input.employeeId);
-    this.assertEmployee(input.correctedById);
+    const correctedById = this.resolveActorId(input, input.correctedById);
+    this.assertAdmin(correctedById, input.session);
 
     const correction: AttendanceCorrection = {
       id: this.db.nextId("corr"),
       attendanceId: input.attendanceId,
       employeeId: input.employeeId,
-      correctedById: input.correctedById,
+      correctedById,
       type: input.type,
       beforeValue: input.beforeValue,
       afterValue: input.afterValue,
@@ -277,7 +321,7 @@ export class HrApi {
     };
     const saved = this.db.addCorrection(correction);
     const auditLog = this.addAuditLog({
-      actorId: input.correctedById,
+      actorId: correctedById,
       action: "ATTENDANCE_CORRECTION_CREATED",
       targetType: "AttendanceRecord",
       targetId: input.attendanceId,
@@ -289,7 +333,8 @@ export class HrApi {
 
   async uploadPayrollStatement(input: UploadPayrollStatementInput) {
     this.assertEmployee(input.employeeId);
-    this.assertEmployee(input.actorId);
+    const actorId = this.resolveActorId(input, input.actorId);
+    this.assertAdmin(actorId, input.session);
 
     const statement: PayrollStatement = {
       id: this.db.nextId("pay"),
@@ -300,7 +345,7 @@ export class HrApi {
     };
     const saved = this.db.addPayrollStatement(statement);
     const auditLog = this.addAuditLog({
-      actorId: input.actorId,
+      actorId,
       action: "PAYROLL_STATEMENT_UPLOADED",
       targetType: "PayrollStatement",
       targetId: saved.id,
@@ -311,7 +356,8 @@ export class HrApi {
   }
 
   async softDeletePayrollStatement(input: SoftDeletePayrollStatementInput) {
-    this.assertAdmin(input.actorId);
+    const actorId = this.resolveActorId(input, input.actorId);
+    this.assertAdmin(actorId, input.session);
 
     const statement = this.db
       .listPayrollStatements(true)
@@ -325,7 +371,7 @@ export class HrApi {
       deletedAt: input.deletedAt ?? this.clock()
     });
     const auditLog = this.addAuditLog({
-      actorId: input.actorId,
+      actorId,
       action: "PAYROLL_STATEMENT_SOFT_DELETED",
       targetType: "PayrollStatement",
       targetId: saved.id,
@@ -336,8 +382,7 @@ export class HrApi {
   }
 
   async getAuditLogs(filter: AuditLogFilter = {}) {
-    const logs = this.db
-      .listAuditLogs()
+    const logs = this.filterAuditLogsBySession(this.db.listAuditLogs(), filter.session)
       .filter((log) => !filter.actorId || log.actorId === filter.actorId)
       .filter((log) => !filter.targetType || log.targetType === filter.targetType)
       .filter((log) => !filter.targetId || log.targetId === filter.targetId)
@@ -395,15 +440,91 @@ export class HrApi {
     }
   }
 
-  private assertAdmin(employeeId: string) {
+  private assertAdmin(employeeId: string, session?: AuthSession) {
     const employee = this.db.listEmployees().find((item) => item.id === employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
     }
 
+    if (session) {
+      this.assertSessionActor(session, employeeId);
+      if (!isAdminSession(session)) {
+        throw new Error(`Admin permission required: ${employeeId}`);
+      }
+      return;
+    }
+
     if (employee.role !== "HR_ADMIN" && employee.role !== "SYSTEM_ADMIN") {
       throw new Error(`Admin permission required: ${employeeId}`);
     }
+  }
+
+  private assertCanApprove(employeeId: string, session?: AuthSession) {
+    const employee = this.db.listEmployees().find((item) => item.id === employeeId);
+    if (!employee) {
+      throw new Error(`Employee not found: ${employeeId}`);
+    }
+
+    if (session) {
+      this.assertSessionActor(session, employeeId);
+      if (!canApproveRequests(session)) {
+        throw new Error(`Approval permission required: ${employeeId}`);
+      }
+      return;
+    }
+
+    if (employee.role !== "APPROVER" && employee.role !== "HR_ADMIN" && employee.role !== "SYSTEM_ADMIN") {
+      throw new Error(`Approval permission required: ${employeeId}`);
+    }
+  }
+
+  private assertCanReadEmployee(employeeId: string, session?: AuthSession) {
+    this.assertEmployee(employeeId);
+    if (!session || isAdminSession(session) || session.employeeId === employeeId) {
+      return;
+    }
+
+    throw new Error(`Employee access denied: ${session.employeeId} -> ${employeeId}`);
+  }
+
+  private assertSessionActor(session: AuthSession, actorId: string) {
+    if (session.employeeId !== actorId) {
+      throw new Error(`Session actor mismatch: ${session.employeeId} cannot act as ${actorId}`);
+    }
+  }
+
+  private resolveActorId(input: { actorId?: string; session?: AuthSession }, fallbackEmployeeId: string) {
+    if (input.session) {
+      const actorId = input.actorId ?? input.session.employeeId;
+      this.assertSessionActor(input.session, actorId);
+      return input.session.employeeId;
+    }
+
+    return input.actorId ?? fallbackEmployeeId;
+  }
+
+  private visibleEmployeeIds(session: AuthSession | undefined, employees: Employee[]) {
+    if (!session || isAdminSession(session)) {
+      return new Set(employees.map((employee) => employee.id));
+    }
+
+    return new Set([session.employeeId]);
+  }
+
+  private filterAuditLogsBySession(logs: AuditLog[], session?: AuthSession, visibleTargetIds?: Set<string>) {
+    if (!session || isAdminSession(session)) {
+      return logs;
+    }
+
+    return logs.filter((log) => log.actorId === session.employeeId || Boolean(visibleTargetIds?.has(log.targetId)));
+  }
+
+  private workplacesWithPolicyRadius() {
+    const { gpsAllowedRadiusMeters } = this.db.getSettings();
+    return this.db.listWorkplaces().map((workplace) => ({
+      ...workplace,
+      allowedRadiusMeters: gpsAllowedRadiusMeters
+    }));
   }
 
   private findLeaveRequest(requestId: string) {
@@ -429,10 +550,22 @@ export function createHrApi(db = new InMemoryDatabase(), clock: Clock = defaultC
   return new HrApi(db, clock);
 }
 
+function parseDashboardInput(input: string | DashboardInput, clock: Clock) {
+  if (typeof input === "string") {
+    return { asOf: input, session: undefined };
+  }
+
+  return {
+    asOf: input.asOf ?? clock(),
+    session: input.session
+  };
+}
+
 export const defaultDatabase = new InMemoryDatabase();
 export const defaultHrApi = createHrApi(defaultDatabase);
 
 export const getEmployees = defaultHrApi.getEmployees.bind(defaultHrApi);
+export const getEmployeeDirectory = defaultHrApi.getEmployeeDirectory.bind(defaultHrApi);
 export const getDashboard = defaultHrApi.getDashboard.bind(defaultHrApi);
 export const getEmployeeSnapshot = defaultHrApi.getEmployeeSnapshot.bind(defaultHrApi);
 export const getSettings = defaultHrApi.getSettings.bind(defaultHrApi);

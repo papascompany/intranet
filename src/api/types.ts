@@ -17,6 +17,11 @@ import type {
   VerificationMethod,
   Workplace
 } from "../domain/types";
+import type { AuthSession } from "./auth";
+
+export type AuthenticatedInput = {
+  session?: AuthSession;
+};
 
 export type CoordinateInput = {
   latitude: number;
@@ -24,7 +29,7 @@ export type CoordinateInput = {
   accuracyMeters?: number;
 };
 
-export type ClockAttendanceInput = {
+export type ClockAttendanceInput = AuthenticatedInput & {
   employeeId: string;
   type: ClockType;
   method: VerificationMethod;
@@ -42,7 +47,7 @@ export type ClockAttendanceResult = {
   earlyLeaveLedger?: EarlyLeaveLedger;
 };
 
-export type SubmitLeaveRequestInput = {
+export type SubmitLeaveRequestInput = AuthenticatedInput & {
   employeeId: string;
   type: LeaveType;
   startsOn: string;
@@ -53,7 +58,7 @@ export type SubmitLeaveRequestInput = {
   status?: Extract<RequestStatus, "DRAFT" | "PENDING">;
 };
 
-export type SubmitOvertimeRequestInput = {
+export type SubmitOvertimeRequestInput = AuthenticatedInput & {
   employeeId: string;
   date: string;
   startsAt: string;
@@ -64,7 +69,7 @@ export type SubmitOvertimeRequestInput = {
   status?: RequestStatus;
 };
 
-export type UpdateRequestStatusInput = {
+export type UpdateRequestStatusInput = AuthenticatedInput & {
   targetType: "LeaveRequest" | "OvertimeRequest";
   requestId: string;
   status: Extract<RequestStatus, "APPROVED" | "REJECTED" | "PENDING">;
@@ -72,14 +77,14 @@ export type UpdateRequestStatusInput = {
   detail?: string;
 };
 
-export type SetOvertimePayApprovalInput = {
+export type SetOvertimePayApprovalInput = AuthenticatedInput & {
   requestId: string;
   payApproved: boolean;
   actorId: string;
   detail?: string;
 };
 
-export type CreateAttendanceCorrectionInput = {
+export type CreateAttendanceCorrectionInput = AuthenticatedInput & {
   attendanceId: string;
   employeeId: string;
   correctedById: string;
@@ -90,7 +95,7 @@ export type CreateAttendanceCorrectionInput = {
   createdAt?: string;
 };
 
-export type UploadPayrollStatementInput = {
+export type UploadPayrollStatementInput = AuthenticatedInput & {
   employeeId: string;
   month: string;
   filename: string;
@@ -98,7 +103,7 @@ export type UploadPayrollStatementInput = {
   uploadedAt?: string;
 };
 
-export type SoftDeletePayrollStatementInput = {
+export type SoftDeletePayrollStatementInput = AuthenticatedInput & {
   statementId: string;
   actorId: string;
   deletedAt?: string;
@@ -122,12 +127,16 @@ export const defaultSystemPolicy: SystemPolicy = {
   advanceLeaveExceptionHandling: "HR_CORRECTION"
 };
 
-export type UpdateSettingsInput = {
+export type DashboardInput = AuthenticatedInput & {
+  asOf?: string;
+};
+
+export type UpdateSettingsInput = AuthenticatedInput & {
   actorId: string;
   settings: Partial<SystemPolicy>;
 };
 
-export type AuditLogFilter = {
+export type AuditLogFilter = AuthenticatedInput & {
   actorId?: string;
   targetType?: string;
   targetId?: string;
