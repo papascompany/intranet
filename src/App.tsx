@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck,
   CalendarDays,
@@ -13,77 +13,80 @@ import {
   Upload
 } from "lucide-react";
 import {
-  auditLogs as seedAuditLogs,
-  attendanceRecords as seedAttendanceRecords,
-  corrections,
-  earlyLeaveLedger,
-  employees,
-  leaveRequests,
-  overtimeRequests,
-  payrollStatements,
-  workplaces
-} from "./domain/seed";
-import type { AttendanceRecord, ClockType, Employee, VerificationMethod } from "./domain/types";
-import { buildAttendanceRecord, evaluateVerification } from "./domain/attendance";
-import { getLeaveBalance } from "./domain/leave";
-import { offsetOvertimeWithEarlyLeave } from "./domain/overtime";
+  clockAttendance,
+  createAttendanceCorrection,
+  getDashboard,
+  getEmployeeSnapshot,
+  getEmployees,
+  submitLeaveRequest,
+  uploadPayrollStatement
+} from "./api/hrApi";
+import type { Dashboard, EmployeeSnapshot } from "./api/types";
+import type { ClockType, Employee, VerificationMethod } from "./domain/types";
+import { buildAdminViewModel, type AdminDashboardResponse, type AdminViewModel } from "./features/adminViewModel";
+import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 
 const today = "2026-07-08T08:02:00+09:00";
-
-const statusLabels = {
-  GPS_PASSED: "GPS 정상",
-  GPS_FAILED_ALLOWED: "GPS수신실패+수동클릭",
-  GPS_FAILED_QR_ALLOWED: "GPS수신실패+QR",
-  OUT_OF_RANGE: "반경 밖",
-  MANUAL_REVIEW_REQUIRED: "관리자 검토"
-};
-
-const correctionLabels = {
-  APPROVED_LATE: "인정지각",
-  APPROVED_EARLY_LEAVE: "인정조퇴",
-  CLOCK_IN_CORRECTION: "출근시각 보정",
-  CLOCK_OUT_CORRECTION: "퇴근시각 보정",
-  MISSING_RECORD_CREATED: "누락 기록 추가"
-};
 
 function App() {
   const [mode, setMode] = useState<"employee" | "admin">("employee");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("emp-ops-1");
-  const [records, setRecords] = useState<AttendanceRecord[]>(seedAttendanceRecords);
-  const [notice, setNotice] = useState("운영팀 파일럿 데이터가 준비되었습니다.");
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [employeeSnapshot, setEmployeeSnapshot] = useState<EmployeeSnapshot | null>(null);
+  const [notice, setNotice] = useState("운영팀 파일럿 API/DB 계층이 준비되었습니다.");
+  const [isLoading, setIsLoading] = useState(true);
 
-  const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId) ?? employees[1];
-  const selectedRecord = records.find(
-    (record) => record.employeeId === selectedEmployee.id && record.date === today.slice(0, 10)
+  const refresh = useCallback(async (employeeId = selectedEmployeeId) => {
+    setIsLoading(true);
+    const [nextEmployees, nextDashboard, nextSnapshot] = await Promise.all([
+      getEmployees(),
+      getDashboard(today),
+      getEmployeeSnapshot(employeeId, today)
+    ]);
+
+    setEmployees(nextEmployees);
+    setDashboard(nextDashboard);
+    setEmployeeSnapshot(nextSnapshot);
+    setIsLoading(false);
+  }, [selectedEmployeeId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const selectedEmployee = employeeSnapshot?.employee ?? employees.find((employee) => employee.id === selectedEmployeeId);
+  const employeeViewModel = useMemo(
+    () => (employeeSnapshot ? buildEmployeeViewModel(toEmployeeViewModelSnapshot(employeeSnapshot)) : null),
+    [employeeSnapshot]
   );
-  const balance = getLeaveBalance({
-    employee: selectedEmployee,
-    asOf: today,
-    approvedRequests: leaveRequests
-  });
-  const earlyLeaveMinutes = earlyLeaveLedger
-    .filter((entry) => entry.employeeId === selectedEmployee.id)
-    .reduce((sum, entry) => sum + entry.minutes, 0);
-  const overtime = overtimeRequests.find((request) => request.employeeId === selectedEmployee.id);
-  const offset = overtime
-    ? offsetOvertimeWithEarlyLeave({
-        date: overtime.date,
-        earlyLeaveMinutes,
-        overtimeMinutes: overtime.minutes,
-        payApproved: overtime.payApproved
-      })
-    : undefined;
+  const adminViewModel = useMemo(
+    () =>
+      dashboard && employeeSnapshot
+        ? buildAdminViewModel(toAdminDashboardResponse(dashboard, employeeSnapshot, employees), selectedEmployeeId)
+        : null,
+    [dashboard, employeeSnapshot, employees, selectedEmployeeId]
+  );
 
-  function clock(type: ClockType, method: VerificationMethod, gpsError = false) {
+  async function handleEmployeeChange(employeeId: string) {
+    setSelectedEmployeeId(employeeId);
+    await refresh(employeeId);
+  }
+
+  async function clock(type: ClockType, method: VerificationMethod, gpsError = false) {
+    if (!selectedEmployee) {
+      return;
+    }
+
     const now =
       type === "CLOCK_IN"
         ? "2026-07-08T08:02:00+09:00"
         : method === "GPS"
           ? "2026-07-08T16:42:00+09:00"
           : "2026-07-08T16:48:00+09:00";
-    const verification = evaluateVerification({
+    const result = await clockAttendance({
       employeeId: selectedEmployee.id,
-      workplaces,
+      type,
       method,
       now,
       gpsError,
@@ -95,16 +98,66 @@ function App() {
             accuracyMeters: 18
           }
     });
-    const nextRecord = buildAttendanceRecord({
+
+    setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}`);
+    await refresh(selectedEmployee.id);
+  }
+
+  async function submitLeave() {
+    if (!selectedEmployee) {
+      return;
+    }
+
+    const result = await submitLeaveRequest({
       employeeId: selectedEmployee.id,
-      type,
-      verification,
-      existing: selectedRecord,
-      now
+      type: "HALF_DAY",
+      startsOn: "2026-07-15",
+      endsOn: "2026-07-15",
+      days: 0.5,
+      reason: "오후 개인 일정",
+      actorId: selectedEmployee.id
     });
 
-    setRecords((current) => [nextRecord, ...current.filter((record) => record.id !== nextRecord.id)]);
-    setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"}: ${statusLabels[verification.status]}`);
+    setNotice(`${selectedEmployee.name} 휴가 신청 생성 · ${result.request.status}`);
+    await refresh(selectedEmployee.id);
+  }
+
+  async function createCorrection() {
+    if (!selectedEmployee || !employeeSnapshot?.todayAttendance) {
+      setNotice("보정할 오늘 출퇴근 기록이 없습니다.");
+      return;
+    }
+
+    const result = await createAttendanceCorrection({
+      attendanceId: employeeSnapshot.todayAttendance.id,
+      employeeId: selectedEmployee.id,
+      correctedById: "emp-ceo",
+      type: "APPROVED_LATE",
+      beforeValue: employeeSnapshot.todayAttendance.clockInAt,
+      afterValue: "2026-07-08T08:00:00+09:00",
+      reason: "API 계층 보정 데모",
+      createdAt: "2026-07-08T09:00:00+09:00"
+    });
+
+    setNotice(`${selectedEmployee.name} 보정 생성 · ${result.correction.type}`);
+    await refresh(selectedEmployee.id);
+  }
+
+  async function uploadPayroll() {
+    if (!selectedEmployee) {
+      return;
+    }
+
+    const result = await uploadPayrollStatement({
+      employeeId: selectedEmployee.id,
+      month: "2026-07",
+      filename: `2026-07-payroll-${selectedEmployee.id}.pdf`,
+      actorId: "emp-ceo",
+      uploadedAt: "2026-07-08T11:00:00+09:00"
+    });
+
+    setNotice(`${selectedEmployee.name} 급여명세서 업로드 · ${result.statement.month}`);
+    await refresh(selectedEmployee.id);
   }
 
   return (
@@ -133,7 +186,7 @@ function App() {
             </div>
             <label className="select-label">
               직원
-              <select value={selectedEmployeeId} onChange={(event) => setSelectedEmployeeId(event.target.value)}>
+              <select value={selectedEmployeeId} onChange={(event) => void handleEmployeeChange(event.target.value)}>
                 {employees.map((employee) => (
                   <option key={employee.id} value={employee.id}>
                     {employee.name} · {employee.department}
@@ -144,16 +197,15 @@ function App() {
           </div>
 
           {mode === "employee" ? (
-            <EmployeeView
-              employee={selectedEmployee}
-              record={selectedRecord}
-              balance={balance}
-              earlyLeaveMinutes={earlyLeaveMinutes}
-              offset={offset}
-              onClock={clock}
-            />
+            <EmployeeView viewModel={employeeViewModel} isLoading={isLoading} onClock={clock} onSubmitLeave={submitLeave} />
           ) : (
-            <AdminView records={records} selectedEmployee={selectedEmployee} />
+            <AdminView
+              viewModel={adminViewModel}
+              isLoading={isLoading}
+              selectedEmployee={selectedEmployee}
+              onCreateCorrection={createCorrection}
+              onUploadPayroll={uploadPayroll}
+            />
           )}
         </section>
       </main>
@@ -162,88 +214,103 @@ function App() {
 }
 
 function EmployeeView(props: {
-  employee: Employee;
-  record?: AttendanceRecord;
-  balance: ReturnType<typeof getLeaveBalance>;
-  earlyLeaveMinutes: number;
-  offset?: ReturnType<typeof offsetOvertimeWithEarlyLeave>;
+  viewModel: EmployeeViewModel | null;
+  isLoading: boolean;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
+  onSubmitLeave: () => void;
 }) {
-  const payroll = payrollStatements.find((statement) => statement.employeeId === props.employee.id);
-  const pendingLeave = leaveRequests.find(
-    (request) => request.employeeId === props.employee.id && request.status === "PENDING"
-  );
+  const viewModel = props.viewModel;
 
   return (
     <div className="employee-grid">
       <section className="clock-panel">
         <div className="panel-title">
           <Fingerprint size={18} />
-          <span>{props.employee.name}</span>
+          <span>{props.isLoading ? "API 동기화 중" : "직원 셀프서비스"}</span>
         </div>
         <div className="time-row">
           <div>
             <span>출근</span>
-            <strong>{formatTime(props.record?.clockInAt)}</strong>
+            <strong>{viewModel?.clockInLabel ?? "--:--"}</strong>
           </div>
           <div>
             <span>퇴근</span>
-            <strong>{formatTime(props.record?.clockOutAt)}</strong>
+            <strong>{viewModel?.clockOutLabel ?? "--:--"}</strong>
           </div>
         </div>
         <div className="action-grid">
-          <button className="primary-action" onClick={() => props.onClock("CLOCK_IN", "GPS")}>
+          <button className="primary-action" disabled={props.isLoading} onClick={() => props.onClock("CLOCK_IN", "GPS")}>
             <MapPin size={18} />
             출근
           </button>
-          <button className="primary-action" onClick={() => props.onClock("CLOCK_OUT", "GPS")}>
+          <button className="primary-action" disabled={props.isLoading} onClick={() => props.onClock("CLOCK_OUT", "GPS")}>
             <Clock size={18} />
             퇴근
           </button>
-          <button className="secondary-action" onClick={() => props.onClock("CLOCK_IN", "QR", true)}>
+          <button className="secondary-action" disabled={props.isLoading} onClick={() => props.onClock("CLOCK_IN", "QR", true)}>
             <QrCode size={18} />
             QR 출근
           </button>
-          <button className="secondary-action" onClick={() => props.onClock("CLOCK_OUT", "MANUAL_CLICK", true)}>
+          <button
+            className="secondary-action"
+            disabled={props.isLoading}
+            onClick={() => props.onClock("CLOCK_OUT", "MANUAL_CLICK", true)}
+          >
             <TimerReset size={18} />
             GPS 실패 퇴근
           </button>
         </div>
-        <p className="status-line">{props.record ? statusLabels[props.record.status] : "오늘 기록 없음"}</p>
+        <p className="status-line">{viewModel?.statusLabel ?? "API 데이터 준비 중"}</p>
       </section>
 
       <section className="metric-strip">
-        <Metric icon={<CalendarDays size={18} />} label="사용 가능 휴가" value={`${props.balance.availableDays}일`} />
-        <Metric icon={<ListChecks size={18} />} label="선사용 잔여" value={`${props.balance.advanceGrantedDays - props.balance.advanceUsedDays}일`} />
-        <Metric icon={<TimerReset size={18} />} label="조기퇴근 누계" value={`${props.earlyLeaveMinutes}분`} />
-        <Metric icon={<BadgeCheck size={18} />} label="상계 예정" value={`${props.offset?.appliedMinutes ?? 0}분`} />
+        <Metric
+          icon={<CalendarDays size={18} />}
+          label="사용 가능 휴가"
+          value={stripMetricPrefix(viewModel?.leaveAvailableLabel, "사용 가능 연차")}
+        />
+        <Metric
+          icon={<ListChecks size={18} />}
+          label="선사용 현황"
+          value={stripMetricPrefix(viewModel?.advanceLeaveLabel, "선사용 연차")}
+        />
+        <Metric
+          icon={<TimerReset size={18} />}
+          label="조기퇴근 누계"
+          value={stripMetricPrefix(viewModel?.earlyLeaveLabel, "조퇴 누적")}
+        />
+        <Metric icon={<BadgeCheck size={18} />} label="상계 예정" value={viewModel?.offsetLabel ?? "-"} />
       </section>
 
       <section className="list-section">
         <div className="section-heading">
           <h3>신청 현황</h3>
-          <button className="pill-button">신청</button>
+          <button className="pill-button" disabled={props.isLoading} onClick={props.onSubmitLeave}>
+            신청
+          </button>
         </div>
-        <DataRow label="휴가" value={pendingLeave ? `${pendingLeave.reason} · ${pendingLeave.days}일` : "대기 없음"} meta={pendingLeave?.status ?? "READY"} />
-        <DataRow label="야근" value={props.offset ? `${props.offset.remainingOvertimeMinutes}분 잔여` : "승인 내역 없음"} meta={props.offset?.status ?? "EMPTY"} />
-        <DataRow label="급여명세서" value={payroll?.filename ?? "업로드 대기"} meta={payroll?.month ?? "WAIT"} />
+        <DataRow label="휴가" value={viewModel?.pendingLeaveSummary ?? "로딩 중"} meta="API" />
+        <DataRow label="야근" value={viewModel?.overtimeSummary ?? "로딩 중"} meta="OFFSET" />
+        <DataRow label="급여명세서" value={viewModel?.payrollSummary ?? "로딩 중"} meta="PAYROLL" />
       </section>
     </div>
   );
 }
 
-function AdminView(props: { records: AttendanceRecord[]; selectedEmployee: Employee }) {
-  const pilotEmployees = employees.filter((employee) => employee.pilot);
-  const gpsFailed = props.records.filter((record) => record.status.includes("GPS_FAILED"));
-  const selectedCorrections = corrections.filter((correction) => correction.employeeId === props.selectedEmployee.id);
-
+function AdminView(props: {
+  viewModel: AdminViewModel | null;
+  isLoading: boolean;
+  selectedEmployee?: Employee;
+  onCreateCorrection: () => void;
+  onUploadPayroll: () => void;
+}) {
   return (
     <div className="admin-grid">
       <section className="metric-strip admin-metrics">
-        <Metric icon={<ShieldCheck size={18} />} label="파일럿 인원" value={`${pilotEmployees.length}명`} />
-        <Metric icon={<MapPin size={18} />} label="GPS 실패 허용" value={`${gpsFailed.length}건`} />
-        <Metric icon={<ListChecks size={18} />} label="승인 대기" value={`${leaveRequests.filter((request) => request.status === "PENDING").length}건`} />
-        <Metric icon={<Upload size={18} />} label="급여 파일" value={`${payrollStatements.length}개`} />
+        <Metric icon={<ShieldCheck size={18} />} label="파일럿 인원" value={props.viewModel?.pilotCountLabel ?? "-"} />
+        <Metric icon={<MapPin size={18} />} label="GPS 실패 허용" value={props.viewModel?.gpsFailedCountLabel ?? "-"} />
+        <Metric icon={<ListChecks size={18} />} label="승인 대기" value={props.viewModel?.pendingRequestCountLabel ?? "-"} />
+        <Metric icon={<Upload size={18} />} label="급여 파일" value={props.viewModel?.payrollCountLabel ?? "-"} />
       </section>
 
       <section className="list-section">
@@ -251,56 +318,37 @@ function AdminView(props: { records: AttendanceRecord[]; selectedEmployee: Emplo
           <h3>출퇴근 인증 내역</h3>
           <button className="pill-button">CSV</button>
         </div>
-        {props.records.slice(0, 5).map((record) => {
-          const employee = employees.find((item) => item.id === record.employeeId);
-          return (
-            <DataRow
-              key={record.id}
-              label={employee?.name ?? record.employeeId}
-              value={`${formatTime(record.clockInAt)} / ${formatTime(record.clockOutAt)}`}
-              meta={statusLabels[record.status]}
-            />
-          );
-        })}
+        {props.viewModel?.attendanceRows.slice(0, 5).map((row) => (
+          <DataRow key={row.id} label={row.label} value={row.value} meta={row.meta} />
+        )) ?? <DataRow label="API" value="출퇴근 내역을 불러오는 중" meta="LOAD" />}
       </section>
 
       <section className="list-section">
         <div className="section-heading">
           <h3>보정·감사 로그</h3>
-          <button className="pill-button">보정</button>
+          <button className="pill-button" disabled={props.isLoading} onClick={props.onCreateCorrection}>
+            보정
+          </button>
         </div>
-        {selectedCorrections.map((correction) => (
-          <DataRow
-            key={correction.id}
-            label={correctionLabels[correction.type]}
-            value={correction.reason}
-            meta={formatTime(correction.createdAt)}
-          />
+        {props.viewModel?.correctionRows.map((row) => (
+          <DataRow key={row.id} label={row.label} value={row.value} meta={row.meta} />
         ))}
-        {seedAuditLogs.slice(0, 2).map((log) => (
-          <DataRow key={log.id} label={log.action} value={log.detail} meta={formatTime(log.createdAt)} />
-        ))}
+        {props.viewModel?.auditRows.slice(0, 2).map((row) => (
+          <DataRow key={row.id} label={row.label} value={row.value} meta={row.meta} />
+        )) ?? <DataRow label="API" value="감사 로그를 불러오는 중" meta="LOAD" />}
       </section>
 
       <section className="list-section payroll-panel">
         <div className="section-heading">
           <h3>급여명세서</h3>
-          <button className="pill-button">
+          <button className="pill-button" disabled={props.isLoading || !props.selectedEmployee} onClick={props.onUploadPayroll}>
             <FileText size={14} />
             업로드
           </button>
         </div>
-        {payrollStatements.map((statement) => {
-          const employee = employees.find((item) => item.id === statement.employeeId);
-          return (
-            <DataRow
-              key={statement.id}
-              label={employee?.name ?? statement.employeeId}
-              value={statement.filename}
-              meta={statement.month}
-            />
-          );
-        })}
+        {props.viewModel?.payrollRows.map((row) => (
+          <DataRow key={row.id} label={row.label} value={row.value} meta={row.meta} />
+        )) ?? <DataRow label="API" value="급여명세서를 불러오는 중" meta="LOAD" />}
       </section>
     </div>
   );
@@ -328,17 +376,35 @@ function DataRow(props: { label: string; value: string; meta: string }) {
   );
 }
 
-function formatTime(value?: string) {
-  if (!value) {
-    return "--:--";
-  }
+function toEmployeeViewModelSnapshot(snapshot: EmployeeSnapshot) {
+  return {
+    employee: snapshot.employee,
+    attendanceToday: snapshot.todayAttendance ?? null,
+    leaveBalance: snapshot.leaveBalance,
+    leaveRequests: snapshot.leaveRequests,
+    earlyLeaveTotalMinutes: snapshot.earlyLeaveLedger.reduce((sum, entry) => sum + entry.minutes, 0),
+    overtimeOffset: snapshot.overtimeOffset ?? null,
+    payrollStatements: snapshot.payrollStatements
+  };
+}
 
-  return new Intl.DateTimeFormat("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Asia/Seoul"
-  }).format(new Date(value));
+function toAdminDashboardResponse(
+  dashboard: Dashboard,
+  employeeSnapshot: EmployeeSnapshot,
+  employees: Employee[]
+): AdminDashboardResponse {
+  return {
+    employees,
+    attendanceRecords: dashboard.todayAttendance,
+    leaveRequests: dashboard.pendingLeaveRequests,
+    corrections: employeeSnapshot.attendanceCorrections,
+    payrollStatements: dashboard.activePayrollStatements,
+    auditLogs: dashboard.recentAuditLogs
+  };
+}
+
+function stripMetricPrefix(value: string | undefined, prefix: string) {
+  return value?.replace(prefix, "").trim() ?? "-";
 }
 
 export default App;
