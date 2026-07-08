@@ -1,0 +1,150 @@
+export type Role = "EMPLOYEE" | "APPROVER" | "HR_ADMIN" | "SYSTEM_ADMIN";
+
+export type Department = "운영팀" | "제작팀";
+
+export type Employee = {
+  id: string;
+  name: string;
+  role: Role;
+  department: Department;
+  hireDate: string;
+  approverId?: string;
+  pilot: boolean;
+};
+
+export type Workplace = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  allowedRadiusMeters: number;
+  qrPath: string;
+};
+
+export type ClockType = "CLOCK_IN" | "CLOCK_OUT";
+export type VerificationMethod = "GPS" | "QR" | "WIFI_IP" | "MANUAL_CLICK";
+export type VerificationStatus =
+  | "GPS_PASSED"
+  | "GPS_FAILED_ALLOWED"
+  | "GPS_FAILED_QR_ALLOWED"
+  | "OUT_OF_RANGE"
+  | "MANUAL_REVIEW_REQUIRED";
+
+export type VerificationAttempt = {
+  id: string;
+  employeeId: string;
+  workplaceId?: string;
+  method: VerificationMethod;
+  status: VerificationStatus;
+  attemptedAt: string;
+  distanceMeters?: number;
+  accuracyMeters?: number;
+  note?: string;
+};
+
+export type AttendanceRecord = {
+  id: string;
+  employeeId: string;
+  date: string;
+  clockInAt?: string;
+  clockOutAt?: string;
+  status: VerificationStatus;
+  verificationId: string;
+  earlyLeaveMinutes: number;
+};
+
+export type CorrectionType =
+  | "APPROVED_LATE"
+  | "APPROVED_EARLY_LEAVE"
+  | "CLOCK_IN_CORRECTION"
+  | "CLOCK_OUT_CORRECTION"
+  | "MISSING_RECORD_CREATED";
+
+export type AttendanceCorrection = {
+  id: string;
+  attendanceId: string;
+  employeeId: string;
+  correctedById: string;
+  type: CorrectionType;
+  beforeValue?: string;
+  afterValue: string;
+  reason: string;
+  createdAt: string;
+};
+
+export type LeaveType = "ANNUAL" | "HALF_DAY" | "SPECIAL" | "UNPAID";
+export type RequestStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED";
+
+export type LeaveRequest = {
+  id: string;
+  employeeId: string;
+  type: LeaveType;
+  startsOn: string;
+  endsOn: string;
+  days: number;
+  reason: string;
+  status: RequestStatus;
+};
+
+export type LeaveBalance = {
+  statutoryDays: number;
+  advanceGrantedDays: number;
+  advanceUsedDays: number;
+  availableDays: number;
+  pendingOffsetDays: number;
+};
+
+export type EarlyLeaveStatus =
+  | "APPROVED"
+  | "FLEX_ALLOWED"
+  | "LEAVE_RELATED"
+  | "UNAPPROVED"
+  | "CORRECTED";
+
+export type EarlyLeaveLedger = {
+  id: string;
+  employeeId: string;
+  date: string;
+  minutes: number;
+  status: EarlyLeaveStatus;
+  reason?: string;
+};
+
+export type OvertimeRequest = {
+  id: string;
+  employeeId: string;
+  date: string;
+  startsAt: string;
+  endsAt: string;
+  minutes: number;
+  reason: string;
+  status: RequestStatus;
+  payApproved: boolean;
+};
+
+export type OvertimeOffsetResult = {
+  appliedMinutes: number;
+  remainingEarlyLeaveMinutes: number;
+  remainingOvertimeMinutes: number;
+  payEligibleMinutes: number;
+  status: "OFFSET_APPLIED" | "OFFSET_EXCLUDED_PEAK_SEASON" | "OVERTIME_PAY_APPROVED" | "OVERTIME_PAY_NOT_COUNTED";
+};
+
+export type PayrollStatement = {
+  id: string;
+  employeeId: string;
+  month: string;
+  filename: string;
+  uploadedAt: string;
+  deletedAt?: string;
+};
+
+export type AuditLog = {
+  id: string;
+  actorId: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  createdAt: string;
+  detail: string;
+};
