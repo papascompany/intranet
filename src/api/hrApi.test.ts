@@ -67,6 +67,31 @@ describe("hr api", () => {
     );
   });
 
+  it("excludes approved leave requests from pending leave dashboard list", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitLeaveRequest({
+      employeeId: "emp-ops-1",
+      type: "ANNUAL",
+      startsOn: "2026-07-21",
+      endsOn: "2026-07-21",
+      days: 1,
+      reason: "정책 회귀 확인"
+    });
+
+    const approved = await hrApi.updateRequestStatus({
+      targetType: "LeaveRequest",
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: "emp-ceo",
+      detail: "휴가 승인"
+    });
+    const dashboard = await hrApi.getDashboard(fixedNow);
+
+    expect(approved.request.status).toBe("APPROVED");
+    expect(dashboard.leaveRequests.map((request) => request.id)).toContain(submitted.request.id);
+    expect(dashboard.pendingLeaveRequests.map((request) => request.id)).not.toContain(submitted.request.id);
+  });
+
   it("submits overtime as pending with pay approval off and records the write", async () => {
     const hrApi = api();
 
@@ -139,6 +164,37 @@ describe("hr api", () => {
     await expect(hrApi.getAuditLogs({ action: "OVERTIME_PAY_APPROVED" })).resolves.toHaveLength(1);
   });
 
+  it("updates employee overtime pay eligible minutes after overtime approval and pay approval", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-11",
+      startsAt: "2026-07-11T17:30:00+09:00",
+      endsAt: "2026-07-11T19:30:00+09:00",
+      minutes: 120,
+      reason: "정책 회귀 확인"
+    });
+
+    await hrApi.updateRequestStatus({
+      targetType: "OvertimeRequest",
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: "emp-ceo",
+      detail: "야근 승인"
+    });
+    await hrApi.setOvertimePayApproval({
+      requestId: submitted.request.id,
+      payApproved: true,
+      actorId: "emp-ceo",
+      detail: "수당 지급 대상"
+    });
+    const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
+
+    expect(snapshot.overtimeOffset?.payEligibleMinutes).toBe(95);
+    expect(snapshot.overtimeOffset?.remainingOvertimeMinutes).toBe(95);
+    expect(snapshot.overtimeOffset?.status).toBe("OVERTIME_PAY_APPROVED");
+  });
+
   it("returns admin dashboard lists for leave, overtime, and corrections", async () => {
     const hrApi = api();
 
@@ -170,6 +226,27 @@ describe("hr api", () => {
     expect(result.auditLog.detail).toContain("승인된 조기퇴근");
   });
 
+  it("shows created attendance corrections in the admin dashboard", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.createAttendanceCorrection({
+      attendanceId: "att-2026-07-08-emp-ops-1",
+      employeeId: "emp-ops-1",
+      correctedById: "emp-ceo",
+      type: "CLOCK_OUT_CORRECTION",
+      beforeValue: "2026-07-08T16:35:00+09:00",
+      afterValue: "2026-07-08T17:00:00+09:00",
+      reason: "대시보드 반영 회귀 확인"
+    });
+    const dashboard = await hrApi.getDashboard(fixedNow);
+
+    expect(dashboard.corrections.map((correction) => correction.id)).toContain(result.correction.id);
+    expect(dashboard.corrections.find((correction) => correction.id === result.correction.id)).toMatchObject({
+      attendanceId: "att-2026-07-08-emp-ops-1",
+      type: "CLOCK_OUT_CORRECTION"
+    });
+  });
+
   it("soft deletes payroll statements without returning them in active lists", async () => {
     const hrApi = api();
 
@@ -191,5 +268,26 @@ describe("hr api", () => {
     expect(snapshot.payrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
     expect(dashboard.activePayrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
     await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_SOFT_DELETED" })).resolves.toHaveLength(1);
+  });
+
+  it("excludes soft deleted payroll statements from employee snapshots", async () => {
+    const hrApi = api();
+    const upload = await hrApi.uploadPayrollStatement({
+      employeeId: "emp-ops-1",
+      actorId: "emp-ceo",
+      month: "2026-08",
+      filename: "2026-08-payroll-kim.pdf"
+    });
+
+    const beforeDelete = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
+    await hrApi.softDeletePayrollStatement({
+      statementId: upload.statement.id,
+      actorId: "emp-ceo",
+      deletedAt: "2026-08-31T10:00:00+09:00"
+    });
+    const afterDelete = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
+
+    expect(beforeDelete.payrollStatements.map((statement) => statement.id)).toContain(upload.statement.id);
+    expect(afterDelete.payrollStatements.map((statement) => statement.id)).not.toContain(upload.statement.id);
   });
 });
