@@ -10,6 +10,7 @@ import type {
   VerificationAttempt,
   Workplace
 } from "../domain/types";
+import { defaultSystemPolicy, type SystemPolicy } from "./types";
 import {
   auditLogs,
   attendanceRecords,
@@ -33,6 +34,7 @@ export type InMemoryDatabaseSeed = {
   corrections?: AttendanceCorrection[];
   payrollStatements?: PayrollStatement[];
   auditLogs?: AuditLog[];
+  settings?: SystemPolicy;
 };
 
 export class InMemoryDatabase {
@@ -46,6 +48,7 @@ export class InMemoryDatabase {
   private readonly corrections: AttendanceCorrection[];
   private readonly payrollStatements: PayrollStatement[];
   private readonly auditLogs: AuditLog[];
+  private settings: SystemPolicy;
 
   constructor(seed: InMemoryDatabaseSeed = {}) {
     this.employees = cloneList(seed.employees ?? employees);
@@ -58,6 +61,7 @@ export class InMemoryDatabase {
     this.corrections = cloneList(seed.corrections ?? corrections);
     this.payrollStatements = cloneList(seed.payrollStatements ?? payrollStatements);
     this.auditLogs = cloneList(seed.auditLogs ?? auditLogs);
+    this.settings = cloneItem(seed.settings ?? defaultSystemPolicy);
   }
 
   listEmployees() {
@@ -177,6 +181,19 @@ export class InMemoryDatabase {
 
     this.payrollStatements[index] = cloneItem(statement);
     return cloneItem(this.payrollStatements[index]);
+  }
+
+  getSettings() {
+    return cloneItem(this.settings);
+  }
+
+  updateSettings(settings: Partial<SystemPolicy>) {
+    this.settings = {
+      ...this.settings,
+      ...settings
+    };
+
+    return cloneItem(this.settings);
   }
 
   listAuditLogs() {

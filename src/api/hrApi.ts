@@ -21,6 +21,7 @@ import type {
   SoftDeletePayrollStatementInput,
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
+  UpdateSettingsInput,
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
 } from "./types";
@@ -57,8 +58,28 @@ export class HrApi {
       corrections: this.db.listCorrections(),
       gpsFailedAttendance: attendance.filter((record) => record.status.includes("GPS_FAILED")),
       activePayrollStatements: this.db.listPayrollStatements(false),
+      settings: this.db.getSettings(),
       recentAuditLogs: this.db.listAuditLogs().slice(0, 10)
     };
+  }
+
+  async getSettings() {
+    return this.db.getSettings();
+  }
+
+  async updateSettings(input: UpdateSettingsInput) {
+    this.assertAdmin(input.actorId);
+
+    const settings = this.db.updateSettings(input.settings);
+    const auditLog = this.addAuditLog({
+      actorId: input.actorId,
+      action: "SETTINGS_UPDATED",
+      targetType: "SystemPolicy",
+      targetId: "system-policy",
+      detail: Object.keys(input.settings).sort().join(", ")
+    });
+
+    return { settings, auditLog };
   }
 
   async getEmployeeSnapshot(employeeId: string, asOf = this.clock()): Promise<EmployeeSnapshot> {
@@ -224,7 +245,7 @@ export class HrApi {
   }
 
   async setOvertimePayApproval(input: SetOvertimePayApprovalInput) {
-    this.assertEmployee(input.actorId);
+    this.assertAdmin(input.actorId);
 
     const request = this.findOvertimeRequest(input.requestId);
     const saved = this.db.updateOvertimeRequest({ ...request, payApproved: input.payApproved });
@@ -290,7 +311,7 @@ export class HrApi {
   }
 
   async softDeletePayrollStatement(input: SoftDeletePayrollStatementInput) {
-    this.assertEmployee(input.actorId);
+    this.assertAdmin(input.actorId);
 
     const statement = this.db
       .listPayrollStatements(true)
@@ -374,6 +395,17 @@ export class HrApi {
     }
   }
 
+  private assertAdmin(employeeId: string) {
+    const employee = this.db.listEmployees().find((item) => item.id === employeeId);
+    if (!employee) {
+      throw new Error(`Employee not found: ${employeeId}`);
+    }
+
+    if (employee.role !== "HR_ADMIN" && employee.role !== "SYSTEM_ADMIN") {
+      throw new Error(`Admin permission required: ${employeeId}`);
+    }
+  }
+
   private findLeaveRequest(requestId: string) {
     const request = this.db.listLeaveRequests().find((item) => item.id === requestId);
     if (!request) {
@@ -403,6 +435,8 @@ export const defaultHrApi = createHrApi(defaultDatabase);
 export const getEmployees = defaultHrApi.getEmployees.bind(defaultHrApi);
 export const getDashboard = defaultHrApi.getDashboard.bind(defaultHrApi);
 export const getEmployeeSnapshot = defaultHrApi.getEmployeeSnapshot.bind(defaultHrApi);
+export const getSettings = defaultHrApi.getSettings.bind(defaultHrApi);
+export const updateSettings = defaultHrApi.updateSettings.bind(defaultHrApi);
 export const clockAttendance = defaultHrApi.clockAttendance.bind(defaultHrApi);
 export const submitLeaveRequest = defaultHrApi.submitLeaveRequest.bind(defaultHrApi);
 export const submitOvertimeRequest = defaultHrApi.submitOvertimeRequest.bind(defaultHrApi);

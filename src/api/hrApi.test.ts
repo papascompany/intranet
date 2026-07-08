@@ -208,6 +208,55 @@ describe("hr api", () => {
     expect(dashboard.corrections.map((correction) => correction.id)).toContain("corr-1");
   });
 
+  it("allows admins to update settings", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.updateSettings({
+      actorId: "emp-ceo",
+      settings: {
+        gpsAllowedRadiusMeters: 250
+      }
+    });
+    const settings = await hrApi.getSettings();
+
+    expect(result.settings.gpsAllowedRadiusMeters).toBe(250);
+    expect(settings.gpsAllowedRadiusMeters).toBe(250);
+    expect(settings.gpsFailureFallback).toBe("QR_OR_MANUAL_EQUAL");
+    expect(result.auditLog.action).toBe("SETTINGS_UPDATED");
+  });
+
+  it("rejects employee settings updates", async () => {
+    const hrApi = api();
+
+    await expect(
+      hrApi.updateSettings({
+        actorId: "emp-ops-1",
+        settings: {
+          gpsAllowedRadiusMeters: 250
+        }
+      })
+    ).rejects.toThrow("Admin permission required");
+    await expect(hrApi.getSettings()).resolves.toMatchObject({
+      gpsAllowedRadiusMeters: 300,
+      payrollEmployeeAccess: "VIEW_ONLY"
+    });
+  });
+
+  it("includes settings in the dashboard", async () => {
+    const hrApi = api();
+
+    const dashboard = await hrApi.getDashboard(fixedNow);
+
+    expect(dashboard.settings).toEqual({
+      gpsAllowedRadiusMeters: 300,
+      gpsFailureFallback: "QR_OR_MANUAL_EQUAL",
+      payrollEmployeeAccess: "VIEW_ONLY",
+      payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE",
+      overtimePayApproverRole: "ADMIN_ONLY",
+      advanceLeaveExceptionHandling: "HR_CORRECTION"
+    });
+  });
+
   it("creates attendance correction audit history", async () => {
     const hrApi = api();
 
@@ -268,6 +317,52 @@ describe("hr api", () => {
     expect(snapshot.payrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
     expect(dashboard.activePayrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
     await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_SOFT_DELETED" })).resolves.toHaveLength(1);
+  });
+
+  it("rejects employee payroll statement deletion", async () => {
+    const hrApi = api();
+    const upload = await hrApi.uploadPayrollStatement({
+      employeeId: "emp-ops-1",
+      actorId: "emp-ceo",
+      month: "2026-07",
+      filename: "2026-07-payroll-kim.pdf"
+    });
+
+    await expect(
+      hrApi.softDeletePayrollStatement({
+        statementId: upload.statement.id,
+        actorId: "emp-ops-1",
+        deletedAt: "2026-07-08T10:00:00+09:00"
+      })
+    ).rejects.toThrow("Admin permission required");
+    const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
+
+    expect(snapshot.payrollStatements.map((statement) => statement.id)).toContain(upload.statement.id);
+  });
+
+  it("rejects employee overtime pay approval", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-10",
+      startsAt: "2026-07-10T17:30:00+09:00",
+      endsAt: "2026-07-10T19:00:00+09:00",
+      minutes: 90,
+      reason: "정산 마감",
+      status: "APPROVED"
+    });
+
+    await expect(
+      hrApi.setOvertimePayApproval({
+        requestId: submitted.request.id,
+        payApproved: true,
+        actorId: "emp-ops-1",
+        detail: "직원 직접 인정"
+      })
+    ).rejects.toThrow("Admin permission required");
+    const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
+
+    expect(snapshot.overtimeRequests.find((request) => request.id === submitted.request.id)?.payApproved).toBe(false);
   });
 
   it("excludes soft deleted payroll statements from employee snapshots", async () => {

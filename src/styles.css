@@ -50,6 +50,11 @@ button {
   padding: 24px 0 80px;
 }
 
+.login-shell {
+  width: min(640px, calc(100% - 32px));
+  padding-top: 12vh;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -157,6 +162,55 @@ h3 {
   min-width: 220px;
   font-family: var(--font-inter);
   font-weight: 500;
+}
+
+.topbar-controls,
+.login-grid,
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-controls {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.login-grid {
+  align-items: end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.checkbox-label {
+  min-height: 40px;
+  color: var(--color-graphite);
+  font-family: var(--font-inter);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.checkbox-label input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-ink);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--color-silver);
+  border-radius: 999px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+}
+
+.icon-button:hover {
+  background: var(--color-paper);
 }
 
 select {
@@ -410,6 +464,16 @@ select {
 
   .select-label {
     min-width: 0;
+  }
+
+  .topbar-controls,
+  .login-grid {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .icon-button {
+    width: 100%;
   }
 
   .employee-grid,

@@ -2,12 +2,41 @@ export type Role = "EMPLOYEE" | "APPROVER" | "HR_ADMIN" | "SYSTEM_ADMIN";
 
 export type Department = "운영팀" | "제작팀";
 
+export type EmployeeCustomAdminField = {
+  id: `custom-admin-field-${1 | 2 | 3 | 4 | 5}`;
+  label: string;
+  value: string;
+  sensitive?: boolean;
+};
+
+export type EmployeeCustomAdminFields = [
+  EmployeeCustomAdminField,
+  EmployeeCustomAdminField,
+  EmployeeCustomAdminField,
+  EmployeeCustomAdminField,
+  EmployeeCustomAdminField
+];
+
 export type Employee = {
   id: string;
   name: string;
   role: Role;
   department: Department;
   hireDate: string;
+  employeeNumber?: string;
+  position?: string;
+  residentRegistrationNumber?: string;
+  birthday?: string;
+  address?: string;
+  mobile?: string;
+  emergencyContact?: string;
+  familyRelations?: string;
+  payrollBank?: string;
+  payrollAccount?: string;
+  annualSalary?: number;
+  severancePay?: number;
+  incomeDeductionDependents?: number;
+  customAdminFields?: EmployeeCustomAdminFields;
   approverId?: string;
   pilot: boolean;
 };

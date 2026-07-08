@@ -104,6 +104,29 @@ export type SoftDeletePayrollStatementInput = {
   deletedAt?: string;
 };
 
+export type SystemPolicy = {
+  gpsAllowedRadiusMeters: number;
+  gpsFailureFallback: "QR_OR_MANUAL_EQUAL";
+  payrollEmployeeAccess: "VIEW_ONLY";
+  payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE";
+  overtimePayApproverRole: "ADMIN_ONLY";
+  advanceLeaveExceptionHandling: "HR_CORRECTION";
+};
+
+export const defaultSystemPolicy: SystemPolicy = {
+  gpsAllowedRadiusMeters: 300,
+  gpsFailureFallback: "QR_OR_MANUAL_EQUAL",
+  payrollEmployeeAccess: "VIEW_ONLY",
+  payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE",
+  overtimePayApproverRole: "ADMIN_ONLY",
+  advanceLeaveExceptionHandling: "HR_CORRECTION"
+};
+
+export type UpdateSettingsInput = {
+  actorId: string;
+  settings: Partial<SystemPolicy>;
+};
+
 export type AuditLogFilter = {
   actorId?: string;
   targetType?: string;
@@ -123,6 +146,7 @@ export type Dashboard = {
   corrections: AttendanceCorrection[];
   gpsFailedAttendance: AttendanceRecord[];
   activePayrollStatements: PayrollStatement[];
+  settings?: SystemPolicy;
   recentAuditLogs: AuditLog[];
 };
 

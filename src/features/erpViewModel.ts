@@ -11,6 +11,7 @@ import type {
 
 export type ErpActiveSection =
   | "self-service"
+  | "employee-card"
   | "attendance"
   | "approvals"
   | "leave"
@@ -67,6 +68,7 @@ export type ErpViewModel = {
 
 const navLabels = {
   "self-service": "셀프서비스",
+  "employee-card": "직원카드",
   attendance: "근태",
   approvals: "승인",
   leave: "휴가",
@@ -172,7 +174,7 @@ export function buildErpViewModel({
       isPilot: selectedEmployee.pilot,
       pilotLabel: selectedEmployee.pilot ? "파일럿 대상" : "일반 대상"
     },
-    decisionChecks: buildDecisionChecks()
+    decisionChecks: buildDecisionChecks(dashboard.settings)
   };
 }
 
@@ -193,6 +195,7 @@ function buildNavItems({
     "self-service":
       employeeSnapshot.leaveRequests.filter((request) => request.status === "PENDING").length +
       employeeSnapshot.overtimeRequests.filter((request) => request.status === "PENDING").length,
+    "employee-card": 1,
     attendance: dashboard.todayAttendance.length,
     approvals: pendingApprovalCount,
     leave: dashboard.leaveRequests.length,
@@ -289,42 +292,44 @@ function correctionRow(correction: AttendanceCorrection, employees: Employee[]):
   };
 }
 
-function buildDecisionChecks(): ErpViewModelRow[] {
+function buildDecisionChecks(settings: Dashboard["settings"]): ErpViewModelRow[] {
+  const gpsRadius = settings?.gpsAllowedRadiusMeters ?? 300;
+
   return [
     {
       id: "policy-gps-radius",
-      label: "GPS 300m",
-      value: "근무지 허용 반경 기본값",
-      meta: "개발 기본값 확인 필요",
-      status: "DEFAULT"
+      label: "GPS 허용 반경",
+      value: `${gpsRadius}m 기본 적용`,
+      meta: "관리자 설정에서 변경 가능",
+      status: "ACTIVE"
     },
     {
       id: "policy-fixed-qr",
-      label: "고정 QR 보조인증",
-      value: "GPS 실패 시 QR 인증 허용",
-      meta: "개발 기본값 확인 필요",
-      status: "DEFAULT"
+      label: "GPS 실패 대체 인증",
+      value: "QR과 수동 클릭 동등 허용",
+      meta: "두 방식 모두 감사 로그 보존",
+      status: "ACTIVE"
     },
     {
       id: "policy-payroll-soft-delete",
-      label: "급여명세서 soft delete",
-      value: "삭제 시 원본 보존 및 deletedAt 표시",
-      meta: "개발 기본값 확인 필요",
-      status: "DEFAULT"
+      label: "급여명세서 접근",
+      value: "직원 View only · 관리자 삭제",
+      meta: "삭제는 soft delete 처리",
+      status: "ACTIVE"
     },
     {
       id: "policy-overtime-pay-approver",
-      label: "야근 수당 인정자 기준",
-      value: "승인자/관리자 인정 기준 확정 필요",
-      meta: "개발 기본값 확인 필요",
-      status: "DEFAULT"
+      label: "야근 수당 인정",
+      value: "관리자 지정 계정만 가능",
+      meta: "HR/SYSTEM 관리자 권한 검사",
+      status: "ACTIVE"
     },
     {
       id: "policy-advance-leave-exception",
       label: "휴직/장기결근 선사용휴가 예외",
-      value: "선사용휴가 차감 예외 기준 확정 필요",
-      meta: "개발 기본값 확인 필요",
-      status: "DEFAULT"
+      value: "자동 중단 없이 HR 보정",
+      meta: "예외 처리는 보정 이력으로 추적",
+      status: "ACTIVE"
     }
   ];
 }

@@ -289,11 +289,16 @@ describe("buildErpViewModel", () => {
     const viewModel = buildViewModel("settings");
 
     expect(viewModel.decisionChecks.map((check) => check.label)).toEqual([
-      "GPS 300m",
-      "고정 QR 보조인증",
-      "급여명세서 soft delete",
-      "야근 수당 인정자 기준",
+      "GPS 허용 반경",
+      "GPS 실패 대체 인증",
+      "급여명세서 접근",
+      "야근 수당 인정",
       "휴직/장기결근 선사용휴가 예외"
     ]);
+    expect(viewModel.decisionChecks[0]).toMatchObject({
+      value: "300m 기본 적용",
+      meta: "관리자 설정에서 변경 가능",
+      status: "ACTIVE"
+    });
   });
 });
