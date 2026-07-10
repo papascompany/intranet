@@ -68,6 +68,16 @@ export class InMemoryDatabase {
     return cloneList(this.employees);
   }
 
+  updateEmployee(employee: Employee) {
+    const index = this.employees.findIndex((item) => item.id === employee.id);
+    if (index < 0) {
+      throw new Error(`Employee not found: ${employee.id}`);
+    }
+
+    this.employees[index] = cloneItem(employee);
+    return cloneItem(this.employees[index]);
+  }
+
   listWorkplaces() {
     return cloneList(this.workplaces);
   }

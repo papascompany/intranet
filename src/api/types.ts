@@ -18,6 +18,7 @@ import type {
   Workplace
 } from "../domain/types";
 import type { AuthSession } from "./auth";
+import type { EmployeeCardUpdateInput } from "../features/employeeCardUpdate";
 
 export type AuthenticatedInput = {
   session?: AuthSession;
@@ -150,6 +151,13 @@ export type DashboardInput = AuthenticatedInput & {
 export type UpdateSettingsInput = AuthenticatedInput & {
   actorId: string;
   settings: Partial<SystemPolicy>;
+};
+
+export type UpdateEmployeeCardInput = AuthenticatedInput & {
+  employeeId: string;
+  actorId: string;
+  patch: EmployeeCardUpdateInput;
+  reason?: string;
 };
 
 export type AuditLogFilter = AuthenticatedInput & {

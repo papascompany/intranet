@@ -305,6 +305,48 @@ describe("hr api", () => {
     ]);
   });
 
+  it("allows admins to update employee card fields", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: {
+        position: "운영 리드",
+        annualSalary: 56000000,
+        incomeDeductionDependents: 2
+      },
+      reason: "직원카드 정기 갱신"
+    });
+    const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow, adminSession);
+
+    expect(result.employee.position).toBe("운영 리드");
+    expect(result.employee.annualSalary).toBe(56000000);
+    expect(result.auditLog).toMatchObject({
+      action: "EMPLOYEE_CARD_UPDATED",
+      targetType: "Employee",
+      targetId: "emp-ops-1",
+      detail: "직원카드 정기 갱신"
+    });
+    expect(snapshot.employee.position).toBe("운영 리드");
+  });
+
+  it("rejects employee sessions from updating employee cards", async () => {
+    const hrApi = api();
+
+    await expect(
+      hrApi.updateEmployeeCard({
+        employeeId: "emp-ops-1",
+        actorId: employeeSession.employeeId,
+        session: employeeSession,
+        patch: {
+          position: "직원 직접 수정"
+        }
+      })
+    ).rejects.toThrow("Admin permission required");
+  });
+
   it("allows admins to update settings", async () => {
     const hrApi = api();
 

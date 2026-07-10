@@ -1,6 +1,7 @@
 import { buildAttendanceRecord, evaluateVerification } from "../domain/attendance";
 import { getLeaveBalance } from "../domain/leave";
 import { offsetOvertimeWithEarlyLeave } from "../domain/overtime";
+import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate";
 import type {
   AttendanceCorrection,
   AuditLog,
@@ -26,6 +27,7 @@ import type {
   SoftDeletePayrollStatementInput,
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
+  UpdateEmployeeCardInput,
   UpdateSettingsInput,
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
@@ -167,6 +169,27 @@ export class HrApi {
         .filter((log) => log.actorId === employeeId || log.targetId.includes(employeeId))
         .slice(0, 10)
     };
+  }
+
+  async updateEmployeeCard(input: UpdateEmployeeCardInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    this.assertAdmin(actorId, input.session);
+
+    const employee = this.db.listEmployees().find((item) => item.id === input.employeeId);
+    if (!employee) {
+      throw new Error(`Employee not found: ${input.employeeId}`);
+    }
+
+    const saved = this.db.updateEmployee(applyEmployeeCardUpdate(employee, input.patch));
+    const auditLog = this.addAuditLog({
+      actorId,
+      action: "EMPLOYEE_CARD_UPDATED",
+      targetType: "Employee",
+      targetId: saved.id,
+      detail: input.reason ?? Object.keys(input.patch).sort().join(", ")
+    });
+
+    return { employee: saved, auditLog };
   }
 
   async clockAttendance(input: ClockAttendanceInput) {
@@ -645,6 +668,7 @@ export const getEmployees = defaultHrApi.getEmployees.bind(defaultHrApi);
 export const getEmployeeDirectory = defaultHrApi.getEmployeeDirectory.bind(defaultHrApi);
 export const getDashboard = defaultHrApi.getDashboard.bind(defaultHrApi);
 export const getEmployeeSnapshot = defaultHrApi.getEmployeeSnapshot.bind(defaultHrApi);
+export const updateEmployeeCard = defaultHrApi.updateEmployeeCard.bind(defaultHrApi);
 export const getSettings = defaultHrApi.getSettings.bind(defaultHrApi);
 export const updateSettings = defaultHrApi.updateSettings.bind(defaultHrApi);
 export const clockAttendance = defaultHrApi.clockAttendance.bind(defaultHrApi);
