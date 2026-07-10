@@ -245,6 +245,9 @@ export const payrollStatements: PayrollStatement[] = [
     employeeId: "emp-ops-1",
     month: "2026-06",
     filename: "2026-06-payroll-kim.pdf",
+    storageBucket: "payroll-statements",
+    storagePath: "emp-ops-1/2026-06/2026-06-payroll-kim.pdf",
+    uploadedBy: "emp-ceo",
     uploadedAt: "2026-07-05T10:00:00+09:00"
   }
 ];

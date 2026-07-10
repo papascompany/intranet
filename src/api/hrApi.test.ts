@@ -419,15 +419,37 @@ describe("hr api", () => {
     const deleted = await hrApi.softDeletePayrollStatement({
       statementId: upload.statement.id,
       actorId: "emp-ceo",
+      deleteReason: "재발행된 명세서로 교체",
       deletedAt: "2026-07-08T10:00:00+09:00"
     });
     const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
     const dashboard = await hrApi.getDashboard(fixedNow);
 
     expect(deleted.statement.deletedAt).toBe("2026-07-08T10:00:00+09:00");
+    expect(deleted.statement.deletedBy).toBe("emp-ceo");
+    expect(deleted.statement.deleteReason).toBe("재발행된 명세서로 교체");
     expect(snapshot.payrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
     expect(dashboard.activePayrollStatements.some((statement) => statement.id === upload.statement.id)).toBe(false);
     await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_SOFT_DELETED" })).resolves.toHaveLength(1);
+  });
+
+  it("requires a delete reason for payroll statement deletion", async () => {
+    const hrApi = api();
+    const upload = await hrApi.uploadPayrollStatement({
+      employeeId: "emp-ops-1",
+      actorId: "emp-ceo",
+      month: "2026-07",
+      filename: "2026-07-payroll-kim.pdf"
+    });
+
+    await expect(
+      hrApi.softDeletePayrollStatement({
+        statementId: upload.statement.id,
+        actorId: "emp-ceo",
+        deleteReason: "  ",
+        deletedAt: "2026-07-08T10:00:00+09:00"
+      })
+    ).rejects.toThrow("Payroll delete reason required");
   });
 
   it("rejects employee payroll statement deletion", async () => {
@@ -443,6 +465,7 @@ describe("hr api", () => {
       hrApi.softDeletePayrollStatement({
         statementId: upload.statement.id,
         actorId: "emp-ops-1",
+        deleteReason: "직원 직접 삭제 시도",
         deletedAt: "2026-07-08T10:00:00+09:00"
       })
     ).rejects.toThrow("Admin permission required");
@@ -473,7 +496,63 @@ describe("hr api", () => {
       actorId: adminSession.employeeId,
       session: adminSession,
       month: "2026-07",
-      filename: "2026-07-payroll-kim.pdf"
+      filename: "2026-07-payroll-kim.pdf",
+      storageBucket: "payroll-secure",
+      storagePath: "emp-ops-1/2026-07/final.pdf"
+    });
+
+    expect(result.statement.employeeId).toBe("emp-ops-1");
+    expect(result.statement.storageBucket).toBe("payroll-secure");
+    expect(result.statement.storagePath).toBe("emp-ops-1/2026-07/final.pdf");
+    expect(result.statement.uploadedBy).toBe(adminSession.employeeId);
+    expect(result.auditLog.actorId).toBe(adminSession.employeeId);
+  });
+
+  it("allows employees to download only their own payroll statement and writes an audit log", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.downloadPayrollStatement({
+      statementId: "pay-1",
+      session: employeeSession
+    });
+
+    expect(result.statement.employeeId).toBe(employeeSession.employeeId);
+    expect(result.storageBucket).toBe("payroll-statements");
+    expect(result.storagePath).toBe("emp-ops-1/2026-06/2026-06-payroll-kim.pdf");
+    expect(result.signedUrl).toBe("signed-url:///payroll-statements/emp-ops-1/2026-06/2026-06-payroll-kim.pdf");
+    expect(result.auditLog).toMatchObject({
+      actorId: employeeSession.employeeId,
+      action: "PAYROLL_STATEMENT_DOWNLOADED",
+      targetId: "pay-1"
+    });
+    await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_DOWNLOADED" })).resolves.toHaveLength(1);
+  });
+
+  it("rejects employee payroll downloads for another employee", async () => {
+    const hrApi = api();
+    const upload = await hrApi.uploadPayrollStatement({
+      employeeId: "emp-ops-2",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      month: "2026-07",
+      filename: "2026-07-payroll-lee.pdf"
+    });
+
+    await expect(
+      hrApi.downloadPayrollStatement({
+        statementId: upload.statement.id,
+        session: employeeSession
+      })
+    ).rejects.toThrow("Payroll access denied");
+    await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_DOWNLOADED" })).resolves.toHaveLength(0);
+  });
+
+  it("allows admin payroll downloads for any employee", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.downloadPayrollStatement({
+      statementId: "pay-1",
+      session: adminSession
     });
 
     expect(result.statement.employeeId).toBe("emp-ops-1");
@@ -518,6 +597,7 @@ describe("hr api", () => {
     await hrApi.softDeletePayrollStatement({
       statementId: upload.statement.id,
       actorId: "emp-ceo",
+      deleteReason: "직원 스냅샷 제외 검증",
       deletedAt: "2026-08-31T10:00:00+09:00"
     });
     const afterDelete = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);

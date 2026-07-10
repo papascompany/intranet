@@ -100,12 +100,28 @@ export type UploadPayrollStatementInput = AuthenticatedInput & {
   month: string;
   filename: string;
   actorId: string;
+  storageBucket?: string;
+  storagePath?: string;
   uploadedAt?: string;
+};
+
+export type DownloadPayrollStatementInput = AuthenticatedInput & {
+  statementId: string;
+  actorId?: string;
+};
+
+export type DownloadPayrollStatementResult = {
+  statement: PayrollStatement;
+  storageBucket: string;
+  storagePath: string;
+  signedUrl: string;
+  auditLog: AuditLog;
 };
 
 export type SoftDeletePayrollStatementInput = AuthenticatedInput & {
   statementId: string;
   actorId: string;
+  deleteReason: string;
   deletedAt?: string;
 };
 

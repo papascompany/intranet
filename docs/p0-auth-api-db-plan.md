@@ -25,6 +25,8 @@
 3. Supabase Auth 로그인으로 데모 계정 선택 UI 교체.
 4. 급여명세서 PDF는 Supabase Storage `payroll-statements` 버킷으로 이관.
 5. 민감 필드는 애플리케이션 계층 암호화 후 `*_enc` 컬럼에 저장.
+6. 급여명세서 다운로드는 API에서 본인/관리자 권한을 확인하고 `PAYROLL_STATEMENT_DOWNLOADED` 감사 로그를 남긴 뒤 storage metadata 또는 signed URL을 반환.
+7. 급여명세서 삭제는 soft delete만 허용하며 `deletedBy`, `deletedAt`, `deleteReason`을 필수로 저장.
 
 ## 보안 메모
 

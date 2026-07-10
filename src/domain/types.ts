@@ -164,8 +164,13 @@ export type PayrollStatement = {
   employeeId: string;
   month: string;
   filename: string;
+  storageBucket?: string;
+  storagePath?: string;
+  uploadedBy?: string;
   uploadedAt: string;
+  deletedBy?: string;
   deletedAt?: string;
+  deleteReason?: string;
 };
 
 export type AuditLog = {

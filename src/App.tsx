@@ -391,6 +391,7 @@ function App() {
       statementId,
       actorId: authActorId(authSession, selectedEmployee?.id),
       session: authSession ?? undefined,
+      deleteReason: "관리자 화면에서 급여명세서 삭제",
       deletedAt: "2026-07-08T12:00:00+09:00"
     });
 

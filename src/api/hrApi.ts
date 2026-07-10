@@ -19,6 +19,8 @@ import type {
   CreateAttendanceCorrectionInput,
   Dashboard,
   DashboardInput,
+  DownloadPayrollStatementInput,
+  DownloadPayrollStatementResult,
   EmployeeSnapshot,
   SetOvertimePayApprovalInput,
   SoftDeletePayrollStatementInput,
@@ -341,6 +343,9 @@ export class HrApi {
       employeeId: input.employeeId,
       month: input.month,
       filename: input.filename,
+      storageBucket: input.storageBucket ?? "payroll-statements",
+      storagePath: input.storagePath ?? this.defaultPayrollStoragePath(input.employeeId, input.month, input.filename),
+      uploadedBy: actorId,
       uploadedAt: input.uploadedAt ?? this.clock()
     };
     const saved = this.db.addPayrollStatement(statement);
@@ -355,27 +360,58 @@ export class HrApi {
     return { statement: saved, auditLog };
   }
 
+  async downloadPayrollStatement(input: DownloadPayrollStatementInput): Promise<DownloadPayrollStatementResult> {
+    const actorId = this.resolveActorId(input, input.actorId ?? input.session?.employeeId ?? "");
+    this.assertEmployee(actorId);
+
+    const statement = this.findPayrollStatement(input.statementId);
+    this.assertCanDownloadPayrollStatement(actorId, statement, input.session);
+
+    const storageBucket = statement.storageBucket ?? "payroll-statements";
+    const storagePath = statement.storagePath ?? this.defaultPayrollStoragePath(
+      statement.employeeId,
+      statement.month,
+      statement.filename
+    );
+    const auditLog = this.addAuditLog({
+      actorId,
+      action: "PAYROLL_STATEMENT_DOWNLOADED",
+      targetType: "PayrollStatement",
+      targetId: statement.id,
+      detail: `${statement.month} ${statement.filename} from ${storageBucket}/${storagePath}`
+    });
+
+    return {
+      statement,
+      storageBucket,
+      storagePath,
+      signedUrl: `signed-url:///${storageBucket}/${storagePath}`,
+      auditLog
+    };
+  }
+
   async softDeletePayrollStatement(input: SoftDeletePayrollStatementInput) {
     const actorId = this.resolveActorId(input, input.actorId);
     this.assertAdmin(actorId, input.session);
-
-    const statement = this.db
-      .listPayrollStatements(true)
-      .find((item) => item.id === input.statementId);
-    if (!statement) {
-      throw new Error(`Payroll statement not found: ${input.statementId}`);
+    const deleteReason = input.deleteReason.trim();
+    if (!deleteReason) {
+      throw new Error("Payroll delete reason required");
     }
+
+    const statement = this.findPayrollStatement(input.statementId);
 
     const saved = this.db.updatePayrollStatement({
       ...statement,
-      deletedAt: input.deletedAt ?? this.clock()
+      deletedBy: actorId,
+      deletedAt: input.deletedAt ?? this.clock(),
+      deleteReason
     });
     const auditLog = this.addAuditLog({
       actorId,
       action: "PAYROLL_STATEMENT_SOFT_DELETED",
       targetType: "PayrollStatement",
       targetId: saved.id,
-      detail: `${saved.month} ${saved.filename}`
+      detail: `${saved.month} ${saved.filename}: ${deleteReason}`
     });
 
     return { statement: saved, auditLog };
@@ -487,6 +523,47 @@ export class HrApi {
     throw new Error(`Employee access denied: ${session.employeeId} -> ${employeeId}`);
   }
 
+  private assertCanDownloadPayrollStatement(actorId: string, statement: PayrollStatement, session?: AuthSession) {
+    if (statement.deletedAt) {
+      throw new Error(`Payroll statement deleted: ${statement.id}`);
+    }
+
+    if (session) {
+      this.assertSessionActor(session, actorId);
+      if (isAdminSession(session) || statement.employeeId === session.employeeId) {
+        return;
+      }
+
+      throw new Error(`Payroll access denied: ${session.employeeId} -> ${statement.employeeId}`);
+    }
+
+    const employee = this.db.listEmployees().find((item) => item.id === actorId);
+    if (employee && (employee.role === "HR_ADMIN" || employee.role === "SYSTEM_ADMIN")) {
+      return;
+    }
+
+    if (statement.employeeId === actorId) {
+      return;
+    }
+
+    throw new Error(`Payroll access denied: ${actorId} -> ${statement.employeeId}`);
+  }
+
+  private findPayrollStatement(statementId: string) {
+    const statement = this.db
+      .listPayrollStatements(true)
+      .find((item) => item.id === statementId);
+    if (!statement) {
+      throw new Error(`Payroll statement not found: ${statementId}`);
+    }
+
+    return statement;
+  }
+
+  private defaultPayrollStoragePath(employeeId: string, month: string, filename: string) {
+    return `${employeeId}/${month}/${filename}`;
+  }
+
   private assertSessionActor(session: AuthSession, actorId: string) {
     if (session.employeeId !== actorId) {
       throw new Error(`Session actor mismatch: ${session.employeeId} cannot act as ${actorId}`);
@@ -577,5 +654,6 @@ export const updateRequestStatus = defaultHrApi.updateRequestStatus.bind(default
 export const setOvertimePayApproval = defaultHrApi.setOvertimePayApproval.bind(defaultHrApi);
 export const createAttendanceCorrection = defaultHrApi.createAttendanceCorrection.bind(defaultHrApi);
 export const uploadPayrollStatement = defaultHrApi.uploadPayrollStatement.bind(defaultHrApi);
+export const downloadPayrollStatement = defaultHrApi.downloadPayrollStatement.bind(defaultHrApi);
 export const softDeletePayrollStatement = defaultHrApi.softDeletePayrollStatement.bind(defaultHrApi);
 export const getAuditLogs = defaultHrApi.getAuditLogs.bind(defaultHrApi);

@@ -32,7 +32,7 @@
 | `EarlyLeaveLedger` | `id`, `employeeId`, `attendanceRecordId`, `workDate`, `minutes`, `status`, `reason`, `balanceAfterMinutes` | 17:00 이전 퇴근 누적 |
 | `OvertimeRequest` | `id`, `employeeId`, `workDate`, `startAt`, `endAt`, `expectedMinutes`, `reason`, `weeklyOvertimeMinutesAtRequest`, `status`, `approverId`, `decidedAt` | 야근 신청/승인 |
 | `OvertimeOffsetLedger` | `id`, `employeeId`, `overtimeRequestId`, `earlyLeaveLedgerId`, `offsetMinutes`, `status`, `payApprovedMinutes`, `decidedBy`, `decidedAt` | 조기퇴근-야근 상계와 수당 집계 인정 |
-| `PayrollStatement` | `id`, `employeeId`, `payrollMonth`, `fileId`, `fileName`, `uploadedBy`, `uploadedAt`, `deletedAt`, `deletedBy`, `deleteReason` | 급여명세서 파일 메타데이터, soft delete |
+| `PayrollStatement` | `id`, `employeeId`, `payrollMonth`, `storageBucket`, `storagePath`, `fileName`, `uploadedBy`, `uploadedAt`, `deletedAt`, `deletedBy`, `deleteReason` | 급여명세서 파일 메타데이터, soft delete |
 | `AuditLog` | `id`, `actorEmployeeId`, `action`, `targetType`, `targetId`, `beforeJson`, `afterJson`, `reason`, `ipAddress`, `userAgent`, `createdAt` | 민감 조회/변경/삭제 감사 로그 |
 
 ## 3. 상태값 계약
@@ -89,7 +89,7 @@
 | `POST` | `/api/overtime/requests` | 본인 | 야근 신청, 주 12시간 초과 가능성 경고 포함 |
 | `GET` | `/api/overtime/requests/me` | 본인 | 본인 야근/상계 내역 |
 | `GET` | `/api/payroll/statements/me` | 본인 | 본인 급여명세서 목록 |
-| `GET` | `/api/payroll/statements/:id/download` | 본인 | 권한 확인 후 일회성 링크 또는 스트리밍 |
+| `GET` | `/api/payroll/statements/:id/download` | 본인 | 본인 명세서만 다운로드, storage metadata/signed URL 반환, 감사 로그 기록 |
 
 ### 4.2 관리자 API
 
@@ -110,8 +110,9 @@
 | `GET` | `/api/admin/overtime/requests` | `APPROVER` 이상 | 야근 신청 목록 |
 | `PATCH` | `/api/admin/overtime/requests/:id` | `APPROVER` 이상 | 야근 승인/반려 |
 | `PATCH` | `/api/admin/overtime-offsets/:id` | `HR_ADMIN` 이상 | 수당 집계 인정/미인정 |
-| `POST` | `/api/admin/payroll/statements` | `HR_ADMIN` 이상 | 급여명세서 업로드 |
-| `DELETE` | `/api/admin/payroll/statements/:id` | `HR_ADMIN` 이상 | soft delete, 사유 필수 |
+| `GET` | `/api/admin/payroll/statements/:id/download` | `HR_ADMIN` 이상 | 직원 명세서 다운로드, storage metadata/signed URL 반환, 감사 로그 기록 |
+| `POST` | `/api/admin/payroll/statements` | `HR_ADMIN` 이상 | 급여명세서 업로드, storage bucket/path 기록 |
+| `DELETE` | `/api/admin/payroll/statements/:id` | `HR_ADMIN` 이상 | soft delete, 사유/삭제자/삭제시각 필수 |
 | `GET` | `/api/admin/audit-logs` | `SYSTEM_ADMIN` | 감사 로그 조회 |
 
 ### 4.3 주요 요청 페이로드

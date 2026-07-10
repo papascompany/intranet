@@ -161,13 +161,18 @@ create table public.payroll_statements (
   employee_id text not null references public.employees(id) on delete cascade,
   payroll_month text not null,
   storage_bucket text not null default 'payroll-statements',
-  storage_path text,
+  storage_path text not null,
   filename text not null,
   uploaded_by text not null references public.employees(id),
   uploaded_at timestamptz not null default now(),
   deleted_by text references public.employees(id),
   deleted_at timestamptz,
-  delete_reason text
+  delete_reason text,
+  constraint payroll_delete_metadata_required check (
+    (deleted_at is null and deleted_by is null and delete_reason is null)
+    or
+    (deleted_at is not null and deleted_by is not null and nullif(btrim(delete_reason), '') is not null)
+  )
 );
 
 create table public.audit_logs (
