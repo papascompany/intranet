@@ -475,6 +475,32 @@ describe("hr api", () => {
     await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_SOFT_DELETED" })).resolves.toHaveLength(1);
   });
 
+  it("rejects deleted payroll statement downloads without writing a download audit log", async () => {
+    const hrApi = api();
+    const upload = await hrApi.uploadPayrollStatement({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      month: "2026-07",
+      filename: "2026-07-payroll-kim.pdf"
+    });
+
+    await hrApi.softDeletePayrollStatement({
+      statementId: upload.statement.id,
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      deleteReason: "재발행된 명세서로 교체"
+    });
+
+    await expect(
+      hrApi.downloadPayrollStatement({
+        statementId: upload.statement.id,
+        session: adminSession
+      })
+    ).rejects.toThrow("Payroll statement deleted");
+    await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_DOWNLOADED" })).resolves.toHaveLength(0);
+  });
+
   it("requires a delete reason for payroll statement deletion", async () => {
     const hrApi = api();
     const upload = await hrApi.uploadPayrollStatement({

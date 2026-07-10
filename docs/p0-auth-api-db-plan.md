@@ -15,17 +15,19 @@
 
 - `src/api/auth.ts`: 인증 세션, 관리자/승인자 역할 판정 추가.
 - `src/api/hrApi.ts`: dashboard, 직원 디렉터리, 직원 스냅샷, 설정, 승인, 급여, 보정 API에 세션 기반 권한 검사 추가.
+- `src/api/hrRepository.ts`: API가 의존하는 저장소 계약을 분리해 메모리 저장소와 Supabase 저장소를 교체 가능하게 정리.
+- `src/api/supabaseRepository.ts`: 실제 Supabase 쿼리 연결 전까지 사용할 어댑터 골격 추가.
 - `src/App.tsx`: 로그인 시 `AuthSession`을 만들고 모든 주요 API 호출에 전달.
 - `supabase/migrations/202607080001_initial_hr_schema.sql`: Supabase Postgres 초기 스키마와 RLS 정책 초안 추가.
 
 ## 다음 구현 단위
 
 1. Supabase 프로젝트 연결 후 마이그레이션 적용.
-2. `InMemoryDatabase`와 같은 계약을 만족하는 `SupabaseHrRepository` 구현.
+2. `SupabaseHrRepository`의 메서드를 Supabase Postgres/Storage 쿼리로 채우고 통합 테스트 추가.
 3. Supabase Auth 로그인으로 데모 계정 선택 UI 교체.
 4. 급여명세서 PDF는 Supabase Storage `payroll-statements` 버킷으로 이관.
 5. 민감 필드는 애플리케이션 계층 암호화 후 `*_enc` 컬럼에 저장.
-6. 급여명세서 다운로드는 API에서 본인/관리자 권한을 확인하고 `PAYROLL_STATEMENT_DOWNLOADED` 감사 로그를 남긴 뒤 storage metadata 또는 signed URL을 반환.
+6. 급여명세서 다운로드는 API에서 본인/관리자 권한을 확인하고 `PAYROLL_STATEMENT_DOWNLOADED` 감사 로그를 남긴 뒤 storage metadata 또는 signed URL을 반환한다. 현재 UI는 이 API 호출까지 연결되어 있다.
 7. 급여명세서 삭제는 soft delete만 허용하며 `deletedBy`, `deletedAt`, `deleteReason`을 필수로 저장.
 
 ## 보안 메모

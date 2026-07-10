@@ -14,6 +14,7 @@ import type {
 } from "../domain/types";
 import { canApproveRequests, isAdminSession, type AuthSession } from "./auth";
 import { InMemoryDatabase } from "./inMemoryDatabase";
+import type { HrRepository } from "./hrRepository";
 import type {
   AuditLogFilter,
   ClockAttendanceInput,
@@ -39,7 +40,7 @@ const defaultClock: Clock = () => new Date().toISOString();
 
 export class HrApi {
   constructor(
-    private readonly db = new InMemoryDatabase(),
+    private readonly db: HrRepository = new InMemoryDatabase(),
     private readonly clock: Clock = defaultClock
   ) {}
 

@@ -4,6 +4,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   Clock,
+  Download,
   FileText,
   Fingerprint,
   History,
@@ -24,10 +25,12 @@ import {
   getEmployeeDirectory,
   getEmployeeSnapshot,
   getEmployees,
+  downloadPayrollStatement,
   setOvertimePayApproval,
   softDeletePayrollStatement,
   submitLeaveRequest,
   submitOvertimeRequest,
+  updateEmployeeCard,
   updateSettings,
   updateRequestStatus,
   uploadPayrollStatement
@@ -381,6 +384,22 @@ function App() {
     await refresh(selectedEmployee.id);
   }
 
+  async function downloadPayroll(statementId?: string) {
+    if (!statementId) {
+      setNotice("다운로드할 급여명세서가 없습니다.");
+      return;
+    }
+
+    const result = await downloadPayrollStatement({
+      statementId,
+      actorId: authActorId(authSession, selectedEmployee?.id),
+      session: authSession ?? undefined
+    });
+
+    setNotice(`급여명세서 다운로드 링크 생성 · ${result.storagePath}`);
+    await refresh(selectedEmployeeId);
+  }
+
   async function deletePayroll(statementId?: string) {
     if (!statementId) {
       setNotice("삭제할 급여명세서가 없습니다.");
@@ -397,6 +416,26 @@ function App() {
 
     setNotice(`급여명세서 삭제 처리 · ${result.statement.month}`);
     await refresh(selectedEmployeeId);
+  }
+
+  async function updateSelectedEmployeeCard() {
+    if (!selectedEmployee) return;
+
+    const result = await updateEmployeeCard({
+      employeeId: selectedEmployee.id,
+      actorId: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined,
+      patch: {
+        position: selectedEmployee.position ?? "운영 매니저",
+        mobile: selectedEmployee.mobile ?? "010-0000-0000",
+        emergencyContact: selectedEmployee.emergencyContact ?? "긴급연락처 미등록",
+        annualSalary: selectedEmployee.annualSalary ? selectedEmployee.annualSalary + 500000 : 48000000,
+        incomeDeductionDependents: selectedEmployee.incomeDeductionDependents ?? 0
+      }
+    });
+
+    setNotice(`${result.employee.name} 직원카드 갱신 · 감사로그 ${result.auditLog.id}`);
+    await refresh(selectedEmployee.id);
   }
 
   async function updateGpsRadius(radius: number) {
@@ -507,7 +546,9 @@ function App() {
               onApproveOvertime: approveOvertime,
               onClock: clock,
               onCreateCorrection: createCorrection,
+              onDownloadPayroll: downloadPayroll,
               onDeletePayroll: deletePayroll,
+              onUpdateEmployeeCard: updateSelectedEmployeeCard,
               onUpdateGpsRadius: updateGpsRadius,
               onSubmitLeave: submitLeave,
               onSubmitOvertime: submitOvertime,
@@ -535,7 +576,9 @@ function renderSection(props: {
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
   onCreateCorrection: () => void;
+  onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string) => void;
+  onUpdateEmployeeCard: () => void;
   onUpdateGpsRadius: (radius: number) => void;
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
@@ -700,11 +743,27 @@ function SelfServiceSection(props: {
   );
 }
 
-function EmployeeCardSection(props: { canAdmin: boolean; employeeCardRows: EmployeeCardRow[]; erpViewModel: ErpViewModel }) {
+function EmployeeCardSection(props: {
+  canAdmin: boolean;
+  employeeCardRows: EmployeeCardRow[];
+  erpViewModel: ErpViewModel;
+  isLoading: boolean;
+  onUpdateEmployeeCard: () => void;
+}) {
   return (
     <DetailPanel
       title={`${props.erpViewModel.employeeSummary.name} 직원카드`}
       description={props.canAdmin ? "관리자 전용 급여·퇴직·소득공제·커스텀 항목까지 표시합니다." : "직원모드에서는 기본 인사카드 항목만 표시합니다."}
+      actions={
+        props.canAdmin ? (
+          <InlineActions>
+            <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
+              <BadgeCheck size={14} />
+              관리자 갱신
+            </button>
+          </InlineActions>
+        ) : undefined
+      }
     >
       <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
     </DetailPanel>
@@ -854,6 +913,7 @@ function PayrollSection(props: {
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onUploadPayroll: () => void;
+  onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string) => void;
 }) {
   const payrollRows = filterRowsForMode(props.erpViewModel.payrollRows, props.erpViewModel.employeeSummary.name, props.canAdmin);
@@ -864,17 +924,23 @@ function PayrollSection(props: {
       title="급여명세서"
       description={props.canAdmin ? "관리자는 명세서 업로드와 soft delete 삭제 처리를 수행합니다." : "직원은 본인 급여명세서 조회만 가능합니다."}
       actions={
-        props.canAdmin ? (
-          <InlineActions>
-            <button disabled={props.isLoading} onClick={props.onUploadPayroll}>
-              <Upload size={14} />
-              업로드
-            </button>
-            <button disabled={props.isLoading || !firstPayrollId} onClick={() => props.onDeletePayroll(firstPayrollId)}>
-              삭제
-            </button>
-          </InlineActions>
-        ) : undefined
+        <InlineActions>
+          <button disabled={props.isLoading || !firstPayrollId} onClick={() => props.onDownloadPayroll(firstPayrollId)}>
+            <Download size={14} />
+            다운로드
+          </button>
+          {props.canAdmin ? (
+            <>
+              <button disabled={props.isLoading} onClick={props.onUploadPayroll}>
+                <Upload size={14} />
+                업로드
+              </button>
+              <button disabled={props.isLoading || !firstPayrollId} onClick={() => props.onDeletePayroll(firstPayrollId)}>
+                삭제
+              </button>
+            </>
+          ) : null}
+        </InlineActions>
       }
     >
       <DataTable columns={rowColumns} rows={payrollRows} emptyState={<EmptyState title="급여명세서 없음" />} />

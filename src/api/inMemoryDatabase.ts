@@ -11,6 +11,7 @@ import type {
   Workplace
 } from "../domain/types";
 import { defaultSystemPolicy, type SystemPolicy } from "./types";
+import type { HrRepository } from "./hrRepository";
 import {
   auditLogs,
   attendanceRecords,
@@ -37,7 +38,7 @@ export type InMemoryDatabaseSeed = {
   settings?: SystemPolicy;
 };
 
-export class InMemoryDatabase {
+export class InMemoryDatabase implements HrRepository {
   private readonly employees: Employee[];
   private readonly workplaces: Workplace[];
   private readonly attendanceRecords: AttendanceRecord[];
