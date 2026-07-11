@@ -19,13 +19,15 @@
 - `src/api/hrRepository.ts`: API가 의존하는 저장소 계약을 분리해 메모리 저장소와 Postgres 저장소를 교체 가능하게 정리.
 - `src/api/hrApi.ts`: 저장소 호출을 `await` 기반으로 통일해 동기 메모리 저장소와 비동기 Postgres 저장소를 모두 수용.
 - `src/api/postgresRepository.ts`: Neon/Vercel Postgres에 붙일 SQL repository, snake/camel 변환, soft delete 필터, 감사 로그 저장 구현.
+- `src/server/neonRepositoryFactory.ts`: `DATABASE_URL`이 있으면 Neon Postgres, 없으면 데모용 메모리 저장소를 선택하는 서버 전용 factory 추가.
+- `src/server/hrHttpHandler.ts`, `api/hr.ts`: Vercel Serverless Function에서 `HrApi`를 호출하는 HTTP API 표면 추가.
 - `src/App.tsx`: 로그인 시 `AuthSession`을 만들고 모든 주요 API 호출에 전달.
 - `database/migrations/202607110001_neon_hr_schema.sql`: Neon Postgres 초기 스키마 추가.
 
 ## 다음 구현 단위
 
 1. Neon 프로젝트를 Vercel Marketplace에서 연결하고 `DATABASE_URL`을 Vercel env로 주입.
-2. 서버/API 런타임에서 `PostgresHrRepository`를 기본 저장소로 선택하는 설정 추가.
+2. 프론트엔드의 직접 `HrApi` 호출을 `/api/hr` HTTP client로 교체해 DB 접근을 서버로 완전히 이동.
 3. 실제 인증 provider(Auth.js/Clerk/Better Auth 등)로 데모 계정 선택 UI 교체.
 4. 급여명세서 PDF는 Vercel Blob에 저장하고 metadata는 `payroll_statements`에 보관.
 5. 민감 필드는 애플리케이션 계층 암호화 후 `*_enc` 컬럼에 저장.
@@ -36,6 +38,7 @@
 
 - 현재 localStorage 세션은 개발용 데모 경계다.
 - `PostgresHrRepository`는 서버/API 계층에서만 사용해야 하며 `DATABASE_URL` 또는 DB client가 브라우저 번들에 포함되면 안 된다.
+- 로컬 데모는 `HR_REPOSITORY_MODE=memory` 또는 `DATABASE_URL` 미설정 상태에서 메모리 저장소를 사용한다.
 - 운영 전에는 refresh token/session cookie, CSRF 정책, 감사 로그 IP/User-Agent 수집, 관리자 액션 재인증 기준을 확정해야 한다.
 - 운영 전에는 업무 write와 감사 로그 insert를 DB transaction으로 묶어 원자성을 강화해야 한다.
 - DB 권한은 서버 계층에서 통제하고, API 계층에서도 동일한 권한 검사를 유지한다.
