@@ -45,11 +45,11 @@ export class HrApi {
   ) {}
 
   async getEmployees() {
-    return this.db.listEmployees();
+    return await this.db.listEmployees();
   }
 
   async getEmployeeDirectory(input: { session?: AuthSession } = {}) {
-    const employees = this.db.listEmployees();
+    const employees = await this.db.listEmployees();
     if (!input.session || isAdminSession(input.session)) {
       return employees;
     }
@@ -60,23 +60,31 @@ export class HrApi {
   async getDashboard(input: string | DashboardInput = this.clock()): Promise<Dashboard> {
     const { asOf, session } = parseDashboardInput(input, this.clock);
     const today = asOf.slice(0, 10);
-    const employees = this.db.listEmployees();
+    const [
+      employees,
+      attendanceRecords,
+      leaveRequestRecords,
+      overtimeRequestRecords,
+      correctionRecords,
+      payrollStatementRecords,
+      settings,
+      auditLogs
+    ] = await Promise.all([
+      this.db.listEmployees(),
+      this.db.listAttendanceRecords(),
+      this.db.listLeaveRequests(),
+      this.db.listOvertimeRequests(),
+      this.db.listCorrections(),
+      this.db.listPayrollStatements(false),
+      this.db.getSettings(),
+      this.db.listAuditLogs()
+    ]);
     const visibleEmployeeIds = this.visibleEmployeeIds(session, employees);
-    const attendance = this.db
-      .listAttendanceRecords()
-      .filter((record) => visibleEmployeeIds.has(record.employeeId));
-    const leaveRequests = this.db
-      .listLeaveRequests()
-      .filter((request) => visibleEmployeeIds.has(request.employeeId));
-    const overtimeRequests = this.db
-      .listOvertimeRequests()
-      .filter((request) => visibleEmployeeIds.has(request.employeeId));
-    const corrections = this.db
-      .listCorrections()
-      .filter((correction) => visibleEmployeeIds.has(correction.employeeId));
-    const activePayrollStatements = this.db
-      .listPayrollStatements(false)
-      .filter((statement) => visibleEmployeeIds.has(statement.employeeId));
+    const attendance = attendanceRecords.filter((record) => visibleEmployeeIds.has(record.employeeId));
+    const leaveRequests = leaveRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
+    const overtimeRequests = overtimeRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
+    const corrections = correctionRecords.filter((correction) => visibleEmployeeIds.has(correction.employeeId));
+    const activePayrollStatements = payrollStatementRecords.filter((statement) => visibleEmployeeIds.has(statement.employeeId));
     const visibleEmployees = employees.filter((employee) => visibleEmployeeIds.has(employee.id));
     const visibleTargetIds = new Set([
       ...attendance.map((record) => record.id),
@@ -98,21 +106,21 @@ export class HrApi {
       corrections,
       gpsFailedAttendance: attendance.filter((record) => record.status.includes("GPS_FAILED")),
       activePayrollStatements,
-      settings: this.db.getSettings(),
-      recentAuditLogs: this.filterAuditLogsBySession(this.db.listAuditLogs(), session, visibleTargetIds).slice(0, 10)
+      settings,
+      recentAuditLogs: this.filterAuditLogsBySession(auditLogs, session, visibleTargetIds).slice(0, 10)
     };
   }
 
   async getSettings(_input: { session?: AuthSession } = {}) {
-    return this.db.getSettings();
+    return await this.db.getSettings();
   }
 
   async updateSettings(input: UpdateSettingsInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    this.assertAdmin(actorId, input.session);
+    await this.assertAdmin(actorId, input.session);
 
-    const settings = this.db.updateSettings(input.settings);
-    const auditLog = this.addAuditLog({
+    const settings = await this.db.updateSettings(input.settings);
+    const auditLog = await this.addAuditLog({
       actorId,
       action: "SETTINGS_UPDATED",
       targetType: "SystemPolicy",
@@ -124,25 +132,44 @@ export class HrApi {
   }
 
   async getEmployeeSnapshot(employeeId: string, asOf = this.clock(), session?: AuthSession): Promise<EmployeeSnapshot> {
-    this.assertCanReadEmployee(employeeId, session);
-    const employee = this.db.listEmployees().find((item) => item.id === employeeId);
+    await this.assertCanReadEmployee(employeeId, session);
+    const [
+      employees,
+      attendanceRecordRows,
+      leaveRequestRows,
+      earlyLeaveLedgerRows,
+      overtimeRequestRows,
+      workplaceOptions,
+      correctionRows,
+      payrollStatementRows,
+      auditLogs
+    ] = await Promise.all([
+      this.db.listEmployees(),
+      this.db.listAttendanceRecords(),
+      this.db.listLeaveRequests(),
+      this.db.listEarlyLeaveLedger(),
+      this.db.listOvertimeRequests(),
+      this.db.listWorkplaces(),
+      this.db.listCorrections(),
+      this.db.listPayrollStatements(false),
+      this.db.listAuditLogs()
+    ]);
+    const employee = employees.find((item) => item.id === employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
     }
 
-    const attendanceRecords = this.db
-      .listAttendanceRecords()
-      .filter((record) => record.employeeId === employeeId);
-    const leaveRequests = this.db.listLeaveRequests().filter((request) => request.employeeId === employeeId);
-    const earlyLeaveLedger = this.db.listEarlyLeaveLedger().filter((entry) => entry.employeeId === employeeId);
-    const overtimeRequests = this.db.listOvertimeRequests().filter((request) => request.employeeId === employeeId);
+    const attendanceRecords = attendanceRecordRows.filter((record) => record.employeeId === employeeId);
+    const leaveRequests = leaveRequestRows.filter((request) => request.employeeId === employeeId);
+    const earlyLeaveLedger = earlyLeaveLedgerRows.filter((entry) => entry.employeeId === employeeId);
+    const overtimeRequests = overtimeRequestRows.filter((request) => request.employeeId === employeeId);
     const activeOvertime = overtimeRequests.find((request) => request.status === "APPROVED");
     const earlyLeaveMinutes = earlyLeaveLedger.reduce((sum, entry) => sum + entry.minutes, 0);
 
     return {
       asOf,
       employee,
-      workplaceOptions: this.db.listWorkplaces(),
+      workplaceOptions,
       todayAttendance: attendanceRecords.find((record) => record.date === asOf.slice(0, 10)),
       attendanceRecords,
       leaveBalance: getLeaveBalance({
@@ -161,12 +188,9 @@ export class HrApi {
             payApproved: activeOvertime.payApproved
           })
         : undefined,
-      attendanceCorrections: this.db.listCorrections().filter((correction) => correction.employeeId === employeeId),
-      payrollStatements: this.db
-        .listPayrollStatements(false)
-        .filter((statement) => statement.employeeId === employeeId),
-      recentAuditLogs: this.db
-        .listAuditLogs()
+      attendanceCorrections: correctionRows.filter((correction) => correction.employeeId === employeeId),
+      payrollStatements: payrollStatementRows.filter((statement) => statement.employeeId === employeeId),
+      recentAuditLogs: auditLogs
         .filter((log) => log.actorId === employeeId || log.targetId.includes(employeeId))
         .slice(0, 10)
     };
@@ -174,15 +198,15 @@ export class HrApi {
 
   async updateEmployeeCard(input: UpdateEmployeeCardInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    this.assertAdmin(actorId, input.session);
+    await this.assertAdmin(actorId, input.session);
 
-    const employee = this.db.listEmployees().find((item) => item.id === input.employeeId);
+    const employee = (await this.db.listEmployees()).find((item) => item.id === input.employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${input.employeeId}`);
     }
 
-    const saved = this.db.updateEmployee(applyEmployeeCardUpdate(employee, input.patch));
-    const auditLog = this.addAuditLog({
+    const saved = await this.db.updateEmployee(applyEmployeeCardUpdate(employee, input.patch));
+    const auditLog = await this.addAuditLog({
       actorId,
       action: "EMPLOYEE_CARD_UPDATED",
       targetType: "Employee",
@@ -194,20 +218,20 @@ export class HrApi {
   }
 
   async clockAttendance(input: ClockAttendanceInput) {
-    this.assertEmployee(input.employeeId);
-    this.assertCanReadEmployee(input.employeeId, input.session);
+    await this.assertEmployee(input.employeeId);
+    await this.assertCanReadEmployee(input.employeeId, input.session);
 
     const now = input.now ?? this.clock();
     const verification = evaluateVerification({
       employeeId: input.employeeId,
-      workplaces: this.workplacesWithPolicyRadius(),
+      workplaces: await this.workplacesWithPolicyRadius(),
       coordinate: input.coordinate,
       method: input.method,
       now,
       gpsError: input.gpsError
     });
-    const existing = this.db.findAttendanceByEmployeeDate(input.employeeId, now.slice(0, 10));
-    const attendance = this.db.upsertAttendanceRecord(
+    const existing = await this.db.findAttendanceByEmployeeDate(input.employeeId, now.slice(0, 10));
+    const attendance = await this.db.upsertAttendanceRecord(
       buildAttendanceRecord({
         employeeId: input.employeeId,
         type: input.type,
@@ -217,11 +241,11 @@ export class HrApi {
         scheduledEndHour: input.scheduledEndHour
       })
     );
-    const earlyLeaveEntry = this.syncEarlyLeaveLedger(attendance);
+    const earlyLeaveEntry = await this.syncEarlyLeaveLedger(attendance);
 
-    this.db.addVerificationAttempt(verification);
+    await this.db.addVerificationAttempt(verification);
     const actorId = this.resolveActorId(input, input.employeeId);
-    const auditLog = this.addAuditLog({
+    const auditLog = await this.addAuditLog({
       actorId,
       action: input.type === "CLOCK_IN" ? "ATTENDANCE_CLOCKED_IN" : "ATTENDANCE_CLOCKED_OUT",
       targetType: "AttendanceRecord",
@@ -238,12 +262,12 @@ export class HrApi {
   }
 
   async submitLeaveRequest(input: SubmitLeaveRequestInput) {
-    this.assertEmployee(input.employeeId);
-    this.assertCanReadEmployee(input.employeeId, input.session);
+    await this.assertEmployee(input.employeeId);
+    await this.assertCanReadEmployee(input.employeeId, input.session);
     const actorId = this.resolveActorId(input, input.employeeId);
 
     const request: LeaveRequest = {
-      id: this.db.nextId("leave"),
+      id: await this.db.nextId("leave"),
       employeeId: input.employeeId,
       type: input.type,
       startsOn: input.startsOn,
@@ -252,8 +276,8 @@ export class HrApi {
       reason: input.reason,
       status: input.status ?? "PENDING"
     };
-    const saved = this.db.addLeaveRequest(request);
-    const auditLog = this.addAuditLog({
+    const saved = await this.db.addLeaveRequest(request);
+    const auditLog = await this.addAuditLog({
       actorId,
       action: "LEAVE_REQUEST_SUBMITTED",
       targetType: "LeaveRequest",
@@ -265,13 +289,13 @@ export class HrApi {
   }
 
   async submitOvertimeRequest(input: SubmitOvertimeRequestInput) {
-    this.assertEmployee(input.employeeId);
-    this.assertCanReadEmployee(input.employeeId, input.session);
+    await this.assertEmployee(input.employeeId);
+    await this.assertCanReadEmployee(input.employeeId, input.session);
     const actorId = this.resolveActorId(input, input.employeeId);
-    this.assertEmployee(actorId);
+    await this.assertEmployee(actorId);
 
     const request: OvertimeRequest = {
-      id: this.db.nextId("ot"),
+      id: await this.db.nextId("ot"),
       employeeId: input.employeeId,
       date: input.date,
       startsAt: input.startsAt,
@@ -281,8 +305,8 @@ export class HrApi {
       status: input.status ?? "PENDING",
       payApproved: false
     };
-    const saved = this.db.addOvertimeRequest(request);
-    const auditLog = this.addAuditLog({
+    const saved = await this.db.addOvertimeRequest(request);
+    const auditLog = await this.addAuditLog({
       actorId,
       action: "OVERTIME_REQUEST_SUBMITTED",
       targetType: "OvertimeRequest",
@@ -295,30 +319,30 @@ export class HrApi {
 
   async updateRequestStatus(input: UpdateRequestStatusInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    this.assertCanApprove(actorId, input.session);
+    await this.assertCanApprove(actorId, input.session);
 
     if (input.targetType === "LeaveRequest") {
-      const request = this.findLeaveRequest(input.requestId);
-      const saved = this.db.updateLeaveRequest({ ...request, status: input.status });
-      const auditLog = this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
+      const request = await this.findLeaveRequest(input.requestId);
+      const saved = await this.db.updateLeaveRequest({ ...request, status: input.status });
+      const auditLog = await this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
 
       return { request: saved, auditLog };
     }
 
-    const request = this.findOvertimeRequest(input.requestId);
-    const saved = this.db.updateOvertimeRequest({ ...request, status: input.status });
-    const auditLog = this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
+    const request = await this.findOvertimeRequest(input.requestId);
+    const saved = await this.db.updateOvertimeRequest({ ...request, status: input.status });
+    const auditLog = await this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
 
     return { request: saved, auditLog };
   }
 
   async setOvertimePayApproval(input: SetOvertimePayApprovalInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    this.assertAdmin(actorId, input.session);
+    await this.assertAdmin(actorId, input.session);
 
-    const request = this.findOvertimeRequest(input.requestId);
-    const saved = this.db.updateOvertimeRequest({ ...request, payApproved: input.payApproved });
-    const auditLog = this.addAuditLog({
+    const request = await this.findOvertimeRequest(input.requestId);
+    const saved = await this.db.updateOvertimeRequest({ ...request, payApproved: input.payApproved });
+    const auditLog = await this.addAuditLog({
       actorId,
       action: input.payApproved ? "OVERTIME_PAY_APPROVED" : "OVERTIME_PAY_UNAPPROVED",
       targetType: "OvertimeRequest",
@@ -330,12 +354,12 @@ export class HrApi {
   }
 
   async createAttendanceCorrection(input: CreateAttendanceCorrectionInput) {
-    this.assertEmployee(input.employeeId);
+    await this.assertEmployee(input.employeeId);
     const correctedById = this.resolveActorId(input, input.correctedById);
-    this.assertAdmin(correctedById, input.session);
+    await this.assertAdmin(correctedById, input.session);
 
     const correction: AttendanceCorrection = {
-      id: this.db.nextId("corr"),
+      id: await this.db.nextId("corr"),
       attendanceId: input.attendanceId,
       employeeId: input.employeeId,
       correctedById,
@@ -345,8 +369,8 @@ export class HrApi {
       reason: input.reason,
       createdAt: input.createdAt ?? this.clock()
     };
-    const saved = this.db.addCorrection(correction);
-    const auditLog = this.addAuditLog({
+    const saved = await this.db.addCorrection(correction);
+    const auditLog = await this.addAuditLog({
       actorId: correctedById,
       action: "ATTENDANCE_CORRECTION_CREATED",
       targetType: "AttendanceRecord",
@@ -358,12 +382,12 @@ export class HrApi {
   }
 
   async uploadPayrollStatement(input: UploadPayrollStatementInput) {
-    this.assertEmployee(input.employeeId);
+    await this.assertEmployee(input.employeeId);
     const actorId = this.resolveActorId(input, input.actorId);
-    this.assertAdmin(actorId, input.session);
+    await this.assertAdmin(actorId, input.session);
 
     const statement: PayrollStatement = {
-      id: this.db.nextId("pay"),
+      id: await this.db.nextId("pay"),
       employeeId: input.employeeId,
       month: input.month,
       filename: input.filename,
@@ -372,8 +396,8 @@ export class HrApi {
       uploadedBy: actorId,
       uploadedAt: input.uploadedAt ?? this.clock()
     };
-    const saved = this.db.addPayrollStatement(statement);
-    const auditLog = this.addAuditLog({
+    const saved = await this.db.addPayrollStatement(statement);
+    const auditLog = await this.addAuditLog({
       actorId,
       action: "PAYROLL_STATEMENT_UPLOADED",
       targetType: "PayrollStatement",
@@ -386,10 +410,10 @@ export class HrApi {
 
   async downloadPayrollStatement(input: DownloadPayrollStatementInput): Promise<DownloadPayrollStatementResult> {
     const actorId = this.resolveActorId(input, input.actorId ?? input.session?.employeeId ?? "");
-    this.assertEmployee(actorId);
+    await this.assertEmployee(actorId);
 
-    const statement = this.findPayrollStatement(input.statementId);
-    this.assertCanDownloadPayrollStatement(actorId, statement, input.session);
+    const statement = await this.findPayrollStatement(input.statementId);
+    await this.assertCanDownloadPayrollStatement(actorId, statement, input.session);
 
     const storageBucket = statement.storageBucket ?? "payroll-statements";
     const storagePath = statement.storagePath ?? this.defaultPayrollStoragePath(
@@ -397,7 +421,7 @@ export class HrApi {
       statement.month,
       statement.filename
     );
-    const auditLog = this.addAuditLog({
+    const auditLog = await this.addAuditLog({
       actorId,
       action: "PAYROLL_STATEMENT_DOWNLOADED",
       targetType: "PayrollStatement",
@@ -416,21 +440,21 @@ export class HrApi {
 
   async softDeletePayrollStatement(input: SoftDeletePayrollStatementInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    this.assertAdmin(actorId, input.session);
+    await this.assertAdmin(actorId, input.session);
     const deleteReason = input.deleteReason.trim();
     if (!deleteReason) {
       throw new Error("Payroll delete reason required");
     }
 
-    const statement = this.findPayrollStatement(input.statementId);
+    const statement = await this.findPayrollStatement(input.statementId);
 
-    const saved = this.db.updatePayrollStatement({
+    const saved = await this.db.updatePayrollStatement({
       ...statement,
       deletedBy: actorId,
       deletedAt: input.deletedAt ?? this.clock(),
       deleteReason
     });
-    const auditLog = this.addAuditLog({
+    const auditLog = await this.addAuditLog({
       actorId,
       action: "PAYROLL_STATEMENT_SOFT_DELETED",
       targetType: "PayrollStatement",
@@ -442,7 +466,7 @@ export class HrApi {
   }
 
   async getAuditLogs(filter: AuditLogFilter = {}) {
-    const logs = this.filterAuditLogsBySession(this.db.listAuditLogs(), filter.session)
+    const logs = this.filterAuditLogsBySession(await this.db.listAuditLogs(), filter.session)
       .filter((log) => !filter.actorId || log.actorId === filter.actorId)
       .filter((log) => !filter.targetType || log.targetType === filter.targetType)
       .filter((log) => !filter.targetId || log.targetId === filter.targetId)
@@ -451,7 +475,7 @@ export class HrApi {
     return typeof filter.limit === "number" ? logs.slice(0, filter.limit) : logs;
   }
 
-  private syncEarlyLeaveLedger(attendance: { id: string; employeeId: string; date: string; earlyLeaveMinutes: number }) {
+  private async syncEarlyLeaveLedger(attendance: { id: string; employeeId: string; date: string; earlyLeaveMinutes: number }) {
     if (attendance.earlyLeaveMinutes <= 0) {
       return undefined;
     }
@@ -465,17 +489,17 @@ export class HrApi {
       reason: "실제 퇴근 기록 기준"
     };
 
-    return this.db.upsertEarlyLeaveLedger(entry);
+    return await this.db.upsertEarlyLeaveLedger(entry);
   }
 
-  private auditStatusChange(
+  private async auditStatusChange(
     actorId: string,
     targetType: "LeaveRequest" | "OvertimeRequest",
     targetId: string,
     status: RequestStatus,
     detail?: string
   ) {
-    return this.addAuditLog({
+    return await this.addAuditLog({
       actorId,
       action: `${targetType.toUpperCase()}_${status}`,
       targetType,
@@ -484,24 +508,24 @@ export class HrApi {
     });
   }
 
-  private addAuditLog(input: Omit<AuditLog, "id" | "createdAt">) {
+  private async addAuditLog(input: Omit<AuditLog, "id" | "createdAt">) {
     const log: AuditLog = {
-      id: this.db.nextId("audit"),
+      id: await this.db.nextId("audit"),
       createdAt: this.clock(),
       ...input
     };
 
-    return this.db.addAuditLog(log);
+    return await this.db.addAuditLog(log);
   }
 
-  private assertEmployee(employeeId: string) {
-    if (!this.db.listEmployees().some((employee) => employee.id === employeeId)) {
+  private async assertEmployee(employeeId: string) {
+    if (!(await this.db.listEmployees()).some((employee) => employee.id === employeeId)) {
       throw new Error(`Employee not found: ${employeeId}`);
     }
   }
 
-  private assertAdmin(employeeId: string, session?: AuthSession) {
-    const employee = this.db.listEmployees().find((item) => item.id === employeeId);
+  private async assertAdmin(employeeId: string, session?: AuthSession) {
+    const employee = (await this.db.listEmployees()).find((item) => item.id === employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
     }
@@ -519,8 +543,8 @@ export class HrApi {
     }
   }
 
-  private assertCanApprove(employeeId: string, session?: AuthSession) {
-    const employee = this.db.listEmployees().find((item) => item.id === employeeId);
+  private async assertCanApprove(employeeId: string, session?: AuthSession) {
+    const employee = (await this.db.listEmployees()).find((item) => item.id === employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
     }
@@ -538,8 +562,8 @@ export class HrApi {
     }
   }
 
-  private assertCanReadEmployee(employeeId: string, session?: AuthSession) {
-    this.assertEmployee(employeeId);
+  private async assertCanReadEmployee(employeeId: string, session?: AuthSession) {
+    await this.assertEmployee(employeeId);
     if (!session || isAdminSession(session) || session.employeeId === employeeId) {
       return;
     }
@@ -547,7 +571,7 @@ export class HrApi {
     throw new Error(`Employee access denied: ${session.employeeId} -> ${employeeId}`);
   }
 
-  private assertCanDownloadPayrollStatement(actorId: string, statement: PayrollStatement, session?: AuthSession) {
+  private async assertCanDownloadPayrollStatement(actorId: string, statement: PayrollStatement, session?: AuthSession) {
     if (statement.deletedAt) {
       throw new Error(`Payroll statement deleted: ${statement.id}`);
     }
@@ -561,7 +585,7 @@ export class HrApi {
       throw new Error(`Payroll access denied: ${session.employeeId} -> ${statement.employeeId}`);
     }
 
-    const employee = this.db.listEmployees().find((item) => item.id === actorId);
+    const employee = (await this.db.listEmployees()).find((item) => item.id === actorId);
     if (employee && (employee.role === "HR_ADMIN" || employee.role === "SYSTEM_ADMIN")) {
       return;
     }
@@ -573,9 +597,9 @@ export class HrApi {
     throw new Error(`Payroll access denied: ${actorId} -> ${statement.employeeId}`);
   }
 
-  private findPayrollStatement(statementId: string) {
-    const statement = this.db
-      .listPayrollStatements(true)
+  private async findPayrollStatement(statementId: string) {
+    const statement = (await this.db
+      .listPayrollStatements(true))
       .find((item) => item.id === statementId);
     if (!statement) {
       throw new Error(`Payroll statement not found: ${statementId}`);
@@ -620,16 +644,16 @@ export class HrApi {
     return logs.filter((log) => log.actorId === session.employeeId || Boolean(visibleTargetIds?.has(log.targetId)));
   }
 
-  private workplacesWithPolicyRadius() {
-    const { gpsAllowedRadiusMeters } = this.db.getSettings();
-    return this.db.listWorkplaces().map((workplace) => ({
+  private async workplacesWithPolicyRadius() {
+    const [{ gpsAllowedRadiusMeters }, workplaces] = await Promise.all([this.db.getSettings(), this.db.listWorkplaces()]);
+    return workplaces.map((workplace) => ({
       ...workplace,
       allowedRadiusMeters: gpsAllowedRadiusMeters
     }));
   }
 
-  private findLeaveRequest(requestId: string) {
-    const request = this.db.listLeaveRequests().find((item) => item.id === requestId);
+  private async findLeaveRequest(requestId: string) {
+    const request = (await this.db.listLeaveRequests()).find((item) => item.id === requestId);
     if (!request) {
       throw new Error(`Leave request not found: ${requestId}`);
     }
@@ -637,8 +661,8 @@ export class HrApi {
     return request;
   }
 
-  private findOvertimeRequest(requestId: string) {
-    const request = this.db.listOvertimeRequests().find((item) => item.id === requestId);
+  private async findOvertimeRequest(requestId: string) {
+    const request = (await this.db.listOvertimeRequests()).find((item) => item.id === requestId);
     if (!request) {
       throw new Error(`Overtime request not found: ${requestId}`);
     }
@@ -647,7 +671,7 @@ export class HrApi {
   }
 }
 
-export function createHrApi(db = new InMemoryDatabase(), clock: Clock = defaultClock) {
+export function createHrApi(db: HrRepository = new InMemoryDatabase(), clock: Clock = defaultClock) {
   return new HrApi(db, clock);
 }
 

@@ -2,11 +2,28 @@ import { describe, expect, it } from "vitest";
 import { InMemoryDatabase } from "./inMemoryDatabase";
 import { createHrApi } from "./hrApi";
 import type { AuthSession } from "./auth";
+import type { HrRepository } from "./hrRepository";
 
 const fixedNow = "2026-07-08T09:00:00+09:00";
 
 function api() {
   return createHrApi(new InMemoryDatabase(), () => fixedNow);
+}
+
+function asyncRepository(db = new InMemoryDatabase()): HrRepository {
+  return new Proxy(db as unknown as Record<PropertyKey, unknown>, {
+    get(target, property) {
+      const value = target[property];
+      if (typeof value !== "function") {
+        return value;
+      }
+
+      return async (...args: unknown[]) => {
+        await Promise.resolve();
+        return (value as (...args: unknown[]) => unknown).apply(target, args);
+      };
+    }
+  }) as unknown as HrRepository;
 }
 
 const employeeSession: AuthSession = {
@@ -31,6 +48,21 @@ const adminSession: AuthSession = {
 };
 
 describe("hr api", () => {
+  it("awaits async repository permission checks before payroll writes", async () => {
+    const hrApi = createHrApi(asyncRepository(), () => fixedNow);
+
+    await expect(
+      hrApi.uploadPayrollStatement({
+        employeeId: "emp-ops-1",
+        actorId: employeeSession.employeeId,
+        session: employeeSession,
+        month: "2026-07",
+        filename: "2026-07-payroll-kim.pdf"
+      })
+    ).rejects.toThrow("Admin permission required");
+    await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_UPLOADED" })).resolves.toHaveLength(0);
+  });
+
   it("clocks attendance with GPS, calculates early leave, and writes an audit log", async () => {
     const hrApi = api();
 
