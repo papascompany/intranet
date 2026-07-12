@@ -16,9 +16,9 @@ import type {
   VerificationAttempt,
   VerificationMethod,
   Workplace
-} from "../domain/types";
-import type { AuthSession } from "./auth";
-import type { EmployeeCardUpdateInput } from "../features/employeeCardUpdate";
+} from "../domain/types.js";
+import type { AuthSession } from "./auth.js";
+import type { EmployeeCardUpdateInput } from "../features/employeeCardUpdate.js";
 
 export type AuthenticatedInput = {
   session?: AuthSession;

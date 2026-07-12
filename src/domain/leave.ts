@@ -1,4 +1,4 @@
-import type { Employee, LeaveBalance, LeaveRequest } from "./types";
+import type { Employee, LeaveBalance, LeaveRequest } from "./types.js";
 
 export function monthsSinceHire(hireDate: string, asOf: string) {
   const hire = new Date(hireDate);

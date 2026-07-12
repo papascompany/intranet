@@ -5,7 +5,7 @@ import type {
   VerificationMethod,
   VerificationStatus,
   Workplace
-} from "./types";
+} from "./types.js";
 
 type Coordinate = {
   latitude: number;

@@ -8,7 +8,7 @@ import type {
   OvertimeRequest,
   PayrollStatement,
   Workplace
-} from "./types";
+} from "./types.js";
 
 export const employees: Employee[] = [
   {

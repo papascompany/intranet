@@ -116,13 +116,22 @@ async function post<T>(action: string, payload?: unknown) {
     return await postToLocalDemoApi<T>(action, payload);
   }
 
-  const body = (await response.json()) as T | HrHttpError;
+  const bodyText = await response.text();
+  const body = parseResponseBody<T | HrHttpError>(bodyText);
 
   if (!response.ok) {
-    throw new Error(isHrHttpError(body) && body.error ? body.error : `API request failed: ${action}`);
+    throw new Error(isHrHttpError(body) && body.error ? body.error : `API request failed: ${action} (${response.status})`);
   }
 
   return body as T;
+}
+
+function parseResponseBody<T>(bodyText: string): T | string {
+  try {
+    return JSON.parse(bodyText) as T;
+  } catch {
+    return bodyText;
+  }
 }
 
 function isHrHttpError(body: unknown): body is HrHttpError {

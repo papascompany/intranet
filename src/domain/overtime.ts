@@ -1,4 +1,4 @@
-import type { OvertimeOffsetResult } from "./types";
+import type { OvertimeOffsetResult } from "./types.js";
 
 const peakSeasonMonths = new Set([0, 1]);
 

@@ -1,7 +1,7 @@
-import { buildAttendanceRecord, evaluateVerification } from "../domain/attendance";
-import { getLeaveBalance } from "../domain/leave";
-import { offsetOvertimeWithEarlyLeave } from "../domain/overtime";
-import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate";
+import { buildAttendanceRecord, evaluateVerification } from "../domain/attendance.js";
+import { getLeaveBalance } from "../domain/leave.js";
+import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
+import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
 import type {
   AttendanceCorrection,
   AuditLog,
@@ -11,10 +11,10 @@ import type {
   OvertimeRequest,
   PayrollStatement,
   RequestStatus
-} from "../domain/types";
-import { canApproveRequests, isAdminSession, type AuthSession } from "./auth";
-import { InMemoryDatabase } from "./inMemoryDatabase";
-import type { HrRepository } from "./hrRepository";
+} from "../domain/types.js";
+import { canApproveRequests, isAdminSession, type AuthSession } from "./auth.js";
+import { InMemoryDatabase } from "./inMemoryDatabase.js";
+import type { HrRepository } from "./hrRepository.js";
 import type {
   AuditLogFilter,
   ClockAttendanceInput,
@@ -32,7 +32,7 @@ import type {
   UpdateSettingsInput,
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
-} from "./types";
+} from "./types.js";
 
 type Clock = () => string;
 

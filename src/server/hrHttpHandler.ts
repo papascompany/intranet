@@ -1,6 +1,6 @@
-import type { HrApi } from "../api/hrApi";
-import type { AuthSession } from "../api/auth";
-import { createServerHrApi } from "./neonRepositoryFactory";
+import type { HrApi } from "../api/hrApi.js";
+import type { AuthSession } from "../api/auth.js";
+import { createServerHrApi } from "./neonRepositoryFactory.js";
 
 export type HrHttpRequest = {
   method: string;

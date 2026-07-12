@@ -1,4 +1,4 @@
-import type { Employee, EmployeeCustomAdminField, EmployeeCustomAdminFields } from "../domain/types";
+import type { Employee, EmployeeCustomAdminField, EmployeeCustomAdminFields } from "../domain/types.js";
 
 export type EmployeeCardBasicUpdate = {
   employeeNumber?: string;

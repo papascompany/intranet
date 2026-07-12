@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { handleHrHttpRequest } from "../src/server/hrHttpHandler";
+import { handleHrHttpRequest } from "../src/server/hrHttpHandler.js";
 
 type VercelRequest = IncomingMessage & {
   method?: string;
@@ -11,10 +11,22 @@ export default async function handler(request: VercelRequest, response: ServerRe
   const result = await handleHrHttpRequest({
     method: request.method ?? "GET",
     query: request.query,
-    body: request.body
+    body: parseRequestBody(request.body)
   });
 
   response.statusCode = result.status;
   response.setHeader("Content-Type", "application/json; charset=utf-8");
   response.end(JSON.stringify(result.body));
+}
+
+function parseRequestBody(body: unknown) {
+  if (typeof body !== "string") {
+    return body;
+  }
+
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return body;
+  }
 }

@@ -10,9 +10,9 @@ import type {
   PayrollStatement,
   VerificationAttempt,
   Workplace
-} from "../domain/types";
-import type { HrRepository } from "./hrRepository";
-import { defaultSystemPolicy, type SystemPolicy } from "./types";
+} from "../domain/types.js";
+import type { HrRepository } from "./hrRepository.js";
+import { defaultSystemPolicy, type SystemPolicy } from "./types.js";
 
 export type PostgresQuery = <T extends Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>;
 

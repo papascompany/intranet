@@ -9,9 +9,9 @@ import type {
   PayrollStatement,
   VerificationAttempt,
   Workplace
-} from "../domain/types";
-import { defaultSystemPolicy, type SystemPolicy } from "./types";
-import type { HrRepository } from "./hrRepository";
+} from "../domain/types.js";
+import { defaultSystemPolicy, type SystemPolicy } from "./types.js";
+import type { HrRepository } from "./hrRepository.js";
 import {
   auditLogs,
   attendanceRecords,
@@ -22,7 +22,7 @@ import {
   overtimeRequests,
   payrollStatements,
   workplaces
-} from "../domain/seed";
+} from "../domain/seed.js";
 
 export type InMemoryDatabaseSeed = {
   employees?: Employee[];

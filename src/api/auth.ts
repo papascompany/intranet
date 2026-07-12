@@ -1,4 +1,4 @@
-import type { Employee, Role } from "../domain/types";
+import type { Employee, Role } from "../domain/types.js";
 
 export type AuthSession = {
   employeeId: string;

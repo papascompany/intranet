@@ -1,8 +1,8 @@
 import { neon } from "@neondatabase/serverless";
-import { createHrApi, type HrApi } from "../api/hrApi";
-import { InMemoryDatabase } from "../api/inMemoryDatabase";
-import { PostgresHrRepository, type PostgresQuery } from "../api/postgresRepository";
-import type { HrRepository } from "../api/hrRepository";
+import { createHrApi, type HrApi } from "../api/hrApi.js";
+import { InMemoryDatabase } from "../api/inMemoryDatabase.js";
+import { PostgresHrRepository, type PostgresQuery } from "../api/postgresRepository.js";
+import type { HrRepository } from "../api/hrRepository.js";
 
 export type HrServerEnv = {
   DATABASE_URL?: string;
