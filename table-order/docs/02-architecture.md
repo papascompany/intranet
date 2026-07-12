@@ -14,6 +14,7 @@
 | 실시간 | **Supabase Realtime (Broadcast)** + 폴링 폴백 | 별도 WS 서버 없이 매장 채널 pub/sub. 상세: docs/07 | 자체 Socket.io — Vercel 서버리스와 상성 나쁨(상시 프로세스 필요) |
 | 스토리지 | **Supabase Storage** (음식 사진) + Next/Image 최적화 | 업로드 presign, 변환 파이프라인 단순 | S3+CloudFront — MVP 과설계 |
 | 결제 | **토스페이먼츠** (결제위젯 + 빌링) | 국내 표준, 위젯으로 PCI 부담 없음. 상세: docs/08 | 아임포트 — 직접 연동으로 충분 |
+| AI 이미지 생성 | **제공자 어댑터 + 외부 생성 API** (후보: Gemini API(Imagen) / OpenAI gpt-image — M-AI 착수 시 품질·비용 PoC로 확정, docs/12 §7) | 재료 기반 연출컷은 차별 기능이되 특정 벤더 종속은 회피 | 자체 Stable Diffusion 호스팅 — GPU 운영 부담 |
 | 배포 | **Vercel** (앱) + Supabase (DB/Auth/RT/Storage) | 프리뷰 배포가 에이전트 검증 루프와 궁합 | 자체 VPS — 운영 부담 |
 | 모노레포 | **pnpm workspace + Turborepo** | 패키지 경계 = 에이전트 소유권 경계. 병렬 개발 충돌 최소화 | 단일 앱 폴더 — 소유권 경계 모호 |
 
@@ -44,6 +45,7 @@ flowchart LR
     end
 
     TOSS[토스페이먼츠]
+    AIGEN[이미지 생성 API<br/>어댑터 경유]
 
     G -->|QR /s/slug/t/token| MW --> RSC
     G --> API
@@ -56,6 +58,7 @@ flowchart LR
     SRV --> ST
     P --> AUTH
     API <-->|승인/웹훅| TOSS
+    SRV -->|연출컷 생성 잡| AIGEN
 ```
 
 ## 3. 모노레포 구조 (M0 스캐폴드 목표)
@@ -82,6 +85,7 @@ table-order/
 │       │   └── api/                  # Route Handlers               ← backend-api 소유
 │       │       ├── s/[slug]/         #   공개(고객) API
 │       │       ├── admin/            #   관리자 API
+│       │       ├── admin/ai/         #   AI 연출컷 스튜디오 API       ← ai-imagery 소유
 │       │       ├── platform/         #   가입·구독 API
 │       │       └── webhooks/toss/    #   PG 웹훅                    ← payments 소유
 │       ├── middleware.ts             # 테넌트 해석·인증 가드         ← auth-tenancy 소유
@@ -89,7 +93,8 @@ table-order/
 │       │   ├── server/               # 도메인 서비스·repository      ← backend-api 소유
 │       │   ├── auth/                 # 세션·역할·테넌트 컨텍스트     ← auth-tenancy 소유
 │       │   ├── realtime/             # publish/subscribe 훅         ← realtime 소유
-│       │   └── payments/             # 토스 클라이언트·정산 로직     ← payments 소유
+│       │   ├── payments/             # 토스 클라이언트·정산 로직     ← payments 소유
+│       │   └── ai/                   # 프롬프트 템플릿·생성 어댑터·잡 ← ai-imagery 소유
 │       └── tests/                    # 통합·E2E(Playwright)         ← qa 소유
 ├── packages/
 │   ├── db/                           # Prisma schema·client·seed    ← db-schema 소유
@@ -137,6 +142,7 @@ table-order/
 2. 업로드 완료 콜백에서 서버가 변환 잡: 리사이즈 3종(2048/1024/480 w, WebP/AVIF), blurhash(→ `MenuImage.blurDataUrl`), 지배색 추출(→ 텍스트 스크림 색 결정)
 3. 룩북은 `next/image` + `sizes` 지정, 커버·첫 화면 이미지만 `priority`, 나머지 lazy
 4. 성능 예산: 첫 뷰포트 이미지 총량 < 400KB, LCP 이미지는 AVIF 우선
+5. **AI 생성 이미지도 동일 파이프라인 합류**: 후보 선택 시 2번의 변환 잡을 그대로 태워 `MenuImage(source=AI_GENERATED)`로 저장 (생성·검수 플로우는 docs/12)
 
 ## 7. 환경/배포
 

@@ -16,6 +16,7 @@ flowchart TD
     O --> RT[realtime<br/>src/realtime]
     O --> AT[auth-tenancy<br/>src/auth, middleware, app/(platform)]
     O --> PAY[payments<br/>src/payments, webhooks]
+    O --> AII[ai-imagery<br/>src/ai, api/admin/ai]
     O --> QA[qa<br/>tests — 전 영역 읽기 전용]
 ```
 
@@ -33,6 +34,7 @@ flowchart TD
 | `realtime` | 3초 알림 + 유실 0 폴백 상태기계 | `apps/web/src/realtime/**` | 07 | qa(단절 시나리오) |
 | `auth-tenancy` | 인증·테넌트 격리·온보딩·플랜 게이트 | `apps/web/src/auth/**`, `apps/web/middleware.ts`, `apps/web/app/(platform)/**` | 02 §4-5, 09 | qa(격리 테스트) |
 | `payments` | 돈이 맞는 결제·환불·빌링 | `apps/web/src/payments/**`, `apps/web/app/api/webhooks/**` | 08 | qa(방어 규칙) |
+| `ai-imagery` | 재료 입력→화보급 실사 연출컷 생성 파이프라인 | `apps/web/src/ai/**`, `apps/web/app/api/admin/ai/**` | 12 | qa(크레딧·노출 차단) + 오케스트레이터(품질 블라인드 평가) |
 | `qa` | 계약·불변식·수용 기준을 테스트로 고정 | `apps/web/tests/**`, `packages/*/tests/**`, `*.test.ts`(전 위치) | 전부(§9 수용 기준 위주) | 오케스트레이터 |
 
 **공유 자원 규칙**:
@@ -77,7 +79,12 @@ flowchart LR
         PAY5[payments: 빌링·dunning]
         POS5[pos-ui: 통계·설정]
     end
+    subgraph MAI[M-AI 병렬 트랙 — M2 이후 아무 마일스톤과도 병렬]
+        AIP[ai-imagery: PoC·생성 파이프라인] --> POSA[pos-ui: 스튜디오·라벨 에디터]
+        AIP --> LBA[lookbook-ui: 분해컷 라벨 렌더러]
+    end
     M1 --> M2 --> M3 --> M4 --> M5 --> M6[M6 qa 주도 하드닝]
+    M2 --> MAI --> M6
 ```
 
 같은 서브그래프 안에서 화살표가 없는 노드끼리는 **병렬**이다. (M1: 3개 병렬 / M2: UI 2개 병렬 / M3: POS·룩북 병렬 / M4·M5: 3개 병렬)

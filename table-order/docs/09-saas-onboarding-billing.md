@@ -38,8 +38,9 @@
 | 통계 | 기본 | 기본 | 고급(시간대·회전율) |
 | 테마 | 전체 | 프리셋만 | 전체 + 포컬포인트 |
 | 직원 계정 | 5 | 3 | 무제한 |
+| AI 연출컷 크레딧 | 10회(체험) | 애드온 구매 | 50회/월 |
 
-- 구현: `packages/shared/src/contracts/platform.ts`의 `PLAN_LIMITS: Record<PlanType, PlanLimits>` 단일 상수. 서버는 생성 API에서 한도 검사(`PLAN_LIMIT_EXCEEDED`), POS는 게이지·업그레이드 CTA 표시. 게이트 검사 헬퍼 `assertWithinPlan(ctx, "tables" | "items" | ...)`는 backend-api가 제공.
+- 구현: `packages/shared/src/contracts/platform.ts`의 `PLAN_LIMITS: Record<PlanType, PlanLimits>` 단일 상수. 서버는 생성 API에서 한도 검사(`PLAN_LIMIT_EXCEEDED`), POS는 게이지·업그레이드 CTA 표시. 게이트 검사 헬퍼 `assertWithinPlan(ctx, "tables" | "items" | "aiCredits" | ...)`는 backend-api가 제공(AI 크레딧의 차감·실패 환불 정합은 ai-imagery 소유, docs/12 §6).
 - 다운그레이드 시 초과분은 삭제하지 않고 **읽기 전용 잠금**(신규 생성만 차단) — 데이터 파괴 금지 원칙.
 - 구독 상태별 접근 매트릭스: TRIALING/ACTIVE=전체, PAST_DUE=전체+배너, SUSPENDED=POS 결제설정만 접근 가능·룩북은 안내 페이지(docs/08 §5 dunning).
 

@@ -18,7 +18,8 @@ erDiagram
     TableSession ||--o{ Payment : "정산"
     TableSession ||--o{ StaffCall : "호출"
     MenuCategory ||--o{ MenuItem : ""
-    MenuItem ||--o{ MenuImage : "사진"
+    MenuItem ||--o{ MenuImage : "사진(업로드·AI)"
+    MenuItem ||--o{ AiImageJob : "AI 연출컷 잡"
     MenuItem ||--o{ OptionGroup : ""
     OptionGroup ||--o{ OptionChoice : ""
     Order ||--o{ OrderItem : ""
@@ -88,6 +89,7 @@ model Subscription {
   currentPeriodEnd DateTime?
   billingKey       String?            // 토스 빌링키 (암호화 저장)
   failCount        Int                @default(0)
+  aiCreditsUsed    Int                @default(0)  // 월 주기 리셋 — 한도는 PLAN_LIMITS.aiCreditsMonthly
   store            Store              @relation(fields: [storeId], references: [id])
 }
 
@@ -157,12 +159,14 @@ model MenuItem {
   isHidden    Boolean   @default(false)
   deletedAt   DateTime?             // soft delete (N-8)
   sortOrder   Int       @default(0)
+  ingredients Json?                 // [{name, note?, emphasize?}] — 재료·구성 표기 겸 AI 연출컷 입력(docs/12)
   i18n        Json?                 // 다국어 예약 (백로그)
   store       Store     @relation(fields: [storeId], references: [id])
   category    MenuCategory @relation(fields: [categoryId], references: [id])
   images      MenuImage[]
   optionGroups OptionGroup[]
   orderItems  OrderItem[]
+  aiJobs      AiImageJob[]
 
   @@index([storeId, categoryId, sortOrder])
 }
@@ -178,10 +182,38 @@ model MenuImage {
   width       Int
   height      Int
   sortOrder   Int     @default(0)
+  source      ImageSource @default(UPLOAD)
+  aiJobId     String?             // 생성 출처 잡 (source=AI_GENERATED)
+  labels      Json?               // 분해컷 재료 라벨 [{text, x, y}] — 렌더 스펙은 docs/05 §5
   item        MenuItem @relation(fields: [itemId], references: [id])
 
   @@index([itemId, sortOrder])
 }
+
+enum ImageSource { UPLOAD AI_GENERATED }
+
+model AiImageJob {
+  id          String       @id @default(cuid())
+  storeId     String
+  itemId      String
+  style       AiImageStyle
+  mood        String?              // "dark-wood" | "hanji-light" | "stone" ...
+  prompt      String               // 최종 프롬프트 스냅샷 (재현성·감사)
+  provider    String               // "imagen" | "gpt-image" ...
+  status      AiJobStatus  @default(QUEUED)
+  candidates  Json         @default("[]")  // admin 전용 Storage URL 목록
+  selectedUrl String?
+  creditCost  Int          @default(1)
+  error       String?
+  createdAt   DateTime     @default(now())
+  finishedAt  DateTime?
+  item        MenuItem     @relation(fields: [itemId], references: [id])
+
+  @@index([storeId, createdAt])
+}
+
+enum AiImageStyle { HERO DECONSTRUCTED CLOSEUP }
+enum AiJobStatus { QUEUED GENERATING READY SELECTED DISCARDED FAILED }
 
 model OptionGroup {
   id        String  @id @default(cuid())
@@ -365,8 +397,9 @@ stateDiagram-v2
 | I-5 | 세션 CLOSE 조건: `Σ payments(PAID).amount ≥ Σ orders(CONFIRMED 이상, 취소 제외).totalAmount` |
 | I-6 | 모든 조회/변경은 storeId 스코프 (02 §5) |
 | I-7 | `orderNo`는 매장×영업일 단위 단조 증가 (트랜잭션 내 카운터, 동시 주문 안전) |
+| I-8 | AI 생성 이미지는 운영자 **선택·승인 전(MenuImage 확정 전)에는 고객 표면에 절대 노출되지 않는다** — 후보 URL은 admin 전용 경로에만 존재 |
 
 ## 5. 마이그레이션·시드 정책
 
 - 마이그레이션은 `prisma migrate dev` 산출물을 커밋(리뷰 대상). 파괴적 변경(컬럼 삭제 등)은 expand→migrate→contract 3단계.
-- **시드(필수 산출물)**: 데모 매장 1개 — 슬러그 `demo`, 테이블 8개, 카테고리 4개(시그니처/브런치/디저트/음료), 메뉴 18개(플레이스홀더 이미지 + blurhash), 옵션그룹 예시, 진행중 세션·주문 샘플. 모든 UI 에이전트는 이 시드로 개발·스크린샷한다.
+- **시드(필수 산출물)**: 데모 매장 1개 — 슬러그 `demo`, 테이블 8개, 카테고리 4개(시그니처/브런치/디저트/음료), 메뉴 18개(플레이스홀더 이미지 + blurhash), 옵션그룹 예시, 진행중 세션·주문 샘플, **AI 분해컷 샘플 1개(라벨 데이터 포함, source=AI_GENERATED)**. 모든 UI 에이전트는 이 시드로 개발·스크린샷한다.

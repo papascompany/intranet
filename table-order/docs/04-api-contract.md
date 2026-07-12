@@ -14,7 +14,7 @@
 
 ### 에러 코드 enum (`packages/shared/src/contracts/errors.ts`)
 
-`UNAUTHORIZED` `FORBIDDEN_TENANT` `FORBIDDEN_ROLE` `NOT_FOUND` `VALIDATION_FAILED` `SOLD_OUT` `STORE_CLOSED` `SESSION_CLOSED` `INVALID_TRANSITION` `RATE_LIMITED` `IDEMPOTENCY_CONFLICT` `PAYMENT_FAILED` `PLAN_LIMIT_EXCEEDED` `INTERNAL`
+`UNAUTHORIZED` `FORBIDDEN_TENANT` `FORBIDDEN_ROLE` `NOT_FOUND` `VALIDATION_FAILED` `SOLD_OUT` `STORE_CLOSED` `SESSION_CLOSED` `INVALID_TRANSITION` `RATE_LIMITED` `IDEMPOTENCY_CONFLICT` `PAYMENT_FAILED` `PLAN_LIMIT_EXCEEDED` `AI_CREDIT_EXHAUSTED` `AI_GENERATION_FAILED` `INTERNAL`
 
 ## 2. 공개(고객) API — `/api/s/[slug]/**`
 
@@ -76,6 +76,11 @@
 | `PATCH /api/admin/items/[id]/sold-out` | 품절 토글 `{ isSoldOut }` → menu.updated 이벤트 | STAFF |
 | `POST /api/admin/media/presign` | 이미지 업로드 presign | MANAGER |
 | `POST /api/admin/media/commit` | 업로드 완료 → 변환(리사이즈·blurhash) 트리거 | MANAGER |
+| `POST /api/admin/ai/items/[id]/jobs` | AI 연출컷 잡 시작 `{ style: HERO\|DECONSTRUCTED\|CLOSEUP, mood?, emphasize? }` — 크레딧 차감 | MANAGER |
+| `GET /api/admin/ai/jobs/[id]` | 잡 상태·후보 폴링 (QUEUED→GENERATING→READY) | MANAGER |
+| `POST /api/admin/ai/jobs/[id]/select` | 후보 확정 `{ candidateIndex, labels? }` → 변환 파이프라인 → MenuImage 생성 | MANAGER |
+| `POST /api/admin/ai/jobs/[id]/discard` | 후보 전체 폐기 | MANAGER |
+| `GET /api/admin/ai/credits` | 잔여 크레딧·플랜 한도 | STAFF |
 | `GET/POST/PATCH /api/admin/tables[/id]` | 테이블 CRUD, `POST /[id]/rotate-qr` 토큰 회전 | MANAGER |
 | `GET /api/admin/tables/qr-sheet` | 전체 테이블 QR 인쇄 PDF | MANAGER |
 | `PATCH /api/admin/calls/[id]` | 호출 완료 처리 | STAFF |
@@ -115,4 +120,5 @@ table.ts         // TableInput, QrSheetResponse
 payment.ts       // TossConfirmInput, PaymentResponse
 platform.ts      // SignupInput, OnboardingStepInput, PlanLimits
 realtime.ts      // RealtimeEvent 유니온 (docs/07 §3과 1:1)
+ai-imagery.ts    // AiJobInput·AiJobStatusResponse·IngredientLabel (docs/12)
 ```
