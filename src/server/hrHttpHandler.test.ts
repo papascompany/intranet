@@ -74,6 +74,33 @@ describe("hrHttpHandler", () => {
     });
   });
 
+  it("routes POST lookup actions with session payloads", async () => {
+    const response = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "getEmployeeDirectory",
+          payload: {
+            session: {
+              employeeId: "emp-ops-1",
+              role: "EMPLOYEE",
+              authenticatedAt: "2026-07-12T09:00:00+09:00",
+              rememberLogin: false
+            }
+          }
+        }
+      },
+      api()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual([
+      expect.objectContaining({
+        id: "emp-ops-1"
+      })
+    ]);
+  });
+
   it("returns a 400 response for unsupported actions", async () => {
     const response = await handleHrHttpRequest(
       {

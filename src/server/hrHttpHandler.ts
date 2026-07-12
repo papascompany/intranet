@@ -1,4 +1,5 @@
 import type { HrApi } from "../api/hrApi";
+import type { AuthSession } from "../api/auth";
 import { createServerHrApi } from "./neonRepositoryFactory";
 
 export type HrHttpRequest = {
@@ -63,6 +64,20 @@ async function handlePost(request: HrHttpRequest, api: HrApi) {
   const body = request.body as { action?: string; payload?: unknown } | undefined;
 
   switch (body?.action) {
+    case "getEmployees":
+      return await api.getEmployees();
+    case "getEmployeeDirectory":
+      return await api.getEmployeeDirectory(body.payload as never);
+    case "getDashboard":
+      return await api.getDashboard(body.payload as never);
+    case "getEmployeeSnapshot": {
+      const payload = body.payload as { employeeId: string; asOf?: string; session?: AuthSession };
+      return await api.getEmployeeSnapshot(payload.employeeId, payload.asOf, payload.session);
+    }
+    case "getSettings":
+      return await api.getSettings(body.payload as never);
+    case "getAuditLogs":
+      return await api.getAuditLogs(body.payload as never);
     case "clockAttendance":
       return await api.clockAttendance(body.payload as never);
     case "submitLeaveRequest":

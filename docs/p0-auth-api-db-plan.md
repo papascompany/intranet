@@ -21,13 +21,13 @@
 - `src/api/postgresRepository.ts`: Neon/Vercel Postgres에 붙일 SQL repository, snake/camel 변환, soft delete 필터, 감사 로그 저장 구현.
 - `src/server/neonRepositoryFactory.ts`: `DATABASE_URL`이 있으면 Neon Postgres, 없으면 데모용 메모리 저장소를 선택하는 서버 전용 factory 추가.
 - `src/server/hrHttpHandler.ts`, `api/hr.ts`: Vercel Serverless Function에서 `HrApi`를 호출하는 HTTP API 표면 추가.
-- `src/App.tsx`: 로그인 시 `AuthSession`을 만들고 모든 주요 API 호출에 전달.
+- `src/api/hrHttpClient.ts`, `src/App.tsx`: 프론트엔드는 `/api/hr` HTTP client를 통해 API를 호출한다. Vite 단독 개발 서버에서 `/api/hr`가 404인 경우에만 메모리 API fallback을 사용한다.
 - `database/migrations/202607110001_neon_hr_schema.sql`: Neon Postgres 초기 스키마 추가.
 
 ## 다음 구현 단위
 
 1. Neon 프로젝트를 Vercel Marketplace에서 연결하고 `DATABASE_URL`을 Vercel env로 주입.
-2. 프론트엔드의 직접 `HrApi` 호출을 `/api/hr` HTTP client로 교체해 DB 접근을 서버로 완전히 이동.
+2. Vercel/Neon 연결 후 `/api/hr`가 실제 `DATABASE_URL` 기반 저장소를 사용하는지 staging 환경에서 검증.
 3. 실제 인증 provider(Auth.js/Clerk/Better Auth 등)로 데모 계정 선택 UI 교체.
 4. 급여명세서 PDF는 Vercel Blob에 저장하고 metadata는 `payroll_statements`에 보관.
 5. 민감 필드는 애플리케이션 계층 암호화 후 `*_enc` 컬럼에 저장.

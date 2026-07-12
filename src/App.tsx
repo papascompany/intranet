@@ -34,7 +34,7 @@ import {
   updateSettings,
   updateRequestStatus,
   uploadPayrollStatement
-} from "./api/hrApi";
+} from "./api/hrHttpClient";
 import type { Dashboard, EmployeeSnapshot } from "./api/types";
 import { createDemoAuthSession, isAdminSession, type AuthSession } from "./api/auth";
 import {
