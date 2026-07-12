@@ -5,6 +5,7 @@ import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
 import type {
   AttendanceCorrection,
   AuditLog,
+  DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   LeaveRequest,
@@ -24,11 +25,13 @@ import type {
   DownloadPayrollStatementInput,
   DownloadPayrollStatementResult,
   EmployeeSnapshot,
+  GetDailyWorkTasksInput,
   SetOvertimePayApprovalInput,
   SoftDeletePayrollStatementInput,
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
   UpdateEmployeeCardInput,
+  UpdateDailyWorkTaskStatusInput,
   UpdateSettingsInput,
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
@@ -142,6 +145,7 @@ export class HrApi {
       workplaceOptions,
       correctionRows,
       payrollStatementRows,
+      dailyWorkTaskRows,
       auditLogs
     ] = await Promise.all([
       this.db.listEmployees(),
@@ -152,6 +156,7 @@ export class HrApi {
       this.db.listWorkplaces(),
       this.db.listCorrections(),
       this.db.listPayrollStatements(false),
+      this.db.listDailyWorkTasks(),
       this.db.listAuditLogs()
     ]);
     const employee = employees.find((item) => item.id === employeeId);
@@ -190,10 +195,44 @@ export class HrApi {
         : undefined,
       attendanceCorrections: correctionRows.filter((correction) => correction.employeeId === employeeId),
       payrollStatements: payrollStatementRows.filter((statement) => statement.employeeId === employeeId),
+      dailyWorkTasks: dailyWorkTaskRows.filter((task) => task.employeeId === employeeId && task.date === asOf.slice(0, 10)),
       recentAuditLogs: auditLogs
         .filter((log) => log.actorId === employeeId || log.targetId.includes(employeeId))
         .slice(0, 10)
     };
+  }
+
+  async getDailyWorkTasks(input: GetDailyWorkTasksInput) {
+    await this.assertCanReadEmployee(input.employeeId, input.session);
+    const date = input.date ?? this.clock().slice(0, 10);
+    return (await this.db.listDailyWorkTasks())
+      .filter((task) => task.employeeId === input.employeeId && task.date === date)
+      .sort((left, right) => left.displayOrder - right.displayOrder || left.id.localeCompare(right.id));
+  }
+
+  async updateDailyWorkTaskStatus(input: UpdateDailyWorkTaskStatusInput) {
+    const task = await this.findDailyWorkTask(input.taskId);
+    const actorId = this.resolveActorId(input, task.employeeId);
+    await this.assertEmployee(actorId);
+    if (actorId !== task.employeeId) {
+      throw new Error(`Daily work task access denied: ${actorId} -> ${task.id}`);
+    }
+
+    const updated: DailyWorkTask = {
+      ...task,
+      status: input.status,
+      completedAt: input.status === "DONE" ? input.completedAt ?? this.clock() : undefined
+    };
+    const saved = await this.db.updateDailyWorkTask(updated);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "DAILY_WORK_TASK_STATUS_UPDATED",
+      targetType: "DailyWorkTask",
+      targetId: saved.id,
+      detail: `${task.status} -> ${saved.status}`
+    });
+
+    return { task: saved, auditLog };
   }
 
   async updateEmployeeCard(input: UpdateEmployeeCardInput) {
@@ -669,6 +708,15 @@ export class HrApi {
 
     return request;
   }
+
+  private async findDailyWorkTask(taskId: string) {
+    const task = (await this.db.listDailyWorkTasks()).find((item) => item.id === taskId);
+    if (!task) {
+      throw new Error(`Daily work task not found: ${taskId}`);
+    }
+
+    return task;
+  }
 }
 
 export function createHrApi(db: HrRepository = new InMemoryDatabase(), clock: Clock = defaultClock) {
@@ -693,6 +741,8 @@ export const getEmployees = defaultHrApi.getEmployees.bind(defaultHrApi);
 export const getEmployeeDirectory = defaultHrApi.getEmployeeDirectory.bind(defaultHrApi);
 export const getDashboard = defaultHrApi.getDashboard.bind(defaultHrApi);
 export const getEmployeeSnapshot = defaultHrApi.getEmployeeSnapshot.bind(defaultHrApi);
+export const getDailyWorkTasks = defaultHrApi.getDailyWorkTasks.bind(defaultHrApi);
+export const updateDailyWorkTaskStatus = defaultHrApi.updateDailyWorkTaskStatus.bind(defaultHrApi);
 export const updateEmployeeCard = defaultHrApi.updateEmployeeCard.bind(defaultHrApi);
 export const getSettings = defaultHrApi.getSettings.bind(defaultHrApi);
 export const updateSettings = defaultHrApi.updateSettings.bind(defaultHrApi);

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDashboard, getEmployees, submitLeaveRequest } from "./hrHttpClient";
+import { getDailyWorkTasks, getDashboard, getEmployees, submitLeaveRequest, updateDailyWorkTaskStatus } from "./hrHttpClient";
 
 const originalFetch = globalThis.fetch;
 
@@ -61,5 +61,28 @@ describe("hrHttpClient", () => {
 
     expect(dashboard.asOf).toBe("2026-07-12T09:00:00+09:00");
     expect(dashboard.employeesTotal).toBeGreaterThan(0);
+  });
+
+  it("posts daily work task lookup and status actions", async () => {
+    const fetch = mockFetch(200, { task: { id: "daily-task-prod-1", status: "DONE" }, auditLog: { id: "audit-3" } });
+
+    await getDailyWorkTasks({ employeeId: "emp-prod-1", date: "2026-07-12" });
+    const result = await updateDailyWorkTaskStatus({ taskId: "daily-task-prod-1", status: "DONE" });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/hr",
+      expect.objectContaining({
+        body: JSON.stringify({ action: "getDailyWorkTasks", payload: { employeeId: "emp-prod-1", date: "2026-07-12" } })
+      })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/hr",
+      expect.objectContaining({
+        body: JSON.stringify({ action: "updateDailyWorkTaskStatus", payload: { taskId: "daily-task-prod-1", status: "DONE" } })
+      })
+    );
+    expect(result.task.status).toBe("DONE");
   });
 });

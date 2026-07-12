@@ -160,6 +160,18 @@ export type UpdateEmployeeCardInput = AuthenticatedInput & {
   reason?: string;
 };
 
+export type GetDailyWorkTasksInput = AuthenticatedInput & {
+  employeeId: string;
+  date?: string;
+};
+
+export type UpdateDailyWorkTaskStatusInput = AuthenticatedInput & {
+  taskId: string;
+  status: import("../domain/types.js").DailyWorkTaskStatus;
+  actorId?: string;
+  completedAt?: string;
+};
+
 export type AuditLogFilter = AuthenticatedInput & {
   actorId?: string;
   targetType?: string;
@@ -196,5 +208,6 @@ export type EmployeeSnapshot = {
   overtimeOffset?: OvertimeOffsetResult;
   attendanceCorrections: AttendanceCorrection[];
   payrollStatements: PayrollStatement[];
+  dailyWorkTasks: import("../domain/types.js").DailyWorkTask[];
   recentAuditLogs: AuditLog[];
 };

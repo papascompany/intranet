@@ -173,6 +173,20 @@ export type PayrollStatement = {
   deleteReason?: string;
 };
 
+export type DailyWorkTaskStatus = "TODO" | "IN_PROGRESS" | "DONE";
+
+export type DailyWorkTask = {
+  id: string;
+  employeeId: string;
+  department: Department;
+  date: string;
+  title: string;
+  dueLabel?: string;
+  displayOrder: number;
+  status: DailyWorkTaskStatus;
+  completedAt?: string;
+};
+
 export type AuditLog = {
   id: string;
   actorId: string;

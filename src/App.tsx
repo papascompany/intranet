@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BadgeCheck,
   CalendarDays,
+  Check,
+  CircleCheck,
   ClipboardCheck,
   Clock,
   Download,
@@ -31,6 +33,7 @@ import {
   submitLeaveRequest,
   submitOvertimeRequest,
   updateEmployeeCard,
+  updateDailyWorkTaskStatus,
   updateSettings,
   updateRequestStatus,
   uploadPayrollStatement
@@ -50,7 +53,7 @@ import {
   Toolbar,
   type DataTableColumn
 } from "./components/erp";
-import type { ClockType, Employee, VerificationMethod } from "./domain/types";
+import type { ClockType, DailyWorkTask, Employee, VerificationMethod } from "./domain/types";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
 import {
@@ -60,7 +63,7 @@ import {
   type ErpViewModelRow
 } from "./features/erpViewModel";
 
-const today = "2026-07-08T08:02:00+09:00";
+const today = "2026-07-12T08:02:00+09:00";
 
 const navIcons: Record<ErpActiveSection, React.ReactNode> = {
   "self-service": <Fingerprint size={16} />,
@@ -240,12 +243,13 @@ function App() {
   async function clock(type: ClockType, method: VerificationMethod, gpsError = false) {
     if (!selectedEmployee) return;
 
+    const workDate = today.slice(0, 10);
     const now =
       type === "CLOCK_IN"
-        ? "2026-07-08T08:02:00+09:00"
+        ? `${workDate}T08:02:00+09:00`
         : method === "GPS"
-          ? "2026-07-08T16:42:00+09:00"
-          : "2026-07-08T16:48:00+09:00";
+          ? `${workDate}T16:42:00+09:00`
+          : `${workDate}T16:48:00+09:00`;
     const result = await clockAttendance({
       employeeId: selectedEmployee.id,
       type,
@@ -257,6 +261,22 @@ function App() {
     });
 
     setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}`);
+    await refresh(selectedEmployee.id);
+  }
+
+  async function updateDailyTask(task: DailyWorkTask) {
+    if (!selectedEmployee) return;
+
+    const nextStatus = task.status === "DONE" ? "TODO" : "DONE";
+    const result = await updateDailyWorkTaskStatus({
+      taskId: task.id,
+      status: nextStatus,
+      actorId: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined,
+      completedAt: nextStatus === "DONE" ? today : undefined
+    });
+
+    setNotice(nextStatus === "DONE" ? `작업 완료 · ${result.task.title}` : `완료 취소 · ${result.task.title}`);
     await refresh(selectedEmployee.id);
   }
 
@@ -519,8 +539,8 @@ function App() {
         }
       >
         <Toolbar
-          title={sectionTitle(activeSection)}
-          description={notice}
+          title={effectiveMode === "EMPLOYEE" && activeSection === "self-service" ? "오늘의 업무" : sectionTitle(activeSection)}
+          description={effectiveMode === "EMPLOYEE" && activeSection === "self-service" ? "필요한 일만 빠르게 확인하고 처리하세요." : notice}
           actions={
             <InlineActions>
               <button disabled={isLoading} onClick={() => void refresh()}>
@@ -532,11 +552,13 @@ function App() {
 
         {erpViewModel ? (
           <>
-            <KpiGrid>
-              {erpViewModel.kpis.map((kpi) => (
-                <KpiTile icon={iconForKpi(kpi.id)} key={kpi.id} label={kpi.label} value={kpi.value} footer={kpi.meta} />
-              ))}
-            </KpiGrid>
+            {effectiveMode === "ADMIN" ? (
+              <KpiGrid>
+                {erpViewModel.kpis.map((kpi) => (
+                  <KpiTile icon={iconForKpi(kpi.id)} key={kpi.id} label={kpi.label} value={kpi.value} footer={kpi.meta} />
+                ))}
+              </KpiGrid>
+            ) : null}
             {renderSection({
               activeSection,
               employeeViewModel,
@@ -545,6 +567,7 @@ function App() {
               onApproveLeave: approveLeave,
               onApproveOvertime: approveOvertime,
               onClock: clock,
+              onUpdateDailyTask: updateDailyTask,
               onCreateCorrection: createCorrection,
               onDownloadPayroll: downloadPayroll,
               onDeletePayroll: deletePayroll,
@@ -575,6 +598,7 @@ function renderSection(props: {
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
+  onUpdateDailyTask: (task: DailyWorkTask) => void;
   onCreateCorrection: () => void;
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string) => void;
@@ -659,86 +683,109 @@ function SelfServiceSection(props: {
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
+  onUpdateDailyTask: (task: DailyWorkTask) => void;
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
 }) {
   const employee = props.erpViewModel.employeeSummary;
+  const attendance = props.employeeViewModel;
+  const dailyTasks = props.erpViewModel.dailyWorkTasks;
+  const incompleteTasks = dailyTasks.filter((task) => task.status !== "DONE");
+  const completedTasks = dailyTasks.filter((task) => task.status === "DONE");
+  const nextClockAction = attendance?.clockInLabel === "출근 기록 없음"
+    ? { label: "출근 체크", type: "CLOCK_IN" as const, time: "근무 시작을 기록합니다" }
+    : attendance?.clockOutLabel === "퇴근 기록 없음"
+      ? { label: "퇴근 체크", type: "CLOCK_OUT" as const, time: "오늘 근무를 마무리합니다" }
+      : null;
+  const payrollNotice = payrollNoticeForToday(today);
 
   return (
-    <div className="erp-two-column">
-      <DetailPanel
-        title={`${employee.name} 셀프서비스`}
-        description={`${employee.department} · ${employee.role} · ${employee.pilotLabel}`}
-        actions={
-          <InlineActions>
-            <button disabled={props.isLoading} onClick={() => props.onClock("CLOCK_IN", "GPS")}>
-              <MapPin size={14} />
-              출근
+    <div className="my-day">
+      <section className="my-day__hero" aria-label="오늘의 출퇴근">
+        <div className="my-day__intro">
+          <p className="eyebrow">{formatToday(today)} · {employee.department}</p>
+          <h2>{employee.name}님, 오늘도 반갑습니다.</h2>
+          <p>{nextClockAction?.time ?? "오늘 출퇴근 기록이 모두 완료되었습니다."}</p>
+        </div>
+        <div className="attendance-check-area">
+          {nextClockAction ? (
+            <button
+              className="attendance-check"
+              disabled={props.isLoading}
+              onClick={() => props.onClock(nextClockAction.type, "GPS")}
+            >
+              <CircleCheck size={24} />
+              <span>{nextClockAction.label}</span>
             </button>
-            <button disabled={props.isLoading} onClick={() => props.onClock("CLOCK_OUT", "GPS")}>
-              <Clock size={14} />
-              퇴근
-            </button>
-            <button disabled={props.isLoading} onClick={() => props.onClock("CLOCK_IN", "QR", true)}>
-              <QrCode size={14} />
-              QR
-            </button>
-            <button disabled={props.isLoading} onClick={() => props.onClock("CLOCK_OUT", "MANUAL_CLICK", true)}>
-              <TimerReset size={14} />
-              GPS 실패
-            </button>
-          </InlineActions>
-        }
-      >
-        <KpiGrid minTileWidth="150px">
-          <KpiTile label="출근" value={props.employeeViewModel?.clockInLabel ?? "--:--"} />
-          <KpiTile label="퇴근" value={props.employeeViewModel?.clockOutLabel ?? "--:--"} />
-          <KpiTile label="근태 상태" value={props.employeeViewModel?.statusLabel ?? "준비 중"} />
-          <KpiTile label="상계" value={props.employeeViewModel?.offsetLabel ?? "-"} />
-        </KpiGrid>
-      </DetailPanel>
+          ) : (
+            <div className="attendance-complete"><Check size={20} /> 오늘 근태 완료</div>
+          )}
+          {nextClockAction ? (
+            <div className="attendance-alternatives">
+              <span>GPS가 어렵다면</span>
+              <button disabled={props.isLoading} onClick={() => props.onClock(nextClockAction.type, "QR", true)} title="QR 인증">
+                <QrCode size={15} /> QR
+              </button>
+              <button disabled={props.isLoading} onClick={() => props.onClock(nextClockAction.type, "MANUAL_CLICK", true)} title="수동 인증">
+                <TimerReset size={15} /> 수동
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <dl className="attendance-summary">
+          <div><dt>출근</dt><dd>{attendance?.clockInLabel ?? "--:--"}</dd></div>
+          <div><dt>퇴근</dt><dd>{attendance?.clockOutLabel ?? "--:--"}</dd></div>
+          <div><dt>상태</dt><dd>{attendance?.statusLabel ?? "기록 준비 중"}</dd></div>
+        </dl>
+      </section>
 
-      <DetailPanel
-        title="신청"
-        description="직원 신청은 승인 대기 업무 큐로 이동합니다."
-        actions={
-          <InlineActions>
-            <button disabled={props.isLoading} onClick={props.onSubmitLeave}>
-              휴가 신청
-            </button>
-            <button disabled={props.isLoading} onClick={props.onSubmitOvertime}>
-              야근 신청
-            </button>
-          </InlineActions>
-        }
-      >
-        <DataTable
-          columns={rowColumns}
-          rows={[
-            {
-              id: "leave-summary",
-              label: "휴가",
-              value: props.employeeViewModel?.pendingLeaveSummary ?? "로딩 중",
-              meta: props.employeeViewModel?.leaveAvailableLabel ?? "-",
-              status: "PENDING"
-            },
-            {
-              id: "overtime-summary",
-              label: "야근",
-              value: props.employeeViewModel?.pendingOvertimeSummary ?? "로딩 중",
-              meta: props.employeeViewModel?.overtimeSummary ?? "-",
-              status: "PENDING"
-            },
-            {
-              id: "payroll-summary",
-              label: "급여",
-              value: props.employeeViewModel?.payrollSummary ?? "로딩 중",
-              meta: "본인 명세서만 표시",
-              status: "ACTIVE"
-            }
-          ]}
-        />
-      </DetailPanel>
+      <div className="my-day__content">
+        <DetailPanel
+          title={employee.department === "제작팀" ? "오늘의 제작 플랜" : "오늘의 업무 계획"}
+          description={employee.department === "제작팀" ? "현장·편집·납품 순서로 오늘의 제작 흐름을 확인합니다." : "우선순위에 따라 내 담당 업무를 처리합니다."}
+        >
+          <div className="task-progress">
+            <strong>내 작업 {dailyTasks.length}건</strong>
+            <span>완료 {completedTasks.length} · 남음 {incompleteTasks.length}</span>
+          </div>
+          <div className="daily-task-list">
+            {dailyTasks.map((task) => (
+              <article className={`daily-task is-${task.status.toLowerCase()}`} key={task.id}>
+                <button
+                  aria-label={`${task.title} ${task.status === "DONE" ? "완료 취소" : "완료 처리"}`}
+                  className="task-check"
+                  disabled={props.isLoading}
+                  onClick={() => props.onUpdateDailyTask(task)}
+                >
+                  {task.status === "DONE" ? <Check size={16} /> : null}
+                </button>
+                <div>
+                  <strong>{task.title}</strong>
+                  <span>{taskPlanHint(task)}</span>
+                </div>
+                <small>{task.dueLabel}</small>
+              </article>
+            ))}
+            {dailyTasks.length === 0 ? <EmptyState title="오늘 배정된 작업이 없습니다." /> : null}
+          </div>
+        </DetailPanel>
+
+        <div className="my-day__aside">
+          <DetailPanel title="내 일정" description="자주 쓰는 신청만 간단히 처리합니다.">
+            <div className="quick-actions">
+              <button disabled={props.isLoading} onClick={props.onSubmitLeave}><CalendarDays size={16} /> 휴가 신청</button>
+              <button disabled={props.isLoading} onClick={props.onSubmitOvertime}><Clock size={16} /> 야근 신청</button>
+            </div>
+            <p className="leave-summary">{attendance?.leaveAvailableLabel ?? "연차 정보를 불러오는 중"}</p>
+          </DetailPanel>
+          <DetailPanel title="급여명세서" description={payrollNotice.description}>
+            <div className={`payroll-notice ${payrollNotice.isNoticeDay ? "is-active" : ""}`}>
+              <FileText size={18} />
+              <div><strong>{payrollNotice.title}</strong><span>{attendance?.payrollSummary ?? "명세서 정보를 불러오는 중"}</span></div>
+            </div>
+          </DetailPanel>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1030,6 +1077,27 @@ function sectionTitle(section: ErpActiveSection) {
   };
 
   return titles[section];
+}
+
+function formatToday(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Seoul" }).format(new Date(value));
+}
+
+function payrollNoticeForToday(value: string) {
+  const date = new Date(value);
+  const day = date.getDate();
+  const isNoticeDay = day === 10;
+  return {
+    isNoticeDay,
+    title: isNoticeDay ? "이번 달 급여명세서를 확인하세요" : "급여명세서 안내",
+    description: isNoticeDay ? "오늘 열람 알림이 도착했습니다." : "매월 10일에 열람 알림을 보내며, 공휴일이면 직전 근무일에 안내합니다."
+  };
+}
+
+function taskPlanHint(task: DailyWorkTask) {
+  if (task.status === "DONE") return "완료 처리됨";
+  if (task.status === "IN_PROGRESS") return "진행 중";
+  return task.department === "제작팀" ? "오늘 제작 플랜의 담당 작업" : "오늘 운영 계획의 담당 작업";
 }
 
 function toneForStatus(status?: string) {

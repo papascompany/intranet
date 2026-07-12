@@ -2,6 +2,7 @@ import type {
   AttendanceCorrection,
   AttendanceRecord,
   AuditLog,
+  DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   LeaveRequest,
@@ -249,6 +250,40 @@ export const payrollStatements: PayrollStatement[] = [
     storagePath: "emp-ops-1/2026-06/2026-06-payroll-kim.pdf",
     uploadedBy: "emp-ceo",
     uploadedAt: "2026-07-05T10:00:00+09:00"
+  }
+];
+
+export const dailyWorkTasks: DailyWorkTask[] = [
+  {
+    id: "daily-task-ops-1",
+    employeeId: "emp-ops-1",
+    department: "운영팀",
+    date: "2026-07-12",
+    title: "오전 주문 정산 확인",
+    dueLabel: "오전 11:00",
+    displayOrder: 1,
+    status: "IN_PROGRESS"
+  },
+  {
+    id: "daily-task-prod-1",
+    employeeId: "emp-prod-1",
+    department: "제작팀",
+    date: "2026-07-12",
+    title: "제품 상세컷 1차 보정",
+    dueLabel: "오후 3:00",
+    displayOrder: 1,
+    status: "TODO"
+  },
+  {
+    id: "daily-task-prod-2",
+    employeeId: "emp-prod-1",
+    department: "제작팀",
+    date: "2026-07-12",
+    title: "촬영 원본 업로드 확인",
+    dueLabel: "퇴근 전",
+    displayOrder: 2,
+    status: "DONE",
+    completedAt: "2026-07-12T09:10:00+09:00"
   }
 ];
 

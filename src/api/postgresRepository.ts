@@ -2,6 +2,7 @@ import type {
   AttendanceCorrection,
   AttendanceRecord,
   AuditLog,
+  DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   EmployeeCustomAdminFields,
@@ -133,6 +134,18 @@ export class PostgresHrRepository implements HrRepository {
     return payrollFromRow(requireRow(row, "payroll_statements", statement.id));
   }
 
+  async listDailyWorkTasks() {
+    const rows = await this.query<DailyWorkTaskRow>(
+      "select * from daily_work_tasks order by work_date desc, display_order asc, id asc"
+    );
+    return rows.map(dailyWorkTaskFromRow);
+  }
+
+  async updateDailyWorkTask(task: DailyWorkTask) {
+    const [row] = await this.update<DailyWorkTaskRow>("daily_work_tasks", dailyWorkTaskToRow(task), "id", task.id);
+    return dailyWorkTaskFromRow(requireRow(row, "daily_work_tasks", task.id));
+  }
+
   async getSettings() {
     const rows = await this.query<SystemPolicyRow>("select * from system_policies where id = 'system-policy' limit 1");
     return rows[0] ? policyFromRow(rows[0]) : defaultSystemPolicy;
@@ -242,6 +255,7 @@ type EarlyLeaveRow = DbRow & { status: EarlyLeaveLedger["status"] };
 type OvertimeRow = DbRow & { status: OvertimeRequest["status"] };
 type CorrectionRow = DbRow & { type: AttendanceCorrection["type"] };
 type PayrollRow = DbRow;
+type DailyWorkTaskRow = DbRow & { status: DailyWorkTask["status"]; department: DailyWorkTask["department"] };
 type SystemPolicyRow = DbRow & {
   gps_failure_fallback: SystemPolicy["gpsFailureFallback"];
   payroll_employee_access: SystemPolicy["payrollEmployeeAccess"];
@@ -475,6 +489,34 @@ function payrollToRow(statement: PayrollStatement): DbRow {
     deleted_by: statement.deletedBy,
     deleted_at: statement.deletedAt,
     delete_reason: statement.deleteReason
+  };
+}
+
+function dailyWorkTaskFromRow(row: DailyWorkTaskRow): DailyWorkTask {
+  return {
+    id: stringValue(row.id),
+    employeeId: stringValue(row.employee_id),
+    department: row.department,
+    date: stringValue(row.work_date),
+    title: stringValue(row.title),
+    dueLabel: optionalString(row.due_label),
+    displayOrder: Number(row.display_order),
+    status: row.status,
+    completedAt: optionalString(row.completed_at)
+  };
+}
+
+function dailyWorkTaskToRow(task: DailyWorkTask): DbRow {
+  return {
+    id: task.id,
+    employee_id: task.employeeId,
+    department: task.department,
+    work_date: task.date,
+    title: task.title,
+    due_label: task.dueLabel,
+    display_order: task.displayOrder,
+    status: task.status,
+    completed_at: task.completedAt ?? null
   };
 }
 

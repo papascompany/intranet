@@ -337,6 +337,62 @@ describe("hr api", () => {
     ]);
   });
 
+  it("lists only the employee's daily work tasks and records self completion", async () => {
+    const hrApi = api();
+
+    const tasks = await hrApi.getDailyWorkTasks({
+      employeeId: "emp-prod-1",
+      date: "2026-07-12",
+      session: {
+        ...employeeSession,
+        employeeId: "emp-prod-1"
+      }
+    });
+    const result = await hrApi.updateDailyWorkTaskStatus({
+      taskId: "daily-task-prod-1",
+      status: "DONE",
+      completedAt: "2026-07-12T14:30:00+09:00",
+      session: {
+        ...employeeSession,
+        employeeId: "emp-prod-1"
+      }
+    });
+
+    expect(tasks.map((task) => task.id)).toEqual(["daily-task-prod-1", "daily-task-prod-2"]);
+    expect(result.task).toMatchObject({
+      id: "daily-task-prod-1",
+      status: "DONE",
+      completedAt: "2026-07-12T14:30:00+09:00"
+    });
+    expect(result.auditLog).toMatchObject({
+      action: "DAILY_WORK_TASK_STATUS_UPDATED",
+      targetType: "DailyWorkTask",
+      targetId: "daily-task-prod-1"
+    });
+
+    const reopened = await hrApi.updateDailyWorkTaskStatus({
+      taskId: "daily-task-prod-2",
+      status: "IN_PROGRESS",
+      session: {
+        ...employeeSession,
+        employeeId: "emp-prod-1"
+      }
+    });
+    expect(reopened.task.completedAt).toBeUndefined();
+  });
+
+  it("rejects a daily work task status change by anyone other than the assignee", async () => {
+    const hrApi = api();
+
+    await expect(
+      hrApi.updateDailyWorkTaskStatus({
+        taskId: "daily-task-prod-1",
+        status: "DONE",
+        session: employeeSession
+      })
+    ).rejects.toThrow("Daily work task access denied");
+  });
+
   it("allows admins to update employee card fields", async () => {
     const hrApi = api();
 

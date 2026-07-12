@@ -2,6 +2,7 @@ import type {
   AttendanceCorrection,
   AttendanceRecord,
   AuditLog,
+  DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   LeaveRequest,
@@ -16,6 +17,7 @@ import {
   auditLogs,
   attendanceRecords,
   corrections,
+  dailyWorkTasks,
   earlyLeaveLedger,
   employees,
   leaveRequests,
@@ -35,6 +37,7 @@ export type InMemoryDatabaseSeed = {
   corrections?: AttendanceCorrection[];
   payrollStatements?: PayrollStatement[];
   auditLogs?: AuditLog[];
+  dailyWorkTasks?: DailyWorkTask[];
   settings?: SystemPolicy;
 };
 
@@ -49,6 +52,7 @@ export class InMemoryDatabase implements HrRepository {
   private readonly corrections: AttendanceCorrection[];
   private readonly payrollStatements: PayrollStatement[];
   private readonly auditLogs: AuditLog[];
+  private readonly dailyWorkTasks: DailyWorkTask[];
   private settings: SystemPolicy;
 
   constructor(seed: InMemoryDatabaseSeed = {}) {
@@ -62,6 +66,7 @@ export class InMemoryDatabase implements HrRepository {
     this.corrections = cloneList(seed.corrections ?? corrections);
     this.payrollStatements = cloneList(seed.payrollStatements ?? payrollStatements);
     this.auditLogs = cloneList(seed.auditLogs ?? auditLogs);
+    this.dailyWorkTasks = cloneList(seed.dailyWorkTasks ?? dailyWorkTasks);
     this.settings = cloneItem(seed.settings ?? defaultSystemPolicy);
   }
 
@@ -192,6 +197,20 @@ export class InMemoryDatabase implements HrRepository {
 
     this.payrollStatements[index] = cloneItem(statement);
     return cloneItem(this.payrollStatements[index]);
+  }
+
+  listDailyWorkTasks() {
+    return cloneList(this.dailyWorkTasks);
+  }
+
+  updateDailyWorkTask(task: DailyWorkTask) {
+    const index = this.dailyWorkTasks.findIndex((item) => item.id === task.id);
+    if (index < 0) {
+      throw new Error(`Daily work task not found: ${task.id}`);
+    }
+
+    this.dailyWorkTasks[index] = cloneItem(task);
+    return cloneItem(this.dailyWorkTasks[index]);
   }
 
   getSettings() {

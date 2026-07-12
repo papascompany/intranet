@@ -50,6 +50,287 @@ button {
   padding: 24px 0 80px;
 }
 
+.my-day {
+  display: grid;
+  gap: 16px;
+}
+
+.my-day__hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(228px, 0.78fr) minmax(270px, 0.92fr);
+  align-items: center;
+  gap: 24px;
+  min-height: 182px;
+  border: 1px solid var(--color-silver);
+  border-radius: 8px;
+  padding: 24px;
+  background: var(--color-white);
+  box-shadow: var(--shadow-card);
+}
+
+.my-day__intro {
+  display: grid;
+  gap: 7px;
+}
+
+.my-day__intro h2 {
+  font-size: 22px;
+}
+
+.my-day__intro > p:last-child,
+.leave-summary {
+  color: var(--color-slate);
+  font-family: var(--font-inter);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.attendance-check-area {
+  display: grid;
+  justify-items: stretch;
+  gap: 9px;
+}
+
+.attendance-check,
+.attendance-complete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 68px;
+  border-radius: 8px;
+  font-family: var(--font-cal-sans);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.attendance-check {
+  border: 0;
+  color: var(--color-white);
+  background: var(--color-ink);
+}
+
+.attendance-check:hover {
+  background: #303030;
+}
+
+.attendance-check:disabled {
+  cursor: not-allowed;
+  color: var(--color-stone);
+  background: var(--color-paper);
+}
+
+.attendance-complete {
+  border: 1px solid #bbf7d0;
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.attendance-alternatives {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--color-slate);
+  font-family: var(--font-inter);
+  font-size: 12px;
+}
+
+.attendance-alternatives button,
+.quick-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+  font-family: var(--font-inter);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.attendance-alternatives button:hover,
+.quick-actions button:hover {
+  background: var(--color-paper);
+}
+
+.attendance-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.attendance-summary div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border-left: 1px solid var(--color-silver);
+}
+
+.attendance-summary dt {
+  color: var(--color-slate);
+  font-family: var(--font-inter);
+  font-size: 12px;
+}
+
+.attendance-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-graphite);
+  font-family: var(--font-inter);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.my-day__content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.my-day__aside {
+  display: grid;
+  gap: 16px;
+}
+
+.task-progress {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-silver);
+  font-family: var(--font-inter);
+}
+
+.task-progress strong {
+  font-size: 15px;
+}
+
+.task-progress span {
+  color: var(--color-slate);
+  font-size: 13px;
+}
+
+.daily-task-list {
+  display: grid;
+}
+
+.daily-task {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+  border-bottom: 1px solid var(--color-silver);
+  padding: 10px 0;
+}
+
+.daily-task:last-child {
+  border-bottom: 0;
+}
+
+.task-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid var(--color-stone);
+  border-radius: 50%;
+  color: var(--color-white);
+  background: var(--color-white);
+}
+
+.task-check:hover {
+  border-color: var(--color-ink);
+  background: var(--color-paper);
+}
+
+.daily-task.is-done .task-check {
+  border-color: #15803d;
+  background: #15803d;
+}
+
+.daily-task > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.daily-task strong {
+  overflow-wrap: anywhere;
+  font-family: var(--font-inter);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.daily-task span,
+.daily-task small {
+  color: var(--color-slate);
+  font-family: var(--font-inter);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.daily-task small {
+  white-space: nowrap;
+}
+
+.daily-task.is-done strong,
+.daily-task.is-done span {
+  color: var(--color-stone);
+  text-decoration: line-through;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quick-actions button {
+  min-height: 40px;
+}
+
+.payroll-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--color-slate);
+  font-family: var(--font-inter);
+}
+
+.payroll-notice.is-active {
+  color: #1d4ed8;
+}
+
+.payroll-notice > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.payroll-notice strong {
+  color: var(--color-graphite);
+  font-size: 14px;
+}
+
+.payroll-notice span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .login-shell {
   width: min(640px, calc(100% - 32px));
   padding-top: 12vh;
@@ -447,6 +728,19 @@ select {
 }
 
 @media (max-width: 860px) {
+  .my-day__hero,
+  .my-day__content {
+    grid-template-columns: 1fr;
+  }
+
+  .my-day__hero {
+    gap: 18px;
+  }
+
+  .attendance-summary {
+    max-width: 520px;
+  }
+
   .app-shell {
     width: min(100% - 24px, 720px);
     padding-top: 16px;
@@ -494,6 +788,39 @@ select {
 }
 
 @media (max-width: 520px) {
+  .my-day__hero {
+    padding: 18px;
+  }
+
+  .attendance-check {
+    width: 100%;
+  }
+
+  .attendance-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .attendance-summary div {
+    grid-template-columns: 68px minmax(0, 1fr);
+    align-items: baseline;
+    border-top: 1px solid var(--color-silver);
+    border-left: 0;
+    padding: 8px 0 0;
+  }
+
+  .attendance-summary div:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .daily-task {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .daily-task small {
+    grid-column: 2;
+  }
+
   .workspace-head,
   .clock-panel,
   .list-section {

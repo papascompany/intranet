@@ -74,6 +74,10 @@ async function handlePost(request: HrHttpRequest, api: HrApi) {
       const payload = body.payload as { employeeId: string; asOf?: string; session?: AuthSession };
       return await api.getEmployeeSnapshot(payload.employeeId, payload.asOf, payload.session);
     }
+    case "getDailyWorkTasks":
+      return await api.getDailyWorkTasks(body.payload as never);
+    case "updateDailyWorkTaskStatus":
+      return await api.updateDailyWorkTaskStatus(body.payload as never);
     case "getSettings":
       return await api.getSettings(body.payload as never);
     case "getAuditLogs":

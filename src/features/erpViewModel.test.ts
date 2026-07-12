@@ -202,6 +202,7 @@ const employeeSnapshot: EmployeeSnapshot = {
   },
   attendanceCorrections: [],
   payrollStatements: [dashboard.activePayrollStatements[0]],
+  dailyWorkTasks: [],
   recentAuditLogs: []
 };
 
@@ -283,6 +284,26 @@ describe("buildErpViewModel", () => {
       isPilot: true,
       pilotLabel: "파일럿 대상"
     });
+  });
+
+  it("carries the selected employee's daily work tasks to the employee screen", () => {
+    const task = {
+      id: "daily-task-ops-1",
+      employeeId: "emp-ops-1",
+      department: "운영팀" as const,
+      date: "2026-07-08",
+      title: "오전 주문 정산 확인",
+      displayOrder: 1,
+      status: "IN_PROGRESS" as const
+    };
+    const viewModel = buildErpViewModel({
+      dashboard,
+      employeeSnapshot: { ...employeeSnapshot, dailyWorkTasks: [task] },
+      employees,
+      activeSection: "self-service"
+    });
+
+    expect(viewModel.dailyWorkTasks).toEqual([task]);
   });
 
   it("includes policy decision checks", () => {

@@ -2,6 +2,7 @@ import type { Dashboard, EmployeeSnapshot } from "../api/types";
 import type {
   AttendanceCorrection,
   AttendanceRecord,
+  DailyWorkTask,
   Employee,
   LeaveRequest,
   OvertimeRequest,
@@ -64,6 +65,7 @@ export type ErpViewModel = {
   auditRows: ErpViewModelRow[];
   employeeSummary: ErpEmployeeSummary;
   decisionChecks: ErpViewModelRow[];
+  dailyWorkTasks: DailyWorkTask[];
 };
 
 const navLabels = {
@@ -159,6 +161,7 @@ export function buildErpViewModel({
     overtimeRows: dashboard.overtimeRequests.map((request) => overtimeRow(request, employeeDirectory)),
     payrollRows: dashboard.activePayrollStatements.map((statement) => payrollRow(statement, employeeDirectory)),
     correctionRows: dashboard.corrections.map((correction) => correctionRow(correction, employeeDirectory)),
+    dailyWorkTasks: employeeSnapshot.dailyWorkTasks,
     auditRows: dashboard.recentAuditLogs.map((log) => ({
       id: log.id,
       label: log.action,

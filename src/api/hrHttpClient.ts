@@ -9,11 +9,13 @@ import type {
   DownloadPayrollStatementInput,
   DownloadPayrollStatementResult,
   EmployeeSnapshot,
+  GetDailyWorkTasksInput,
   SetOvertimePayApprovalInput,
   SoftDeletePayrollStatementInput,
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
   UpdateEmployeeCardInput,
+  UpdateDailyWorkTaskStatusInput,
   UpdateSettingsInput,
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
@@ -21,6 +23,7 @@ import type {
 import type {
   AttendanceCorrection,
   AuditLog,
+  DailyWorkTask,
   Employee,
   LeaveRequest,
   OvertimeRequest,
@@ -50,6 +53,14 @@ export async function getEmployeeSnapshot(employeeId: string, asOf?: string, ses
     asOf,
     session
   });
+}
+
+export async function getDailyWorkTasks(input: GetDailyWorkTasksInput) {
+  return await post<DailyWorkTask[]>("getDailyWorkTasks", input);
+}
+
+export async function updateDailyWorkTaskStatus(input: UpdateDailyWorkTaskStatusInput) {
+  return await post<{ task: DailyWorkTask; auditLog: AuditLog }>("updateDailyWorkTaskStatus", input);
 }
 
 export async function getSettings(input: { session?: AuthSession } = {}) {
@@ -152,6 +163,10 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       const snapshotPayload = payload as { employeeId: string; asOf?: string; session?: never };
       return (await api.getEmployeeSnapshot(snapshotPayload.employeeId, snapshotPayload.asOf, snapshotPayload.session)) as T;
     }
+    case "getDailyWorkTasks":
+      return (await api.getDailyWorkTasks(payload as never)) as T;
+    case "updateDailyWorkTaskStatus":
+      return (await api.updateDailyWorkTaskStatus(payload as never)) as T;
     case "getSettings":
       return (await api.getSettings(payload as never)) as T;
     case "getAuditLogs":

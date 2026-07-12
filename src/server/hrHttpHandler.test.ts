@@ -101,6 +101,34 @@ describe("hrHttpHandler", () => {
     ]);
   });
 
+  it("routes daily work task status updates through the HTTP API", async () => {
+    const response = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "updateDailyWorkTaskStatus",
+          payload: {
+            taskId: "daily-task-prod-1",
+            status: "DONE",
+            session: {
+              employeeId: "emp-prod-1",
+              role: "EMPLOYEE",
+              authenticatedAt: "2026-07-12T09:00:00+09:00",
+              rememberLogin: false
+            }
+          }
+        }
+      },
+      api()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      task: { id: "daily-task-prod-1", status: "DONE" },
+      auditLog: { action: "DAILY_WORK_TASK_STATUS_UPDATED" }
+    });
+  });
+
   it("returns a 400 response for unsupported actions", async () => {
     const response = await handleHrHttpRequest(
       {

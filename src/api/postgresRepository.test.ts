@@ -100,4 +100,47 @@ describe("PostgresHrRepository", () => {
     expect(calls[0].params).toContain("emp-ceo");
     expect(log.actorId).toBe("emp-ceo");
   });
+
+  it("maps and persists daily work task status using database column names", async () => {
+    const { calls, repository } = repositoryWithRows([
+      [
+        {
+          id: "daily-task-1",
+          employee_id: "emp-prod-1",
+          department: "제작팀",
+          work_date: "2026-07-12",
+          title: "제품 상세컷 보정",
+          due_label: "오후 3:00",
+          display_order: 1,
+          status: "TODO",
+          completed_at: null
+        }
+      ],
+      [
+        {
+          id: "daily-task-1",
+          employee_id: "emp-prod-1",
+          department: "제작팀",
+          work_date: "2026-07-12",
+          title: "제품 상세컷 보정",
+          due_label: "오후 3:00",
+          display_order: 1,
+          status: "DONE",
+          completed_at: "2026-07-12T14:30:00+09:00"
+        }
+      ]
+    ]);
+
+    const [task] = await repository.listDailyWorkTasks();
+    const saved = await repository.updateDailyWorkTask({
+      ...task,
+      status: "DONE",
+      completedAt: "2026-07-12T14:30:00+09:00"
+    });
+
+    expect(calls[0].sql).toContain("from daily_work_tasks order by work_date desc, display_order asc, id asc");
+    expect(calls[1].sql).toContain("update daily_work_tasks set employee_id = $2");
+    expect(calls[1].params).toContain("DONE");
+    expect(saved.completedAt).toBe("2026-07-12T14:30:00+09:00");
+  });
 });

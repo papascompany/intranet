@@ -2,6 +2,7 @@ import type {
   AttendanceCorrection,
   AttendanceRecord,
   AuditLog,
+  DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   LeaveRequest,
@@ -35,6 +36,8 @@ export interface HrRepository {
   listPayrollStatements(includeDeleted?: boolean): MaybePromise<PayrollStatement[]>;
   addPayrollStatement(statement: PayrollStatement): MaybePromise<PayrollStatement>;
   updatePayrollStatement(statement: PayrollStatement): MaybePromise<PayrollStatement>;
+  listDailyWorkTasks(): MaybePromise<DailyWorkTask[]>;
+  updateDailyWorkTask(task: DailyWorkTask): MaybePromise<DailyWorkTask>;
   getSettings(): MaybePromise<SystemPolicy>;
   updateSettings(settings: Partial<SystemPolicy>): MaybePromise<SystemPolicy>;
   listAuditLogs(): MaybePromise<AuditLog[]>;
