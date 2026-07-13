@@ -81,6 +81,14 @@ type UserMode = "EMPLOYEE" | "ADMIN";
 
 const employeeSections: ErpActiveSection[] = ["self-service", "employee-card", "attendance", "leave", "overtime", "payroll"];
 const adminSections: ErpActiveSection[] = ["employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
+const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
+  "self-service": "나의 하루",
+  "employee-card": "내 정보",
+  attendance: "근태 기록",
+  leave: "휴가",
+  overtime: "야근",
+  payroll: "급여"
+};
 
 const rowColumns: DataTableColumn<ErpViewModelRow>[] = [
   { key: "label", header: "대상", value: "label", width: "22%" },
@@ -160,8 +168,12 @@ function App() {
     [effectiveMode, selectedEmployee]
   );
   const visibleNavItems = useMemo(
-    () => erpViewModel?.navItems.filter((item) => allowedSections.includes(item.section)) ?? [],
-    [allowedSections, erpViewModel]
+    () =>
+      (erpViewModel?.navItems.filter((item) => allowedSections.includes(item.section)) ?? []).map((item) => ({
+        ...item,
+        label: effectiveMode === "EMPLOYEE" ? employeeNavLabels[item.section] ?? item.label : item.label
+      })),
+    [allowedSections, effectiveMode, erpViewModel]
   );
 
   useEffect(() => {
@@ -509,28 +521,34 @@ function App() {
         topbar={
           <>
             <div>
-              <p className="eyebrow">Internal HR Pilot</p>
               <h1>사내 근태 관리</h1>
             </div>
             <div className="topbar-controls">
-              <div className="segmented" aria-label="사용자 모드">
-                <button className={effectiveMode === "EMPLOYEE" ? "active" : undefined} onClick={() => changeMode("EMPLOYEE")}>
-                  직원모드
-                </button>
-                <button className={effectiveMode === "ADMIN" ? "active" : undefined} onClick={() => changeMode("ADMIN")}>
-                  관리자모드
-                </button>
-              </div>
-            <label className="select-label">
-              계정
-              <select value={selectedEmployeeId} onChange={(event) => void handleEmployeeChange(event.target.value)}>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.name} · {employee.department}
-                  </option>
-                ))}
-              </select>
-            </label>
+              {isAdminAccount ? (
+                <>
+                  <button className="mode-button" onClick={() => changeMode(effectiveMode === "ADMIN" ? "EMPLOYEE" : "ADMIN")}>
+                    <ShieldCheck size={16} />
+                    {effectiveMode === "ADMIN" ? "직원 화면" : "관리자 화면"}
+                  </button>
+                  {effectiveMode === "ADMIN" ? (
+                    <label className="select-label select-label--compact">
+                      조회 대상
+                      <select value={selectedEmployeeId} onChange={(event) => void handleEmployeeChange(event.target.value)}>
+                        {employees.map((employee) => (
+                          <option key={employee.id} value={employee.id}>
+                            {employee.name} · {employee.department}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                </>
+              ) : (
+                <div className="signed-in-identity">
+                  <strong>{selectedEmployee?.name ?? "직원"}</strong>
+                  <span>{selectedEmployee?.department ?? ""}</span>
+                </div>
+              )}
               <button className="icon-button" onClick={handleLogout} title="로그아웃">
                 <LogOut size={16} />
               </button>

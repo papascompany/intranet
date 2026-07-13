@@ -458,6 +458,49 @@ h3 {
   flex-wrap: wrap;
 }
 
+.signed-in-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 96px;
+  text-align: right;
+  font-family: var(--font-inter);
+}
+
+.signed-in-identity strong {
+  color: var(--color-graphite);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.signed-in-identity span {
+  color: var(--color-slate);
+  font-size: 12px;
+}
+
+.mode-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 1px solid var(--color-silver);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+  font-family: var(--font-inter);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mode-button:hover {
+  background: var(--color-paper);
+}
+
+.select-label--compact {
+  min-width: 184px;
+}
+
 .login-grid {
   align-items: end;
   justify-content: space-between;
@@ -764,6 +807,15 @@ select {
   .login-grid {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .signed-in-identity {
+    text-align: left;
+  }
+
+  .mode-button,
+  .select-label--compact {
+    width: 100%;
   }
 
   .icon-button {
