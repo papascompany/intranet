@@ -512,6 +512,93 @@ h3 {
   font-family: var(--font-inter);
 }
 
+.account-menu {
+  position: relative;
+}
+
+.account-menu > summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  border: 1px solid var(--color-silver);
+  border-radius: 999px;
+  padding: 5px 10px 5px 6px;
+  background: var(--color-white);
+  cursor: pointer;
+  list-style: none;
+}
+
+.account-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-menu > summary:hover {
+  background: var(--color-paper);
+}
+
+.account-menu__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--color-white);
+  background: var(--color-ink);
+}
+
+.account-menu__popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 8px;
+  width: 220px;
+  border: 1px solid var(--color-silver);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--color-white);
+  box-shadow: var(--shadow-hover);
+}
+
+.account-menu__context {
+  display: grid;
+  gap: 3px;
+  padding: 6px 8px 10px;
+  border-bottom: 1px solid var(--color-silver);
+  font-family: var(--font-inter);
+}
+
+.account-menu__context strong {
+  font-size: 14px;
+}
+
+.account-menu__context span {
+  color: var(--color-slate);
+  font-size: 12px;
+}
+
+.account-menu__logout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--color-graphite);
+  background: transparent;
+  font-family: var(--font-inter);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-menu__logout:hover {
+  background: var(--color-paper);
+}
+
 .signed-in-identity strong {
   color: var(--color-graphite);
   font-size: 14px;
@@ -890,6 +977,25 @@ select {
 
   .signed-in-identity {
     text-align: left;
+  }
+
+  .account-menu,
+  .account-menu > summary {
+    width: 100%;
+  }
+
+  .account-menu > summary {
+    justify-content: flex-start;
+  }
+
+  .account-menu > summary > svg:last-child {
+    margin-left: auto;
+  }
+
+  .account-menu__popover {
+    right: 0;
+    left: 0;
+    width: auto;
   }
 
   .mode-button,

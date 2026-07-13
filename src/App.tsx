@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Check,
   CircleCheck,
+  ChevronDown,
   ClipboardCheck,
   Clock,
   FileText,
@@ -17,7 +18,8 @@ import {
   Settings,
   ShieldCheck,
   TimerReset,
-  Upload
+  Upload,
+  UserRound
 } from "lucide-react";
 import {
   clockAttendance,
@@ -767,15 +769,27 @@ function App() {
                     </label>
                   ) : null}
                 </>
-              ) : (
-                <div className="signed-in-identity">
-                  <strong>{selectedEmployee?.name ?? "직원"}</strong>
-                  <span>{selectedEmployee?.department ?? ""}</span>
+              ) : null}
+              <details className="account-menu">
+                <summary aria-label="계정 메뉴 열기">
+                  <span className="account-menu__avatar" aria-hidden="true"><UserRound size={16} /></span>
+                  <span className="signed-in-identity">
+                    <strong>{selectedEmployee?.name ?? "직원"}</strong>
+                    <span>{selectedEmployee?.department ?? ""}</span>
+                  </span>
+                  <ChevronDown size={15} aria-hidden="true" />
+                </summary>
+                <div className="account-menu__popover">
+                  <div className="account-menu__context">
+                    <strong>{selectedEmployee?.name ?? "직원"}</strong>
+                    <span>{isAdminAccount ? "관리자 계정" : "직원 계정"}</span>
+                  </div>
+                  <button className="account-menu__logout" onClick={handleLogout} type="button">
+                    <LogOut size={16} />
+                    로그아웃
+                  </button>
                 </div>
-              )}
-              <button className="icon-button" onClick={handleLogout} title="로그아웃">
-                <LogOut size={16} />
-              </button>
+              </details>
             </div>
           </>
         }
