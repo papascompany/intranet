@@ -6,7 +6,6 @@ import {
   CircleCheck,
   ClipboardCheck,
   Clock,
-  Download,
   FileText,
   Fingerprint,
   History,
@@ -39,7 +38,7 @@ import {
   updateRequestStatus,
   uploadPayrollStatement
 } from "./api/hrHttpClient";
-import type { Dashboard, EmployeeSnapshot } from "./api/types";
+import { defaultSystemPolicy, type Dashboard, type EmployeeSnapshot, type SystemPolicy } from "./api/types";
 import { isAdminSession, type AuthSession } from "./api/auth";
 import { getAuthenticatedSession, loginWithEmployeeNumber, logoutAuthenticatedSession } from "./api/authHttpClient";
 import {
@@ -57,7 +56,12 @@ import {
 } from "./components/erp";
 import { FormDialog, InlineNotice } from "./components/operational";
 import { DailyWorkPlanManager, type DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
-import type { ClockType, DailyWorkTask, Employee, LeaveType, VerificationMethod } from "./domain/types";
+import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/employeeCardEditor";
+import { ApprovalQueue, type ApprovalQueueItem } from "./components/approvalQueue";
+import { AuditLogExplorer } from "./components/auditLogExplorer";
+import { PayrollStatementManager } from "./components/payrollStatementManager";
+import { SystemPolicyEditor } from "./components/systemPolicyEditor";
+import type { AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveType, PayrollStatement, VerificationMethod } from "./domain/types";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
 import {
@@ -97,6 +101,11 @@ type OvertimeDraft = {
   endsAt: string;
   reason: string;
   startsAt: string;
+};
+
+type PayrollUploadDraft = {
+  file: File | null;
+  month: string;
 };
 
 const employeeSections: ErpActiveSection[] = ["self-service", "employee-card", "attendance", "leave", "overtime", "payroll"];
@@ -164,6 +173,21 @@ function App() {
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [taskPlanError, setTaskPlanError] = useState<string | null>(null);
   const [isSavingTaskPlan, setIsSavingTaskPlan] = useState(false);
+  const [isCorrectionDialogOpen, setIsCorrectionDialogOpen] = useState(false);
+  const [isSubmittingCorrection, setIsSubmittingCorrection] = useState(false);
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [correctionDraft, setCorrectionDraft] = useState<{ afterValue: string; reason: string; type: CorrectionType }>({
+    type: "CLOCK_IN_CORRECTION",
+    afterValue: "",
+    reason: ""
+  });
+  const [isEmployeeCardEditorOpen, setIsEmployeeCardEditorOpen] = useState(false);
+  const [isSavingEmployeeCard, setIsSavingEmployeeCard] = useState(false);
+  const [employeeCardError, setEmployeeCardError] = useState<string | null>(null);
+  const [isPayrollUploadOpen, setIsPayrollUploadOpen] = useState(false);
+  const [isUploadingPayroll, setIsUploadingPayroll] = useState(false);
+  const [payrollUploadError, setPayrollUploadError] = useState<string | null>(null);
+  const [payrollUploadDraft, setPayrollUploadDraft] = useState<PayrollUploadDraft>({ file: null, month: today.slice(0, 7) });
 
   const refresh = useCallback(
     async (employeeId = selectedEmployeeId) => {
@@ -481,7 +505,7 @@ function App() {
     setRequestDialog(nextDialog);
   }
 
-  async function approveLeave(requestId?: string, status: "APPROVED" | "REJECTED" = "APPROVED") {
+  async function approveLeave(requestId?: string, status: "APPROVED" | "REJECTED" = "APPROVED", detail?: string) {
     if (!requestId) {
       setNotice("처리할 휴가 신청이 없습니다.");
       return;
@@ -493,14 +517,14 @@ function App() {
       status,
       actorId: authActorId(authSession, selectedEmployee?.id),
       session: authSession ?? undefined,
-      detail: `관리자 화면에서 휴가 ${status === "APPROVED" ? "승인" : "반려"}`
+      detail: detail ?? `관리자 화면에서 휴가 ${status === "APPROVED" ? "승인" : "반려"}`
     });
 
     setNotice(`휴가 신청 ${status === "APPROVED" ? "승인" : "반려"} · ${result.request.id}`);
     await refresh(selectedEmployeeId);
   }
 
-  async function approveOvertime(requestId?: string, status: "APPROVED" | "REJECTED" = "APPROVED") {
+  async function approveOvertime(requestId?: string, status: "APPROVED" | "REJECTED" = "APPROVED", detail?: string) {
     if (!requestId) {
       setNotice("처리할 야근 신청이 없습니다.");
       return;
@@ -512,7 +536,7 @@ function App() {
       status,
       actorId: authActorId(authSession, selectedEmployee?.id),
       session: authSession ?? undefined,
-      detail: `관리자 화면에서 야근 ${status === "APPROVED" ? "승인" : "반려"}`
+      detail: detail ?? `관리자 화면에서 야근 ${status === "APPROVED" ? "승인" : "반려"}`
     });
 
     if (status === "APPROVED") {
@@ -531,40 +555,86 @@ function App() {
 
   async function createCorrection() {
     if (!selectedEmployee || !employeeSnapshot?.todayAttendance) {
-      setNotice("보정할 오늘 출퇴근 기록이 없습니다.");
+      setCorrectionError("보정할 오늘 출퇴근 기록이 없습니다.");
+      return;
+    }
+    if (!correctionDraft.afterValue || !correctionDraft.reason.trim()) {
+      setCorrectionError("보정 시각과 사유를 입력해 주세요.");
       return;
     }
 
-    const result = await createAttendanceCorrection({
-      attendanceId: employeeSnapshot.todayAttendance.id,
-      employeeId: selectedEmployee.id,
-      correctedById: authActorId(authSession, selectedEmployee.id),
-      session: authSession ?? undefined,
-      type: "APPROVED_LATE",
-      beforeValue: employeeSnapshot.todayAttendance.clockInAt,
-      afterValue: "2026-07-08T08:00:00+09:00",
-      reason: "관리자 인정지각 보정",
-      createdAt: "2026-07-08T09:00:00+09:00"
-    });
+    setIsSubmittingCorrection(true);
+    setCorrectionError(null);
+    try {
+      const isClockOut = correctionDraft.type === "CLOCK_OUT_CORRECTION";
+      const result = await createAttendanceCorrection({
+        attendanceId: employeeSnapshot.todayAttendance.id,
+        employeeId: selectedEmployee.id,
+        correctedById: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined,
+        type: correctionDraft.type,
+        beforeValue: isClockOut ? employeeSnapshot.todayAttendance.clockOutAt : employeeSnapshot.todayAttendance.clockInAt,
+        afterValue: `${employeeSnapshot.todayAttendance.date}T${correctionDraft.afterValue}:00+09:00`,
+        reason: correctionDraft.reason.trim(),
+        createdAt: new Date().toISOString()
+      });
 
-    setNotice(`${selectedEmployee.name} 보정 생성 · ${result.correction.type}`);
-    await refresh(selectedEmployee.id);
+      setNotice(`${selectedEmployee.name} 보정 생성 · ${result.correction.type}`);
+      setIsCorrectionDialogOpen(false);
+      setCorrectionDraft({ type: "CLOCK_IN_CORRECTION", afterValue: "", reason: "" });
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setCorrectionError(error instanceof Error ? error.message : "근태 보정을 저장하지 못했습니다.");
+    } finally {
+      setIsSubmittingCorrection(false);
+    }
+  }
+
+  function openCorrectionDialog() {
+    setCorrectionError(null);
+    setIsCorrectionDialogOpen(true);
+  }
+
+  function openPayrollUpload() {
+    setPayrollUploadError(null);
+    setPayrollUploadDraft({ file: null, month: today.slice(0, 7) });
+    setIsPayrollUploadOpen(true);
   }
 
   async function uploadPayroll() {
     if (!selectedEmployee) return;
+    if (!payrollUploadDraft.file) {
+      setPayrollUploadError("업로드할 PDF 파일을 선택해 주세요.");
+      return;
+    }
+    if (payrollUploadDraft.file.type !== "application/pdf" || !payrollUploadDraft.file.name.toLowerCase().endsWith(".pdf")) {
+      setPayrollUploadError("급여명세서는 PDF 파일만 업로드할 수 있습니다.");
+      return;
+    }
 
-    const result = await uploadPayrollStatement({
-      employeeId: selectedEmployee.id,
-      month: "2026-07",
-      filename: `2026-07-payroll-${selectedEmployee.id}.pdf`,
-      actorId: authActorId(authSession, selectedEmployee.id),
-      session: authSession ?? undefined,
-      uploadedAt: "2026-07-08T11:00:00+09:00"
-    });
-
-    setNotice(`${selectedEmployee.name} 급여명세서 업로드 · ${result.statement.month}`);
-    await refresh(selectedEmployee.id);
+    setIsUploadingPayroll(true);
+    setPayrollUploadError(null);
+    try {
+      const result = await uploadPayrollStatement({
+        employeeId: selectedEmployee.id,
+        month: payrollUploadDraft.month,
+        filename: payrollUploadDraft.file.name,
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined,
+        file: {
+          contentBase64: await fileToBase64(payrollUploadDraft.file),
+          contentType: "application/pdf",
+          sizeBytes: payrollUploadDraft.file.size
+        }
+      });
+      setNotice(`${selectedEmployee.name} 급여명세서 업로드 · ${result.statement.month}`);
+      setIsPayrollUploadOpen(false);
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setPayrollUploadError(error instanceof Error ? error.message : "급여명세서를 업로드하지 못했습니다.");
+    } finally {
+      setIsUploadingPayroll(false);
+    }
   }
 
   async function downloadPayroll(statementId?: string) {
@@ -579,11 +649,16 @@ function App() {
       session: authSession ?? undefined
     });
 
-    setNotice(`급여명세서 다운로드 링크 생성 · ${result.storagePath}`);
-    await refresh(selectedEmployeeId);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = result.signedUrl;
+    downloadLink.download = result.statement.filename;
+    document.body.append(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    setNotice(`급여명세서를 내려받습니다 · ${result.statement.month}`);
   }
 
-  async function deletePayroll(statementId?: string) {
+  async function deletePayroll(statementId?: string, deleteReason?: string) {
     if (!statementId) {
       setNotice("삭제할 급여명세서가 없습니다.");
       return;
@@ -593,35 +668,37 @@ function App() {
       statementId,
       actorId: authActorId(authSession, selectedEmployee?.id),
       session: authSession ?? undefined,
-      deleteReason: "관리자 화면에서 급여명세서 삭제",
-      deletedAt: "2026-07-08T12:00:00+09:00"
+      deleteReason: deleteReason?.trim() || "관리자 화면에서 급여명세서 삭제"
     });
 
     setNotice(`급여명세서 삭제 처리 · ${result.statement.month}`);
     await refresh(selectedEmployeeId);
   }
 
-  async function updateSelectedEmployeeCard() {
+  async function updateSelectedEmployeeCard(input: EmployeeCardEditorSubmit) {
     if (!selectedEmployee) return;
-
-    const result = await updateEmployeeCard({
-      employeeId: selectedEmployee.id,
-      actorId: authActorId(authSession, selectedEmployee.id),
-      session: authSession ?? undefined,
-      patch: {
-        position: selectedEmployee.position ?? "운영 매니저",
-        mobile: selectedEmployee.mobile ?? "010-0000-0000",
-        emergencyContact: selectedEmployee.emergencyContact ?? "긴급연락처 미등록",
-        annualSalary: selectedEmployee.annualSalary ? selectedEmployee.annualSalary + 500000 : 48000000,
-        incomeDeductionDependents: selectedEmployee.incomeDeductionDependents ?? 0
-      }
-    });
-
-    setNotice(`${result.employee.name} 직원카드 갱신 · 감사로그 ${result.auditLog.id}`);
-    await refresh(selectedEmployee.id);
+    setIsSavingEmployeeCard(true);
+    setEmployeeCardError(null);
+    try {
+      const result = await updateEmployeeCard({
+        employeeId: input.employeeId,
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined,
+        patch: input.update,
+        reason: input.reason
+      });
+      setNotice(`${result.employee.name} 직원카드 저장 · 감사로그 ${result.auditLog.id}`);
+      setIsEmployeeCardEditorOpen(false);
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setEmployeeCardError(error instanceof Error ? error.message : "직원카드를 저장하지 못했습니다.");
+      throw error;
+    } finally {
+      setIsSavingEmployeeCard(false);
+    }
   }
 
-  async function updateGpsRadius(radius: number) {
+  async function updateSystemPolicy(settings: SystemPolicy) {
     if (!selectedEmployee || !isAdminAccount) {
       setNotice("GPS 허용 반경은 관리자 지정 계정만 변경할 수 있습니다.");
       return;
@@ -630,12 +707,10 @@ function App() {
     const result = await updateSettings({
       actorId: authActorId(authSession, selectedEmployee.id),
       session: authSession ?? undefined,
-      settings: {
-        gpsAllowedRadiusMeters: radius
-      }
+      settings
     });
 
-    setNotice(`GPS 허용 반경 변경 · ${result.settings.gpsAllowedRadiusMeters}m`);
+    setNotice(`운영 정책 저장 · GPS 허용 반경 ${result.settings.gpsAllowedRadiusMeters}m`);
     await refresh(selectedEmployee.id);
   }
 
@@ -742,18 +817,26 @@ function App() {
               onClock: clock,
               onUpdateDailyTask: updateDailyTask,
               onUpdateDailyTaskPlan: updateDailyTaskPlan,
-              onCreateCorrection: createCorrection,
+              onCreateCorrection: openCorrectionDialog,
               onDownloadPayroll: downloadPayroll,
               onDeletePayroll: deletePayroll,
-              onUpdateEmployeeCard: updateSelectedEmployeeCard,
-              onUpdateGpsRadius: updateGpsRadius,
+              onUpdateEmployeeCard: () => {
+                setEmployeeCardError(null);
+                setIsEmployeeCardEditorOpen(true);
+              },
+              onUpdateSystemPolicy: updateSystemPolicy,
               onSubmitLeave: () => openRequestDialog("leave"),
               onSubmitOvertime: () => openRequestDialog("overtime"),
-              onUploadPayroll: uploadPayroll,
+              onUploadPayroll: openPayrollUpload,
               canAdmin: effectiveMode === "ADMIN",
               employeeCardRows,
               employees,
               dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
+              leaveRequests: dashboard?.leaveRequests ?? [],
+              overtimeRequests: dashboard?.overtimeRequests ?? [],
+              payrollStatements: employeeSnapshot?.payrollStatements ?? [],
+              systemPolicy: dashboard?.settings ?? defaultSystemPolicy,
+              auditLogs: dashboard?.recentAuditLogs ?? [],
               isSavingTaskPlan,
               taskPlanError
             })}
@@ -790,6 +873,34 @@ function App() {
         <RequestField label="사용 일수"><input required min="0.5" step="0.5" type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
         <RequestField label="사유"><textarea required rows={3} value={leaveDraft.reason} onChange={(event) => setLeaveDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
       </FormDialog>
+      {selectedEmployee ? (
+        <EmployeeCardEditor
+          busy={isSavingEmployeeCard}
+          canAdmin={effectiveMode === "ADMIN"}
+          employee={selectedEmployee}
+          error={employeeCardError}
+          onClose={() => setIsEmployeeCardEditorOpen(false)}
+          onSubmit={updateSelectedEmployeeCard}
+          open={isEmployeeCardEditorOpen}
+        />
+      ) : null}
+      <FormDialog
+        busy={isUploadingPayroll}
+        description="PDF 급여명세서는 직원별로 비공개 보관되며, 직원은 본인 파일만 열람할 수 있습니다."
+        error={payrollUploadError ?? undefined}
+        onClose={() => setIsPayrollUploadOpen(false)}
+        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          void uploadPayroll();
+        }}
+        open={isPayrollUploadOpen}
+        submitDisabled={!payrollUploadDraft.file || !payrollUploadDraft.month}
+        submitLabel="PDF 업로드"
+        title="급여명세서 업로드"
+      >
+        <RequestField label="귀속월"><input required type="month" value={payrollUploadDraft.month} onChange={(event) => setPayrollUploadDraft((current) => ({ ...current, month: event.target.value }))} /></RequestField>
+        <RequestField label="PDF 파일"><input accept="application/pdf,.pdf" required type="file" onChange={(event) => setPayrollUploadDraft((current) => ({ ...current, file: event.target.files?.[0] ?? null }))} /></RequestField>
+      </FormDialog>
       <FormDialog
         busy={isSubmittingRequest}
         error={requestDialog === "overtime" ? requestError ?? undefined : undefined}
@@ -810,12 +921,46 @@ function App() {
         </div>
         <RequestField label="사유"><textarea required rows={3} value={overtimeDraft.reason} onChange={(event) => setOvertimeDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
       </FormDialog>
+      <FormDialog
+        busy={isSubmittingCorrection}
+        description="원본 출퇴근 기록은 유지하고 보정 이력을 별도로 남깁니다."
+        error={correctionError ?? undefined}
+        onClose={() => setIsCorrectionDialogOpen(false)}
+        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          void createCorrection();
+        }}
+        open={isCorrectionDialogOpen}
+        submitLabel="보정 저장"
+        title="근태 기록 보정"
+      >
+        <RequestField label="보정 대상">
+          <select value={correctionDraft.type} onChange={(event) => setCorrectionDraft((current) => ({ ...current, type: event.target.value as CorrectionType }))}>
+            <option value="CLOCK_IN_CORRECTION">출근 시각</option>
+            <option value="CLOCK_OUT_CORRECTION">퇴근 시각</option>
+            <option value="APPROVED_LATE">인정지각</option>
+            <option value="APPROVED_EARLY_LEAVE">인정조퇴</option>
+          </select>
+        </RequestField>
+        <RequestField label="보정 시각"><input required type="time" value={correctionDraft.afterValue} onChange={(event) => setCorrectionDraft((current) => ({ ...current, afterValue: event.target.value }))} /></RequestField>
+        <RequestField label="보정 사유"><textarea required rows={3} value={correctionDraft.reason} onChange={(event) => setCorrectionDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
+      </FormDialog>
     </div>
   );
 }
 
 function RequestField({ children, label }: { children: ReactNode; label: string }) {
   return <label className="request-field"><span>{label}</span>{children}</label>;
+}
+
+async function fileToBase64(file: File) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary);
 }
 
 function renderSection(props: {
@@ -835,13 +980,18 @@ function renderSection(props: {
   onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
   onCreateCorrection: () => void;
   onDownloadPayroll: (statementId?: string) => void;
-  onDeletePayroll: (statementId?: string) => void;
+  onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
   onUpdateEmployeeCard: () => void;
-  onUpdateGpsRadius: (radius: number) => void;
+  onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
   onUploadPayroll: () => void;
   isSavingTaskPlan: boolean;
+  leaveRequests: import("./domain/types").LeaveRequest[];
+  overtimeRequests: import("./domain/types").OvertimeRequest[];
+  payrollStatements: PayrollStatement[];
+  systemPolicy: SystemPolicy;
+  auditLogs: AuditLog[];
   taskPlanError: string | null;
 }) {
   switch (props.activeSection) {
@@ -860,9 +1010,9 @@ function renderSection(props: {
     case "payroll":
       return <PayrollSection {...props} />;
     case "settings":
-      return <SettingsSection viewModel={props.erpViewModel} canAdmin={props.canAdmin} isLoading={props.isLoading} onUpdateGpsRadius={props.onUpdateGpsRadius} />;
+      return <SettingsSection viewModel={props.erpViewModel} canAdmin={props.canAdmin} isLoading={props.isLoading} onUpdateSystemPolicy={props.onUpdateSystemPolicy} systemPolicy={props.systemPolicy} />;
     case "audit":
-      return <AuditSection viewModel={props.erpViewModel} />;
+      return <AuditSection auditLogs={props.auditLogs} employees={props.employees} viewModel={props.erpViewModel} />;
   }
 }
 
@@ -1036,14 +1186,12 @@ function EmployeeCardSection(props: {
       title={`${props.erpViewModel.employeeSummary.name} 직원카드`}
       description={props.canAdmin ? "관리자 전용 급여·퇴직·소득공제·커스텀 항목까지 표시합니다." : "직원모드에서는 기본 인사카드 항목만 표시합니다."}
       actions={
-        props.canAdmin ? (
-          <InlineActions>
-            <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
-              <BadgeCheck size={14} />
-              관리자 갱신
-            </button>
-          </InlineActions>
-        ) : undefined
+        <InlineActions>
+          <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
+            <BadgeCheck size={14} />
+            {props.canAdmin ? "직원카드 편집" : "내 정보 수정"}
+          </button>
+        </InlineActions>
       }
     >
       <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
@@ -1086,39 +1234,28 @@ function ApprovalsSection(props: {
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   isSavingTaskPlan: boolean;
-  onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
-  onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
+  leaveRequests: import("./domain/types").LeaveRequest[];
+  overtimeRequests: import("./domain/types").OvertimeRequest[];
+  onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED", detail?: string) => void | Promise<void>;
+  onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED", detail?: string) => void | Promise<void>;
   onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
   onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
   taskPlanError: string | null;
 }) {
-  const firstLeaveId = props.erpViewModel.leaveRows.find((row) => row.status === "PENDING")?.id;
-  const firstOvertimeId = props.erpViewModel.overtimeRows.find((row) => row.status === "PENDING")?.id;
-
   return (
     <div className="admin-operations-stack">
-      <DetailPanel
-        title="업무 큐"
-        description="승인 대기, GPS 실패, 보정 확인이 한 화면에 모입니다."
-        actions={
-          <InlineActions>
-            <button disabled={props.isLoading || !firstLeaveId} onClick={() => props.onApproveLeave(firstLeaveId)}>
-              휴가 승인
-            </button>
-            <button disabled={props.isLoading || !firstLeaveId} onClick={() => props.onApproveLeave(firstLeaveId, "REJECTED")}>
-              휴가 반려
-            </button>
-            <button disabled={props.isLoading || !firstOvertimeId} onClick={() => props.onApproveOvertime(firstOvertimeId)}>
-              야근 승인
-            </button>
-            <button disabled={props.isLoading || !firstOvertimeId} onClick={() => props.onApproveOvertime(firstOvertimeId, "REJECTED")}>
-              야근 반려
-            </button>
-          </InlineActions>
-        }
-      >
-        <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="처리할 업무 없음" />} />
-      </DetailPanel>
+      <ApprovalQueue
+        busy={props.isLoading}
+        employees={props.employees}
+        leaveRequests={props.leaveRequests}
+        overtimeRequests={props.overtimeRequests}
+        onApprove={(item: ApprovalQueueItem) => item.kind === "leave"
+          ? props.onApproveLeave(item.request.id)
+          : props.onApproveOvertime(item.request.id)}
+        onReject={(item: ApprovalQueueItem, reason: string) => item.kind === "leave"
+          ? props.onApproveLeave(item.request.id, "REJECTED", reason)
+          : props.onApproveOvertime(item.request.id, "REJECTED", reason)}
+      />
       <DailyWorkPlanManager
         busy={props.isSavingTaskPlan}
         employees={props.employees}
@@ -1211,48 +1348,37 @@ function PayrollSection(props: {
   isLoading: boolean;
   onUploadPayroll: () => void;
   onDownloadPayroll: (statementId?: string) => void;
-  onDeletePayroll: (statementId?: string) => void;
+  onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
+  payrollStatements: PayrollStatement[];
 }) {
-  const payrollRows = filterRowsForMode(props.erpViewModel.payrollRows, props.erpViewModel.employeeSummary.name, props.canAdmin);
-  const firstPayrollId = payrollRows[0]?.id;
-
   return (
-    <DetailPanel
-      title="급여명세서"
-      description={props.canAdmin ? "관리자는 명세서 업로드와 soft delete 삭제 처리를 수행합니다." : "직원은 본인 급여명세서 조회만 가능합니다."}
-      actions={
+    <div className="admin-operations-stack">
+      {props.canAdmin ? (
         <InlineActions>
-          <button disabled={props.isLoading || !firstPayrollId} onClick={() => props.onDownloadPayroll(firstPayrollId)}>
-            <Download size={14} />
-            다운로드
+          <button disabled={props.isLoading} onClick={props.onUploadPayroll}>
+            <Upload size={14} />
+            명세서 업로드
           </button>
-          {props.canAdmin ? (
-            <>
-              <button disabled={props.isLoading} onClick={props.onUploadPayroll}>
-                <Upload size={14} />
-                업로드
-              </button>
-              <button disabled={props.isLoading || !firstPayrollId} onClick={() => props.onDeletePayroll(firstPayrollId)}>
-                삭제
-              </button>
-            </>
-          ) : null}
         </InlineActions>
-      }
-    >
-      <DataTable columns={rowColumns} rows={payrollRows} emptyState={<EmptyState title="급여명세서 없음" />} />
-    </DetailPanel>
+      ) : null}
+      <PayrollStatementManager
+        busy={props.isLoading}
+        mode={props.canAdmin ? "admin" : "employee"}
+        onDelete={props.canAdmin ? (statement, reason) => props.onDeletePayroll(statement.id, reason) : undefined}
+        onDownload={(statement) => props.onDownloadPayroll(statement.id)}
+        statements={props.payrollStatements}
+      />
+    </div>
   );
 }
 
 function SettingsSection(props: {
   canAdmin: boolean;
   isLoading: boolean;
-  onUpdateGpsRadius: (radius: number) => void;
+  onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
+  systemPolicy: SystemPolicy;
   viewModel: ErpViewModel;
 }) {
-  const gpsRadius = Number(props.viewModel.decisionChecks.find((row) => row.id === "policy-gps-radius")?.value.match(/\d+/)?.[0] ?? 300);
-
   return (
     <div className="erp-two-column">
       <DetailPanel title="선택 직원" description="파일럿 적용 범위와 권한을 확인합니다.">
@@ -1265,34 +1391,15 @@ function SettingsSection(props: {
           ]}
         />
       </DetailPanel>
-      <DetailPanel
-        title="운영 정책"
-        description="확정된 정책값입니다. GPS 반경은 관리자 지정 계정만 변경할 수 있습니다."
-        actions={
-          props.canAdmin ? (
-            <InlineActions>
-              <button disabled={props.isLoading || gpsRadius === 300} onClick={() => props.onUpdateGpsRadius(300)}>
-                300m
-              </button>
-              <button disabled={props.isLoading || gpsRadius === 500} onClick={() => props.onUpdateGpsRadius(500)}>
-                500m
-              </button>
-            </InlineActions>
-          ) : undefined
-        }
-      >
-        <DataTable columns={rowColumns} rows={props.viewModel.decisionChecks} />
-      </DetailPanel>
+      {props.canAdmin ? <SystemPolicyEditor busy={props.isLoading} onSave={props.onUpdateSystemPolicy} settings={props.systemPolicy} /> : null}
     </div>
   );
 }
 
-function AuditSection({ viewModel }: { viewModel: ErpViewModel }) {
+function AuditSection({ auditLogs, employees, viewModel }: { auditLogs: AuditLog[]; employees: Employee[]; viewModel: ErpViewModel }) {
   return (
     <div className="erp-two-column">
-      <DetailPanel title="감사 로그" description="민감 이벤트와 관리자 조작 이력을 추적합니다.">
-        <DataTable columns={rowColumns} rows={viewModel.auditRows} emptyState={<EmptyState title="감사 로그 없음" />} />
-      </DetailPanel>
+      <AuditLogExplorer auditLogs={auditLogs} employees={employees} />
       <DetailPanel title="보정 확인" description="보정 이력은 별도 행으로도 확인합니다.">
         <DataTable columns={rowColumns} rows={viewModel.correctionRows} emptyState={<EmptyState title="보정 없음" />} />
       </DetailPanel>

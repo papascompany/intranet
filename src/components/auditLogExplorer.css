@@ -1,0 +1,61 @@
+.audit-log-explorer {
+  display: grid;
+  gap: 16px;
+  color: var(--color-graphite);
+  font-family: var(--font-inter);
+}
+
+.audit-log-explorer__header,
+.audit-log-explorer__filters,
+.audit-log-explorer__eyebrow,
+.audit-log-explorer__empty {
+  display: flex;
+  align-items: center;
+}
+
+.audit-log-explorer__header { justify-content: space-between; gap: 16px; }
+.audit-log-explorer__header h2, .audit-log-explorer__header p { margin: 0; }
+.audit-log-explorer__header h2 { font-family: var(--font-cal-sans); font-size: 20px; font-weight: 600; }
+.audit-log-explorer__header > div > p:not(.audit-log-explorer__eyebrow) { margin-top: 4px; color: var(--color-slate); font-size: 13px; }
+.audit-log-explorer__eyebrow { gap: 6px; margin-bottom: 6px !important; color: var(--color-slate); font-size: 12px; font-weight: 700; }
+.audit-log-explorer__eyebrow svg { width: 15px; height: 15px; }
+
+.audit-log-explorer__count {
+  flex: 0 0 auto;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--color-slate);
+  background: var(--color-paper);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.audit-log-explorer__filters { flex-wrap: wrap; gap: 10px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 12px; background: var(--color-paper); }
+.audit-log-explorer__filters label { display: grid; flex: 1 1 190px; gap: 5px; color: var(--color-slate); font-size: 12px; font-weight: 600; }
+.audit-log-explorer__filters input { min-width: 0; height: 36px; border: 1px solid var(--color-silver); border-radius: 5px; padding: 0 9px; color: var(--color-graphite); background: var(--color-white); font: inherit; font-size: 13px; }
+.audit-log-explorer__filters input:focus { outline: 2px solid #93c5fd; outline-offset: 1px; }
+.audit-log-explorer__clear { display: inline-flex; align-items: center; gap: 5px; align-self: end; height: 36px; border: 1px solid var(--color-silver); border-radius: 5px; padding: 0 10px; color: var(--color-graphite); background: var(--color-white); font: inherit; font-size: 12px; font-weight: 600; }
+.audit-log-explorer__clear svg { width: 15px; height: 15px; }
+
+.audit-log-explorer__table-wrap { overflow-x: auto; border: 1px solid var(--color-silver); border-radius: 6px; background: var(--color-white); }
+.audit-log-explorer table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+.audit-log-explorer th, .audit-log-explorer td { border-bottom: 1px solid var(--color-silver); padding: 11px 12px; vertical-align: top; font-size: 13px; line-height: 1.45; }
+.audit-log-explorer th { color: var(--color-slate); background: var(--color-paper); font-size: 12px; font-weight: 700; }
+.audit-log-explorer tbody tr:last-child td { border-bottom: 0; }
+.audit-log-explorer td:first-child { white-space: nowrap; color: var(--color-slate); }
+.audit-log-explorer td code { color: #1d4ed8; font-size: 12px; overflow-wrap: anywhere; }
+.audit-log-explorer td span, .audit-log-explorer td small { display: block; }
+.audit-log-explorer td small { margin-top: 2px; color: var(--color-slate); font-size: 11px; overflow-wrap: anywhere; }
+
+.audit-log-explorer__empty { justify-content: center; gap: 12px; min-height: 180px; border: 1px dashed var(--color-silver); border-radius: 6px; padding: 20px; color: var(--color-slate); text-align: left; }
+.audit-log-explorer__empty > svg { flex: 0 0 auto; width: 22px; height: 22px; }
+.audit-log-explorer__empty h3, .audit-log-explorer__empty p { margin: 0; }
+.audit-log-explorer__empty h3 { color: var(--color-graphite); font-size: 14px; }
+.audit-log-explorer__empty p { margin-top: 4px; font-size: 13px; }
+.audit-log-explorer__empty button { flex: 0 0 auto; border: 1px solid var(--color-silver); border-radius: 5px; padding: 8px 10px; color: var(--color-graphite); background: var(--color-white); font: inherit; font-size: 12px; font-weight: 600; }
+
+@media (max-width: 620px) {
+  .audit-log-explorer__header { align-items: flex-start; flex-direction: column; }
+  .audit-log-explorer__empty { align-items: flex-start; flex-wrap: wrap; }
+}

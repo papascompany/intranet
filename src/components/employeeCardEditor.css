@@ -1,0 +1,95 @@
+.employee-card-editor {
+  display: grid;
+  gap: 20px;
+}
+
+.employee-card-editor__section {
+  display: grid;
+  gap: 12px;
+}
+
+.employee-card-editor__section h3,
+.employee-card-editor__custom-fields h4 {
+  margin: 0;
+  color: var(--color-graphite);
+  font-family: var(--font-cal-sans);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.employee-card-editor__admin {
+  border-top: 1px solid var(--color-silver);
+  padding-top: 20px;
+}
+
+.employee-card-editor__grid,
+.employee-card-editor__custom-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.employee-card-editor label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-graphite);
+  font-family: var(--font-inter);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.employee-card-editor input,
+.employee-card-editor textarea {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+  font: inherit;
+  font-weight: 400;
+}
+
+.employee-card-editor textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.employee-card-editor input:focus,
+.employee-card-editor textarea:focus {
+  outline: 2px solid #bfdbfe;
+  outline-offset: 1px;
+}
+
+.employee-card-editor__wide {
+  grid-column: 1 / -1;
+}
+
+.employee-card-editor__custom-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.employee-card-editor__custom-row {
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--color-paper);
+}
+
+.employee-card-editor__reason {
+  margin-top: 4px;
+}
+
+@media (max-width: 640px) {
+  .employee-card-editor__grid,
+  .employee-card-editor__custom-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .employee-card-editor__wide {
+    grid-column: auto;
+  }
+}

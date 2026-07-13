@@ -5,6 +5,7 @@ import type { AuthSession } from "./auth";
 import type { HrRepository } from "./hrRepository";
 
 const fixedNow = "2026-07-08T09:00:00+09:00";
+const payrollFile = { contentBase64: "JVBERi0xLjQK", contentType: "application/pdf" as const, sizeBytes: 9 };
 
 function api() {
   return createHrApi(new InMemoryDatabase(), () => fixedNow);
@@ -57,7 +58,8 @@ describe("hr api", () => {
         actorId: employeeSession.employeeId,
         session: employeeSession,
         month: "2026-07",
-        filename: "2026-07-payroll-kim.pdf"
+        filename: "2026-07-payroll-kim.pdf",
+        file: payrollFile
       })
     ).rejects.toThrow("Admin permission required");
     await expect(hrApi.getAuditLogs({ action: "PAYROLL_STATEMENT_UPLOADED" })).resolves.toHaveLength(0);
@@ -597,7 +599,8 @@ describe("hr api", () => {
       employeeId: "emp-ops-1",
       actorId: "emp-ceo",
       month: "2026-07",
-      filename: "2026-07-payroll-kim.pdf"
+      filename: "2026-07-payroll-kim.pdf",
+      file: payrollFile
     });
     const deleted = await hrApi.softDeletePayrollStatement({
       statementId: upload.statement.id,
@@ -623,7 +626,8 @@ describe("hr api", () => {
       actorId: adminSession.employeeId,
       session: adminSession,
       month: "2026-07",
-      filename: "2026-07-payroll-kim.pdf"
+      filename: "2026-07-payroll-kim.pdf",
+      file: payrollFile
     });
 
     await hrApi.softDeletePayrollStatement({
@@ -648,7 +652,8 @@ describe("hr api", () => {
       employeeId: "emp-ops-1",
       actorId: "emp-ceo",
       month: "2026-07",
-      filename: "2026-07-payroll-kim.pdf"
+      filename: "2026-07-payroll-kim.pdf",
+      file: payrollFile
     });
 
     await expect(
@@ -667,7 +672,8 @@ describe("hr api", () => {
       employeeId: "emp-ops-1",
       actorId: "emp-ceo",
       month: "2026-07",
-      filename: "2026-07-payroll-kim.pdf"
+      filename: "2026-07-payroll-kim.pdf",
+      file: payrollFile
     });
 
     await expect(
@@ -692,7 +698,8 @@ describe("hr api", () => {
         actorId: employeeSession.employeeId,
         session: employeeSession,
         month: "2026-07",
-        filename: "2026-07-payroll-kim.pdf"
+        filename: "2026-07-payroll-kim.pdf",
+        file: payrollFile
       })
     ).rejects.toThrow("Admin permission required");
   });
@@ -706,13 +713,12 @@ describe("hr api", () => {
       session: adminSession,
       month: "2026-07",
       filename: "2026-07-payroll-kim.pdf",
-      storageBucket: "payroll-secure",
-      storagePath: "emp-ops-1/2026-07/final.pdf"
+      file: payrollFile
     });
 
     expect(result.statement.employeeId).toBe("emp-ops-1");
-    expect(result.statement.storageBucket).toBe("payroll-secure");
-    expect(result.statement.storagePath).toBe("emp-ops-1/2026-07/final.pdf");
+    expect(result.statement.storageBucket).toBe("memory-payroll");
+    expect(result.statement.storagePath).toBe("emp-ops-1/2026-07/2026-07-payroll-kim.pdf");
     expect(result.statement.uploadedBy).toBe(adminSession.employeeId);
     expect(result.auditLog.actorId).toBe(adminSession.employeeId);
   });
@@ -728,7 +734,7 @@ describe("hr api", () => {
     expect(result.statement.employeeId).toBe(employeeSession.employeeId);
     expect(result.storageBucket).toBe("payroll-statements");
     expect(result.storagePath).toBe("emp-ops-1/2026-06/2026-06-payroll-kim.pdf");
-    expect(result.signedUrl).toBe("signed-url:///payroll-statements/emp-ops-1/2026-06/2026-06-payroll-kim.pdf");
+    expect(result.signedUrl).toBe("/api/payroll?statementId=pay-1");
     expect(result.auditLog).toMatchObject({
       actorId: employeeSession.employeeId,
       action: "PAYROLL_STATEMENT_DOWNLOADED",
@@ -744,7 +750,8 @@ describe("hr api", () => {
       actorId: adminSession.employeeId,
       session: adminSession,
       month: "2026-07",
-      filename: "2026-07-payroll-lee.pdf"
+      filename: "2026-07-payroll-lee.pdf",
+      file: payrollFile
     });
 
     await expect(
@@ -799,7 +806,8 @@ describe("hr api", () => {
       employeeId: "emp-ops-1",
       actorId: "emp-ceo",
       month: "2026-08",
-      filename: "2026-08-payroll-kim.pdf"
+      filename: "2026-08-payroll-kim.pdf",
+      file: payrollFile
     });
 
     const beforeDelete = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);

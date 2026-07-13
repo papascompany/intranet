@@ -4,15 +4,19 @@ import { InMemoryDatabase } from "../api/inMemoryDatabase.js";
 import { PostgresHrRepository, type PostgresQuery } from "../api/postgresRepository.js";
 import type { HrRepository } from "../api/hrRepository.js";
 import type { PersistenceStatus } from "../api/types.js";
+import type { PayrollFileStorage } from "../api/payrollFileStorage.js";
+import { createPayrollFileStorageFromEnv } from "./vercelBlobPayrollStorage.js";
 
 export type HrServerEnv = {
   DATABASE_URL?: string;
   HR_REPOSITORY_MODE?: "memory" | "postgres";
+  BLOB_READ_WRITE_TOKEN?: string;
 };
 
 export type HrRepositoryFactoryOptions = {
   query?: PostgresQuery;
   fallbackRepository?: HrRepository;
+  payrollStorage?: PayrollFileStorage;
 };
 
 export function getPersistenceStatusFromEnv(env: HrServerEnv = process.env): PersistenceStatus {
@@ -74,5 +78,9 @@ export function createHrRepositoryFromEnv(
 }
 
 export function createServerHrApi(env: HrServerEnv = process.env, options: HrRepositoryFactoryOptions = {}): HrApi {
-  return createHrApi(createHrRepositoryFromEnv(env, options));
+  return createHrApi(
+    createHrRepositoryFromEnv(env, options),
+    undefined,
+    options.payrollStorage ?? createPayrollFileStorageFromEnv(env)
+  );
 }

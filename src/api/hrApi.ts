@@ -15,6 +15,13 @@ import type {
 } from "../domain/types.js";
 import { canApproveRequests, isAdminSession, type AuthSession } from "./auth.js";
 import { InMemoryDatabase } from "./inMemoryDatabase.js";
+import {
+  decodePayrollPdf,
+  InMemoryPayrollFileStorage,
+  type PayrollFileStorage,
+  validatePayrollFilename,
+  validatePayrollMonth
+} from "./payrollFileStorage.js";
 import type { HrRepository } from "./hrRepository.js";
 import type {
   AuditLogFilter,
@@ -46,7 +53,8 @@ const defaultClock: Clock = () => new Date().toISOString();
 export class HrApi {
   constructor(
     private readonly db: HrRepository = new InMemoryDatabase(),
-    private readonly clock: Clock = defaultClock
+    private readonly clock: Clock = defaultClock,
+    private readonly payrollStorage: PayrollFileStorage = new InMemoryPayrollFileStorage()
   ) {}
 
   async getEmployees() {
@@ -303,7 +311,12 @@ export class HrApi {
 
   async updateEmployeeCard(input: UpdateEmployeeCardInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    await this.assertAdmin(actorId, input.session);
+    const selfServiceUpdate = Boolean(input.session && input.session.employeeId === input.employeeId && !isAdminSession(input.session));
+    if (selfServiceUpdate) {
+      assertSelfServiceEmployeeCardPatch(input.patch);
+    } else {
+      await this.assertAdmin(actorId, input.session);
+    }
 
     const employee = (await this.db.listEmployees()).find((item) => item.id === input.employeeId);
     if (!employee) {
@@ -490,14 +503,25 @@ export class HrApi {
     await this.assertEmployee(input.employeeId);
     const actorId = this.resolveActorId(input, input.actorId);
     await this.assertAdmin(actorId, input.session);
+    const filename = validatePayrollFilename(input.filename);
+    const month = validatePayrollMonth(input.month);
+    if (input.file?.contentType !== "application/pdf") {
+      throw new Error("Payroll file content type must be application/pdf.");
+    }
+    const content = decodePayrollPdf(input.file?.contentBase64, input.file?.sizeBytes);
+    const stored = await this.payrollStorage.put({
+      pathname: this.defaultPayrollStoragePath(input.employeeId, month, filename),
+      content,
+      contentType: "application/pdf"
+    });
 
     const statement: PayrollStatement = {
       id: await this.db.nextId("pay"),
       employeeId: input.employeeId,
-      month: input.month,
-      filename: input.filename,
-      storageBucket: input.storageBucket ?? "payroll-statements",
-      storagePath: input.storagePath ?? this.defaultPayrollStoragePath(input.employeeId, input.month, input.filename),
+      month,
+      filename,
+      storageBucket: stored.bucket,
+      storagePath: stored.pathname,
       uploadedBy: actorId,
       uploadedAt: input.uploadedAt ?? this.clock()
     };
@@ -538,7 +562,8 @@ export class HrApi {
       statement,
       storageBucket,
       storagePath,
-      signedUrl: `signed-url:///${storageBucket}/${storagePath}`,
+      // This is a same-origin, cookie-protected streaming endpoint. Blob objects remain private.
+      signedUrl: `/api/payroll?statementId=${encodeURIComponent(statement.id)}`,
       auditLog
     };
   }
@@ -806,13 +831,25 @@ export class HrApi {
   }
 }
 
+function assertSelfServiceEmployeeCardPatch(patch: UpdateEmployeeCardInput["patch"]) {
+  const allowedFields = new Set(["birthday", "address", "mobile", "emergencyContact", "familyRelations", "payrollBank", "payrollAccount"]);
+  const restrictedField = Object.keys(patch).find((field) => !allowedFields.has(field));
+  if (restrictedField) {
+    throw new Error(`Admin permission required for employee-card field: ${restrictedField}`);
+  }
+}
+
 function normalizeOptionalText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized || undefined;
 }
 
-export function createHrApi(db: HrRepository = new InMemoryDatabase(), clock: Clock = defaultClock) {
-  return new HrApi(db, clock);
+export function createHrApi(
+  db: HrRepository = new InMemoryDatabase(),
+  clock: Clock = defaultClock,
+  payrollStorage: PayrollFileStorage = new InMemoryPayrollFileStorage()
+) {
+  return new HrApi(db, clock, payrollStorage);
 }
 
 function parseDashboardInput(input: string | DashboardInput, clock: Clock) {

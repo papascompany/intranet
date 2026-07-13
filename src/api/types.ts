@@ -101,8 +101,11 @@ export type UploadPayrollStatementInput = AuthenticatedInput & {
   month: string;
   filename: string;
   actorId: string;
-  storageBucket?: string;
-  storagePath?: string;
+  file?: {
+    contentBase64: string;
+    contentType: "application/pdf";
+    sizeBytes?: number;
+  };
   uploadedAt?: string;
 };
 
