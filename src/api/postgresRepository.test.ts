@@ -143,4 +143,37 @@ describe("PostgresHrRepository", () => {
     expect(calls[1].params).toContain("DONE");
     expect(saved.completedAt).toBe("2026-07-12T14:30:00+09:00");
   });
+
+  it("inserts daily work task plans with assignment and planning fields", async () => {
+    const { calls, repository } = repositoryWithRows([
+      [
+        {
+          id: "daily-task-3",
+          employee_id: "emp-prod-1",
+          department: "제작팀",
+          work_date: "2026-07-13",
+          title: "제작 일정 등록",
+          due_label: "오후 4:00",
+          display_order: 2,
+          status: "TODO",
+          completed_at: null
+        }
+      ]
+    ]);
+
+    const saved = await repository.addDailyWorkTask({
+      id: "daily-task-3",
+      employeeId: "emp-prod-1",
+      department: "제작팀",
+      date: "2026-07-13",
+      title: "제작 일정 등록",
+      dueLabel: "오후 4:00",
+      displayOrder: 2,
+      status: "TODO"
+    });
+
+    expect(calls[0].sql).toContain("insert into daily_work_tasks");
+    expect(calls[0].params).toEqual(expect.arrayContaining(["emp-prod-1", "제작 일정 등록", 2, "TODO"]));
+    expect(saved).toMatchObject({ employeeId: "emp-prod-1", displayOrder: 2, status: "TODO" });
+  });
 });

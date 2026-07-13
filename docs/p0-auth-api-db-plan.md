@@ -21,6 +21,7 @@
 - `src/api/postgresRepository.ts`: Neon/Vercel Postgres에 붙일 SQL repository, snake/camel 변환, soft delete 필터, 감사 로그 저장 구현.
 - `src/server/neonRepositoryFactory.ts`: `DATABASE_URL`이 있으면 Neon Postgres, 없으면 데모용 메모리 저장소를 선택하는 서버 전용 factory 추가.
 - `src/server/hrHttpHandler.ts`, `api/hr.ts`: Vercel Serverless Function에서 `HrApi`를 호출하는 HTTP API 표면 추가.
+- `GET /api/hr?resource=status` 및 `POST /api/hr`의 `getSystemStatus`: 현재 저장소 모드만 안전하게 보고한다. `postgres`는 연결 문자열이 구성된 상태를 뜻하며, 요청마다 DB 연결을 검사하는 health check는 아니다. 응답에는 연결 문자열, 호스트, 사용자명 등 비밀값이 포함되지 않는다.
 - `src/api/hrHttpClient.ts`, `src/App.tsx`: 프론트엔드는 `/api/hr` HTTP client를 통해 API를 호출한다. Vite 단독 개발 서버에서 `/api/hr`가 404인 경우에만 메모리 API fallback을 사용한다.
 - `database/migrations/202607110001_neon_hr_schema.sql`: Neon Postgres 초기 스키마 추가.
 
@@ -42,3 +43,11 @@
 - 운영 전에는 refresh token/session cookie, CSRF 정책, 감사 로그 IP/User-Agent 수집, 관리자 액션 재인증 기준을 확정해야 한다.
 - 운영 전에는 업무 write와 감사 로그 insert를 DB transaction으로 묶어 원자성을 강화해야 한다.
 - DB 권한은 서버 계층에서 통제하고, API 계층에서도 동일한 권한 검사를 유지한다.
+
+## Vercel 운영 환경
+
+- 운영 환경에는 Neon의 `DATABASE_URL`을 Vercel Production 환경 변수로 설정한다. 이 값은 서버리스 함수에서만 사용하며 `VITE_` 접두사를 붙이지 않는다.
+- `HR_REPOSITORY_MODE`는 일반 운영에서는 설정하지 않는다. `memory`로 명시하면 `DATABASE_URL`이 있어도 데이터가 서버리스 메모리에만 저장되는 데모 모드가 된다.
+- `DATABASE_URL`이 없을 때의 현재 fallback은 의도적으로 보존한다. 앱은 계속 동작하지만 데이터는 영속되지 않는다. 상태 API의 `demoOnly: true`, `persistence: "ephemeral"`, `reason: "DATABASE_URL_MISSING"`로 이를 식별한다.
+- 배포 후 비밀값을 노출하지 않고 `GET /api/hr?resource=status`를 확인한다. 운영 준비 상태는 `repositoryMode: "postgres"`, `persistence: "persistent"`, `demoOnly: false`여야 한다.
+- 이 상태 API는 연결 문자열의 존재 여부만 확인한다. Neon 연결 가능 여부와 마이그레이션 적용 여부는 별도의 배포 점검에서 검증한다.

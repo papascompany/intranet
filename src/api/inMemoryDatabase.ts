@@ -203,6 +203,15 @@ export class InMemoryDatabase implements HrRepository {
     return cloneList(this.dailyWorkTasks);
   }
 
+  addDailyWorkTask(task: DailyWorkTask) {
+    if (this.dailyWorkTasks.some((item) => item.id === task.id)) {
+      throw new Error(`Daily work task already exists: ${task.id}`);
+    }
+
+    this.dailyWorkTasks.push(cloneItem(task));
+    return cloneItem(task);
+  }
+
   updateDailyWorkTask(task: DailyWorkTask) {
     const index = this.dailyWorkTasks.findIndex((item) => item.id === task.id);
     if (index < 0) {

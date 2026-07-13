@@ -144,6 +144,14 @@ export const defaultSystemPolicy: SystemPolicy = {
   advanceLeaveExceptionHandling: "HR_CORRECTION"
 };
 
+export type PersistenceStatus = {
+  repositoryMode: "postgres" | "memory";
+  persistence: "persistent" | "ephemeral";
+  demoOnly: boolean;
+  databaseConfigured: boolean;
+  reason: "DATABASE_URL_CONFIGURED" | "DATABASE_URL_MISSING" | "MEMORY_MODE_REQUESTED" | "LOCAL_DEMO_FALLBACK";
+};
+
 export type DashboardInput = AuthenticatedInput & {
   asOf?: string;
 };
@@ -170,6 +178,29 @@ export type UpdateDailyWorkTaskStatusInput = AuthenticatedInput & {
   status: import("../domain/types.js").DailyWorkTaskStatus;
   actorId?: string;
   completedAt?: string;
+};
+
+export type CreateDailyWorkTaskPlanInput = AuthenticatedInput & {
+  actorId?: string;
+  employeeId: string;
+  date: string;
+  title: string;
+  dueLabel?: string;
+  displayOrder?: number;
+  status?: import("../domain/types.js").DailyWorkTaskStatus;
+  completedAt?: string;
+};
+
+export type UpdateDailyWorkTaskPlanInput = AuthenticatedInput & {
+  actorId?: string;
+  taskId: string;
+  employeeId?: string;
+  date?: string;
+  title?: string;
+  dueLabel?: string | null;
+  displayOrder?: number;
+  status?: import("../domain/types.js").DailyWorkTaskStatus;
+  completedAt?: string | null;
 };
 
 export type AuditLogFilter = AuthenticatedInput & {

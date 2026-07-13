@@ -393,6 +393,59 @@ describe("hr api", () => {
     ).rejects.toThrow("Daily work task access denied");
   });
 
+  it("allows an approver to create and update an assigned employee's daily task plan", async () => {
+    const hrApi = api();
+    const created = await hrApi.createDailyWorkTaskPlan({
+      employeeId: "emp-prod-1",
+      date: "2026-07-13",
+      title: "  제품 컷 최종 검수  ",
+      dueLabel: "오후 4:00",
+      displayOrder: 3,
+      status: "IN_PROGRESS",
+      session: approverSession
+    });
+
+    const updated = await hrApi.updateDailyWorkTaskPlan({
+      taskId: created.task.id,
+      employeeId: "emp-ops-1",
+      title: "운영 검수 요청 확인",
+      dueLabel: null,
+      displayOrder: 1,
+      status: "DONE",
+      completedAt: "2026-07-13T16:00:00+09:00",
+      session: approverSession
+    });
+
+    expect(created).toMatchObject({
+      task: { employeeId: "emp-prod-1", department: "제작팀", title: "제품 컷 최종 검수", status: "IN_PROGRESS" },
+      auditLog: { action: "DAILY_WORK_TASK_PLAN_CREATED" }
+    });
+    expect(updated).toMatchObject({
+      task: {
+        employeeId: "emp-ops-1",
+        department: "운영팀",
+        dueLabel: undefined,
+        displayOrder: 1,
+        status: "DONE",
+        completedAt: "2026-07-13T16:00:00+09:00"
+      },
+      auditLog: { action: "DAILY_WORK_TASK_PLAN_UPDATED" }
+    });
+  });
+
+  it("rejects employee daily task plan changes", async () => {
+    const hrApi = api();
+
+    await expect(
+      hrApi.createDailyWorkTaskPlan({
+        employeeId: "emp-ops-1",
+        date: "2026-07-13",
+        title: "권한 없는 계획 등록",
+        session: employeeSession
+      })
+    ).rejects.toThrow("Approval permission required");
+  });
+
   it("allows admins to update employee card fields", async () => {
     const hrApi = api();
 

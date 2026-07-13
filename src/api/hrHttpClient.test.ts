@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDailyWorkTasks, getDashboard, getEmployees, submitLeaveRequest, updateDailyWorkTaskStatus } from "./hrHttpClient";
+import {
+  createDailyWorkTaskPlan,
+  getDailyWorkTasks,
+  getDashboard,
+  getEmployees,
+  getSystemStatus,
+  submitLeaveRequest,
+  updateDailyWorkTaskPlan,
+  updateDailyWorkTaskStatus
+} from "./hrHttpClient";
 
 const originalFetch = globalThis.fetch;
 
@@ -84,5 +93,51 @@ describe("hrHttpClient", () => {
       })
     );
     expect(result.task.status).toBe("DONE");
+  });
+
+  it("posts daily work task plan create and update actions", async () => {
+    const fetch = mockFetch(200, { task: { id: "daily-task-3", status: "TODO" }, auditLog: { id: "audit-4" } });
+    const createInput = { employeeId: "emp-prod-1", date: "2026-07-13", title: "제작 일정 등록" };
+    const updateInput = { taskId: "daily-task-3", displayOrder: 2, status: "IN_PROGRESS" as const };
+
+    await createDailyWorkTaskPlan(createInput);
+    await updateDailyWorkTaskPlan(updateInput);
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "/api/hr",
+      expect.objectContaining({ body: JSON.stringify({ action: "createDailyWorkTaskPlan", payload: createInput }) })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/api/hr",
+      expect.objectContaining({ body: JSON.stringify({ action: "updateDailyWorkTaskPlan", payload: updateInput }) })
+    );
+  });
+
+  it("retrieves safe persistence status through the server API", async () => {
+    const fetch = mockFetch(200, {
+      repositoryMode: "postgres",
+      persistence: "persistent",
+      demoOnly: false,
+      databaseConfigured: true,
+      reason: "DATABASE_URL_CONFIGURED"
+    });
+
+    await expect(getSystemStatus()).resolves.toMatchObject({ repositoryMode: "postgres", demoOnly: false });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/hr",
+      expect.objectContaining({ body: JSON.stringify({ action: "getSystemStatus" }) })
+    );
+  });
+
+  it("reports the local Vite fallback as demo-only", async () => {
+    mockFetch(404, { error: "Not found" });
+
+    await expect(getSystemStatus()).resolves.toMatchObject({
+      repositoryMode: "memory",
+      demoOnly: true,
+      reason: "LOCAL_DEMO_FALLBACK"
+    });
   });
 });

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handleHrHttpRequest } from "../src/server/hrHttpHandler.js";
+import { getAuthenticatedSessionFromCookie } from "../src/server/productionAuth.js";
 
 type VercelRequest = IncomingMessage & {
   method?: string;
@@ -8,10 +9,12 @@ type VercelRequest = IncomingMessage & {
 };
 
 export default async function handler(request: VercelRequest, response: ServerResponse) {
+  const authenticated = await getAuthenticatedSessionFromCookie(request.headers.cookie).catch(() => undefined);
   const result = await handleHrHttpRequest({
     method: request.method ?? "GET",
     query: request.query,
-    body: parseRequestBody(request.body)
+    body: parseRequestBody(request.body),
+    serverSession: authenticated?.session
   });
 
   response.statusCode = result.status;

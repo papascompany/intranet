@@ -19,6 +19,7 @@ import type { HrRepository } from "./hrRepository.js";
 import type {
   AuditLogFilter,
   ClockAttendanceInput,
+  CreateDailyWorkTaskPlanInput,
   CreateAttendanceCorrectionInput,
   Dashboard,
   DashboardInput,
@@ -31,6 +32,7 @@ import type {
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
   UpdateEmployeeCardInput,
+  UpdateDailyWorkTaskPlanInput,
   UpdateDailyWorkTaskStatusInput,
   UpdateSettingsInput,
   UpdateRequestStatusInput,
@@ -230,6 +232,70 @@ export class HrApi {
       targetType: "DailyWorkTask",
       targetId: saved.id,
       detail: `${task.status} -> ${saved.status}`
+    });
+
+    return { task: saved, auditLog };
+  }
+
+  async createDailyWorkTaskPlan(input: CreateDailyWorkTaskPlanInput) {
+    const actorId = this.resolveActorId(input, input.session?.employeeId ?? "");
+    await this.assertCanApprove(actorId, input.session);
+    const employee = await this.findEmployee(input.employeeId);
+    this.assertDailyWorkTaskPlan(input);
+
+    const status = input.status ?? "TODO";
+    const task: DailyWorkTask = {
+      id: await this.db.nextId("daily-work-task"),
+      employeeId: employee.id,
+      department: employee.department,
+      date: input.date,
+      title: input.title.trim(),
+      dueLabel: normalizeOptionalText(input.dueLabel),
+      displayOrder: input.displayOrder ?? 0,
+      status,
+      completedAt: status === "DONE" ? input.completedAt ?? this.clock() : undefined
+    };
+    const saved = await this.db.addDailyWorkTask(task);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "DAILY_WORK_TASK_PLAN_CREATED",
+      targetType: "DailyWorkTask",
+      targetId: saved.id,
+      detail: `${saved.employeeId} ${saved.date}: ${saved.title}`
+    });
+
+    return { task: saved, auditLog };
+  }
+
+  async updateDailyWorkTaskPlan(input: UpdateDailyWorkTaskPlanInput) {
+    const actorId = this.resolveActorId(input, input.session?.employeeId ?? "");
+    await this.assertCanApprove(actorId, input.session);
+    const current = await this.findDailyWorkTask(input.taskId);
+    const employee = input.employeeId ? await this.findEmployee(input.employeeId) : await this.findEmployee(current.employeeId);
+    const status = input.status ?? current.status;
+    const title = input.title === undefined ? current.title : input.title.trim();
+    const date = input.date ?? current.date;
+    const displayOrder = input.displayOrder ?? current.displayOrder;
+    this.assertDailyWorkTaskPlan({ title, date, displayOrder });
+
+    const updated: DailyWorkTask = {
+      ...current,
+      employeeId: employee.id,
+      department: employee.department,
+      date,
+      title,
+      dueLabel: input.dueLabel === undefined ? current.dueLabel : normalizeOptionalText(input.dueLabel),
+      displayOrder,
+      status,
+      completedAt: status === "DONE" ? input.completedAt ?? current.completedAt ?? this.clock() : undefined
+    };
+    const saved = await this.db.updateDailyWorkTask(updated);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "DAILY_WORK_TASK_PLAN_UPDATED",
+      targetType: "DailyWorkTask",
+      targetId: saved.id,
+      detail: `${current.employeeId}/${current.date} -> ${saved.employeeId}/${saved.date}: ${saved.title}`
     });
 
     return { task: saved, auditLog };
@@ -717,6 +783,32 @@ export class HrApi {
 
     return task;
   }
+
+  private async findEmployee(employeeId: string) {
+    const employee = (await this.db.listEmployees()).find((item) => item.id === employeeId);
+    if (!employee) {
+      throw new Error(`Employee not found: ${employeeId}`);
+    }
+
+    return employee;
+  }
+
+  private assertDailyWorkTaskPlan(input: { title: string; date: string; displayOrder?: number }) {
+    if (!input.title.trim()) {
+      throw new Error("Daily work task title is required");
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+      throw new Error("Daily work task date must use YYYY-MM-DD");
+    }
+    if (input.displayOrder !== undefined && (!Number.isInteger(input.displayOrder) || input.displayOrder < 0)) {
+      throw new Error("Daily work task display order must be a non-negative integer");
+    }
+  }
+}
+
+function normalizeOptionalText(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized || undefined;
 }
 
 export function createHrApi(db: HrRepository = new InMemoryDatabase(), clock: Clock = defaultClock) {
@@ -743,6 +835,8 @@ export const getDashboard = defaultHrApi.getDashboard.bind(defaultHrApi);
 export const getEmployeeSnapshot = defaultHrApi.getEmployeeSnapshot.bind(defaultHrApi);
 export const getDailyWorkTasks = defaultHrApi.getDailyWorkTasks.bind(defaultHrApi);
 export const updateDailyWorkTaskStatus = defaultHrApi.updateDailyWorkTaskStatus.bind(defaultHrApi);
+export const createDailyWorkTaskPlan = defaultHrApi.createDailyWorkTaskPlan.bind(defaultHrApi);
+export const updateDailyWorkTaskPlan = defaultHrApi.updateDailyWorkTaskPlan.bind(defaultHrApi);
 export const updateEmployeeCard = defaultHrApi.updateEmployeeCard.bind(defaultHrApi);
 export const getSettings = defaultHrApi.getSettings.bind(defaultHrApi);
 export const updateSettings = defaultHrApi.updateSettings.bind(defaultHrApi);

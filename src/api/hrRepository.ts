@@ -37,6 +37,7 @@ export interface HrRepository {
   addPayrollStatement(statement: PayrollStatement): MaybePromise<PayrollStatement>;
   updatePayrollStatement(statement: PayrollStatement): MaybePromise<PayrollStatement>;
   listDailyWorkTasks(): MaybePromise<DailyWorkTask[]>;
+  addDailyWorkTask(task: DailyWorkTask): MaybePromise<DailyWorkTask>;
   updateDailyWorkTask(task: DailyWorkTask): MaybePromise<DailyWorkTask>;
   getSettings(): MaybePromise<SystemPolicy>;
   updateSettings(settings: Partial<SystemPolicy>): MaybePromise<SystemPolicy>;

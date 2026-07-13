@@ -3,6 +3,7 @@ import type {
   AuditLogFilter,
   ClockAttendanceInput,
   ClockAttendanceResult,
+  CreateDailyWorkTaskPlanInput,
   CreateAttendanceCorrectionInput,
   Dashboard,
   DashboardInput,
@@ -15,8 +16,10 @@ import type {
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
   UpdateEmployeeCardInput,
+  UpdateDailyWorkTaskPlanInput,
   UpdateDailyWorkTaskStatusInput,
   UpdateSettingsInput,
+  PersistenceStatus,
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
 } from "./types";
@@ -63,8 +66,20 @@ export async function updateDailyWorkTaskStatus(input: UpdateDailyWorkTaskStatus
   return await post<{ task: DailyWorkTask; auditLog: AuditLog }>("updateDailyWorkTaskStatus", input);
 }
 
+export async function createDailyWorkTaskPlan(input: CreateDailyWorkTaskPlanInput) {
+  return await post<{ task: DailyWorkTask; auditLog: AuditLog }>("createDailyWorkTaskPlan", input);
+}
+
+export async function updateDailyWorkTaskPlan(input: UpdateDailyWorkTaskPlanInput) {
+  return await post<{ task: DailyWorkTask; auditLog: AuditLog }>("updateDailyWorkTaskPlan", input);
+}
+
 export async function getSettings(input: { session?: AuthSession } = {}) {
   return await post<SystemPolicy>("getSettings", input);
+}
+
+export async function getSystemStatus() {
+  return await post<PersistenceStatus>("getSystemStatus");
 }
 
 export async function updateSettings(input: UpdateSettingsInput) {
@@ -167,8 +182,20 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.getDailyWorkTasks(payload as never)) as T;
     case "updateDailyWorkTaskStatus":
       return (await api.updateDailyWorkTaskStatus(payload as never)) as T;
+    case "createDailyWorkTaskPlan":
+      return (await api.createDailyWorkTaskPlan(payload as never)) as T;
+    case "updateDailyWorkTaskPlan":
+      return (await api.updateDailyWorkTaskPlan(payload as never)) as T;
     case "getSettings":
       return (await api.getSettings(payload as never)) as T;
+    case "getSystemStatus":
+      return {
+        repositoryMode: "memory",
+        persistence: "ephemeral",
+        demoOnly: true,
+        databaseConfigured: false,
+        reason: "LOCAL_DEMO_FALLBACK"
+      } as T;
     case "getAuditLogs":
       return (await api.getAuditLogs(payload as never)) as T;
     case "clockAttendance":

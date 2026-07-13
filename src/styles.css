@@ -55,6 +55,11 @@ button {
   gap: 16px;
 }
 
+.admin-operations-stack {
+  display: grid;
+  gap: 16px;
+}
+
 .my-day__hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(228px, 0.78fr) minmax(270px, 0.92fr);
@@ -331,6 +336,47 @@ button {
   line-height: 1.45;
 }
 
+.request-field {
+  display: grid;
+  gap: 6px;
+  color: var(--color-graphite);
+  font-family: var(--font-inter);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.request-field > input,
+.request-field > select,
+.request-field > textarea {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+  font: inherit;
+  font-weight: 400;
+}
+
+.request-field > textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.request-field > input:focus,
+.request-field > select:focus,
+.request-field > textarea:focus {
+  outline: 2px solid #bfdbfe;
+  outline-offset: 1px;
+}
+
+.request-form__split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .login-shell {
   width: min(640px, calc(100% - 32px));
   padding-top: 12vh;
@@ -505,6 +551,39 @@ h3 {
   align-items: end;
   justify-content: space-between;
   flex-wrap: wrap;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 420px);
+}
+
+.login-form__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.login-form__actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 16px;
+  color: var(--color-white);
+  background: var(--color-ink);
+  font-family: var(--font-inter);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-form__actions button:disabled {
+  cursor: not-allowed;
+  color: var(--color-stone);
+  background: var(--color-paper);
 }
 
 .checkbox-label {

@@ -3,6 +3,7 @@ import { createHrApi, type HrApi } from "../api/hrApi.js";
 import { InMemoryDatabase } from "../api/inMemoryDatabase.js";
 import { PostgresHrRepository, type PostgresQuery } from "../api/postgresRepository.js";
 import type { HrRepository } from "../api/hrRepository.js";
+import type { PersistenceStatus } from "../api/types.js";
 
 export type HrServerEnv = {
   DATABASE_URL?: string;
@@ -13,6 +14,36 @@ export type HrRepositoryFactoryOptions = {
   query?: PostgresQuery;
   fallbackRepository?: HrRepository;
 };
+
+export function getPersistenceStatusFromEnv(env: HrServerEnv = process.env): PersistenceStatus {
+  if (env.HR_REPOSITORY_MODE === "memory") {
+    return {
+      repositoryMode: "memory",
+      persistence: "ephemeral",
+      demoOnly: true,
+      databaseConfigured: Boolean(env.DATABASE_URL),
+      reason: "MEMORY_MODE_REQUESTED"
+    };
+  }
+
+  if (env.DATABASE_URL) {
+    return {
+      repositoryMode: "postgres",
+      persistence: "persistent",
+      demoOnly: false,
+      databaseConfigured: true,
+      reason: "DATABASE_URL_CONFIGURED"
+    };
+  }
+
+  return {
+    repositoryMode: "memory",
+    persistence: "ephemeral",
+    demoOnly: true,
+    databaseConfigured: false,
+    reason: "DATABASE_URL_MISSING"
+  };
+}
 
 export function createNeonQuery(databaseUrl: string): PostgresQuery {
   const sql = neon(databaseUrl);
@@ -25,7 +56,9 @@ export function createHrRepositoryFromEnv(
   env: HrServerEnv = process.env,
   options: HrRepositoryFactoryOptions = {}
 ): HrRepository {
-  if (env.HR_REPOSITORY_MODE === "memory") {
+  const status = getPersistenceStatusFromEnv(env);
+
+  if (status.repositoryMode === "memory") {
     return options.fallbackRepository ?? new InMemoryDatabase();
   }
 
@@ -35,6 +68,8 @@ export function createHrRepositoryFromEnv(
     });
   }
 
+  // This branch is unreachable with the current status resolver, but keeps the
+  // fallback explicit if a future persistence mode is introduced.
   return options.fallbackRepository ?? new InMemoryDatabase();
 }
 

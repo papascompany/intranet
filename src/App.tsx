@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   BadgeCheck,
   CalendarDays,
@@ -23,10 +23,10 @@ import {
 import {
   clockAttendance,
   createAttendanceCorrection,
+  createDailyWorkTaskPlan,
   getDashboard,
   getEmployeeDirectory,
   getEmployeeSnapshot,
-  getEmployees,
   downloadPayrollStatement,
   setOvertimePayApproval,
   softDeletePayrollStatement,
@@ -34,12 +34,14 @@ import {
   submitOvertimeRequest,
   updateEmployeeCard,
   updateDailyWorkTaskStatus,
+  updateDailyWorkTaskPlan,
   updateSettings,
   updateRequestStatus,
   uploadPayrollStatement
 } from "./api/hrHttpClient";
 import type { Dashboard, EmployeeSnapshot } from "./api/types";
-import { createDemoAuthSession, isAdminSession, type AuthSession } from "./api/auth";
+import { isAdminSession, type AuthSession } from "./api/auth";
+import { getAuthenticatedSession, loginWithEmployeeNumber, logoutAuthenticatedSession } from "./api/authHttpClient";
 import {
   DataTable,
   DetailPanel,
@@ -53,7 +55,9 @@ import {
   Toolbar,
   type DataTableColumn
 } from "./components/erp";
-import type { ClockType, DailyWorkTask, Employee, VerificationMethod } from "./domain/types";
+import { FormDialog, InlineNotice } from "./components/operational";
+import { DailyWorkPlanManager, type DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
+import type { ClockType, DailyWorkTask, Employee, LeaveType, VerificationMethod } from "./domain/types";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
 import {
@@ -78,6 +82,22 @@ const navIcons: Record<ErpActiveSection, React.ReactNode> = {
 };
 
 type UserMode = "EMPLOYEE" | "ADMIN";
+type RequestDialog = "leave" | "overtime" | null;
+
+type LeaveDraft = {
+  days: string;
+  endsOn: string;
+  reason: string;
+  startsOn: string;
+  type: LeaveType;
+};
+
+type OvertimeDraft = {
+  date: string;
+  endsAt: string;
+  reason: string;
+  startsAt: string;
+};
 
 const employeeSections: ErpActiveSection[] = ["self-service", "employee-card", "attendance", "leave", "overtime", "payroll"];
 const adminSections: ErpActiveSection[] = ["employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
@@ -113,33 +133,66 @@ const employeeCardColumns: DataTableColumn<EmployeeCardRow>[] = [
 
 function App() {
   const [activeSection, setActiveSection] = useState<ErpActiveSection>("self-service");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => localStorage.getItem("intranet:employee-id") ?? "emp-ops-1");
-  const [authSession, setAuthSession] = useState<AuthSession | null>(() => readStoredSession());
-  const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(readStoredSession()));
-  const [rememberLogin, setRememberLogin] = useState(() => localStorage.getItem("intranet:remember-login") === "true");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("emp-ops-1");
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [rememberLogin, setRememberLogin] = useState(false);
   const [userMode, setUserMode] = useState<UserMode>("EMPLOYEE");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [employeeSnapshot, setEmployeeSnapshot] = useState<EmployeeSnapshot | null>(null);
   const [notice, setNotice] = useState("운영팀 파일럿 API/DB 계층이 준비되었습니다.");
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [requestDialog, setRequestDialog] = useState<RequestDialog>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [leaveDraft, setLeaveDraft] = useState<LeaveDraft>({
+    type: "ANNUAL",
+    startsOn: "",
+    endsOn: "",
+    days: "1",
+    reason: ""
+  });
+  const [overtimeDraft, setOvertimeDraft] = useState<OvertimeDraft>({
+    date: "",
+    startsAt: "",
+    endsAt: "",
+    reason: ""
+  });
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
+  const [taskPlanError, setTaskPlanError] = useState<string | null>(null);
+  const [isSavingTaskPlan, setIsSavingTaskPlan] = useState(false);
 
   const refresh = useCallback(
     async (employeeId = selectedEmployeeId) => {
+      if (!isLoggedIn || !authSession) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
-      const session = isLoggedIn ? authSession ?? undefined : undefined;
-      const snapshotEmployeeId = session && !isAdminSession(session) ? session.employeeId : employeeId;
-      const [nextEmployees, nextDashboard, nextSnapshot] = await Promise.all([
-        session ? getEmployeeDirectory({ session }) : getEmployees(),
-        getDashboard({ asOf: today, session }),
-        getEmployeeSnapshot(snapshotEmployeeId, today, session)
-      ]);
+      setLoadError(null);
+      try {
+        const session = authSession;
+        const snapshotEmployeeId = !isAdminSession(session) ? session.employeeId : employeeId;
+        const [nextEmployees, nextDashboard, nextSnapshot] = await Promise.all([
+          getEmployeeDirectory({ session }),
+          getDashboard({ asOf: today, session }),
+          getEmployeeSnapshot(snapshotEmployeeId, today, session)
+        ]);
 
-      setEmployees(nextEmployees);
-      setSelectedEmployeeId(snapshotEmployeeId);
-      setDashboard(nextDashboard);
-      setEmployeeSnapshot(nextSnapshot);
-      setIsLoading(false);
+        setEmployees(nextEmployees);
+        setSelectedEmployeeId(snapshotEmployeeId);
+        setDashboard(nextDashboard);
+        setEmployeeSnapshot(nextSnapshot);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "데이터를 불러오지 못했습니다.";
+        setLoadError(message);
+        setNotice("데이터 동기화에 실패했습니다. 다시 시도해 주세요.");
+      } finally {
+        setIsLoading(false);
+      }
     },
     [authSession, isLoggedIn, selectedEmployeeId]
   );
@@ -147,6 +200,28 @@ function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let active = true;
+    void getAuthenticatedSession()
+      .then((session) => {
+        if (!active) return;
+        setAuthSession(session);
+        setSelectedEmployeeId(session.employeeId);
+        setIsLoggedIn(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAuthSession(null);
+        setIsLoggedIn(false);
+      })
+      .finally(() => {
+        if (active) setIsAuthenticating(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const selectedEmployee = employeeSnapshot?.employee ?? employees.find((employee) => employee.id === selectedEmployeeId);
   const isAdminAccount = isAdminSession(authSession ?? undefined);
@@ -202,37 +277,28 @@ function App() {
     await refresh(employeeId);
   }
 
-  function handleLogin() {
-    const employee = employees.find((item) => item.id === selectedEmployeeId);
-    if (!employee) {
-      setNotice("로그인할 계정을 찾을 수 없습니다.");
-      return;
+  async function handleLogin(employeeNumber: string, password: string) {
+    setIsAuthenticating(true);
+    setAuthError(null);
+    try {
+      const nextSession = await loginWithEmployeeNumber({ employeeNumber, password, rememberLogin });
+      setAuthSession(nextSession);
+      setSelectedEmployeeId(nextSession.employeeId);
+      setIsLoggedIn(true);
+      setNotice("로그인되었습니다. 오늘의 업무를 시작합니다.");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "로그인하지 못했습니다.");
+    } finally {
+      setIsAuthenticating(false);
     }
-
-    const nextSession = createDemoAuthSession(employee, {
-      now: new Date().toISOString(),
-      rememberLogin
-    });
-
-    if (rememberLogin) {
-      localStorage.setItem("intranet:remember-login", "true");
-      localStorage.setItem("intranet:employee-id", selectedEmployeeId);
-      localStorage.setItem("intranet:auth-session", JSON.stringify(nextSession));
-    } else {
-      localStorage.removeItem("intranet:remember-login");
-      localStorage.removeItem("intranet:employee-id");
-      localStorage.removeItem("intranet:auth-session");
-    }
-
-    setAuthSession(nextSession);
-    setIsLoggedIn(true);
-    setNotice("로그인되었습니다. 직원모드에서 본인 업무를 시작합니다.");
   }
 
-  function handleLogout() {
-    localStorage.removeItem("intranet:remember-login");
-    localStorage.removeItem("intranet:employee-id");
-    localStorage.removeItem("intranet:auth-session");
+  async function handleLogout() {
+    try {
+      await logoutAuthenticatedSession();
+    } catch {
+      // The local view must still clear when an already-expired session cannot be logged out remotely.
+    }
     setAuthSession(null);
     setRememberLogin(false);
     setIsLoggedIn(false);
@@ -292,42 +358,127 @@ function App() {
     await refresh(selectedEmployee.id);
   }
 
+  async function createDailyTaskPlan(draft: DailyWorkPlanDraft) {
+    if (!selectedEmployee) return;
+    setIsSavingTaskPlan(true);
+    setTaskPlanError(null);
+    try {
+      const result = await createDailyWorkTaskPlan({
+        ...draft,
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined
+      });
+      setNotice(`작업 배정 · ${result.task.title}`);
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setTaskPlanError(error instanceof Error ? error.message : "작업을 배정하지 못했습니다.");
+      throw error;
+    } finally {
+      setIsSavingTaskPlan(false);
+    }
+  }
+
+  async function updateDailyTaskPlan(taskId: string, draft: DailyWorkPlanDraft) {
+    if (!selectedEmployee) return;
+    setIsSavingTaskPlan(true);
+    setTaskPlanError(null);
+    try {
+      const result = await updateDailyWorkTaskPlan({
+        taskId,
+        ...draft,
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined
+      });
+      setNotice(`작업계획 변경 · ${result.task.title}`);
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setTaskPlanError(error instanceof Error ? error.message : "작업계획을 변경하지 못했습니다.");
+      throw error;
+    } finally {
+      setIsSavingTaskPlan(false);
+    }
+  }
+
   async function submitLeave() {
     if (!selectedEmployee) return;
 
-    const result = await submitLeaveRequest({
-      employeeId: selectedEmployee.id,
-      type: "HALF_DAY",
-      startsOn: "2026-07-15",
-      endsOn: "2026-07-15",
-      days: 0.5,
-      reason: "오후 개인 일정",
-      actorId: authActorId(authSession, selectedEmployee.id),
-      session: authSession ?? undefined
-    });
+    const days = Number(leaveDraft.days);
+    if (!leaveDraft.startsOn || !leaveDraft.endsOn || !leaveDraft.reason.trim() || !Number.isFinite(days) || days <= 0) {
+      setRequestError("휴가 유형, 기간, 일수, 사유를 모두 입력해 주세요.");
+      return;
+    }
 
-    setNotice(`${selectedEmployee.name} 휴가 신청 생성 · ${result.request.status}`);
-    setActiveSection("approvals");
-    await refresh(selectedEmployee.id);
+    setIsSubmittingRequest(true);
+    setRequestError(null);
+    try {
+      const result = await submitLeaveRequest({
+        employeeId: selectedEmployee.id,
+        type: leaveDraft.type,
+        startsOn: leaveDraft.startsOn,
+        endsOn: leaveDraft.endsOn,
+        days,
+        reason: leaveDraft.reason.trim(),
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined
+      });
+
+      setNotice(`${selectedEmployee.name} 휴가 신청 · ${result.request.status}`);
+      setRequestDialog(null);
+      setLeaveDraft({ type: "ANNUAL", startsOn: "", endsOn: "", days: "1", reason: "" });
+      setActiveSection("leave");
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "휴가 신청을 처리하지 못했습니다.");
+    } finally {
+      setIsSubmittingRequest(false);
+    }
   }
 
   async function submitOvertime() {
     if (!selectedEmployee) return;
 
-    const result = await submitOvertimeRequest({
-      employeeId: selectedEmployee.id,
-      date: "2026-07-16",
-      startsAt: "2026-07-16T17:30:00+09:00",
-      endsAt: "2026-07-16T19:00:00+09:00",
-      minutes: 90,
-      reason: "운영 마감 지원",
-      actorId: authActorId(authSession, selectedEmployee.id),
-      session: authSession ?? undefined
-    });
+    if (!overtimeDraft.date || !overtimeDraft.startsAt || !overtimeDraft.endsAt || !overtimeDraft.reason.trim()) {
+      setRequestError("근무일, 시작·종료 시각, 사유를 모두 입력해 주세요.");
+      return;
+    }
 
-    setNotice(`${selectedEmployee.name} 야근 신청 생성 · ${result.request.status}`);
-    setActiveSection("approvals");
-    await refresh(selectedEmployee.id);
+    const startsAt = `${overtimeDraft.date}T${overtimeDraft.startsAt}:00+09:00`;
+    const endsAt = `${overtimeDraft.date}T${overtimeDraft.endsAt}:00+09:00`;
+    const minutes = Math.round((Date.parse(endsAt) - Date.parse(startsAt)) / 60000);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      setRequestError("종료 시각은 시작 시각 이후여야 합니다.");
+      return;
+    }
+
+    setIsSubmittingRequest(true);
+    setRequestError(null);
+    try {
+      const result = await submitOvertimeRequest({
+        employeeId: selectedEmployee.id,
+        date: overtimeDraft.date,
+        startsAt,
+        endsAt,
+        minutes,
+        reason: overtimeDraft.reason.trim(),
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined
+      });
+
+      setNotice(`${selectedEmployee.name} 야근 신청 · ${result.request.status}`);
+      setRequestDialog(null);
+      setOvertimeDraft({ date: "", startsAt: "", endsAt: "", reason: "" });
+      setActiveSection("overtime");
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "야근 신청을 처리하지 못했습니다.");
+    } finally {
+      setIsSubmittingRequest(false);
+    }
+  }
+
+  function openRequestDialog(nextDialog: Exclude<RequestDialog, null>) {
+    setRequestError(null);
+    setRequestDialog(nextDialog);
   }
 
   async function approveLeave(requestId?: string, status: "APPROVED" | "REJECTED" = "APPROVED") {
@@ -491,13 +642,11 @@ function App() {
   if (!isLoggedIn) {
     return (
       <LoginScreen
-        employees={employees}
-        isLoading={isLoading}
-        onEmployeeChange={handleEmployeeChange}
+        authError={authError}
+        isLoading={isAuthenticating}
         onLogin={handleLogin}
         onRememberChange={setRememberLogin}
         rememberLogin={rememberLogin}
-        selectedEmployeeId={selectedEmployeeId}
       />
     );
   }
@@ -567,6 +716,11 @@ function App() {
             </InlineActions>
           }
         />
+        {loadError ? (
+          <InlineNotice onDismiss={() => setLoadError(null)} title="동기화 오류" tone="danger">
+            {loadError}
+          </InlineNotice>
+        ) : null}
 
         {erpViewModel ? (
           <>
@@ -584,39 +738,101 @@ function App() {
               isLoading,
               onApproveLeave: approveLeave,
               onApproveOvertime: approveOvertime,
+              onCreateDailyTaskPlan: createDailyTaskPlan,
               onClock: clock,
               onUpdateDailyTask: updateDailyTask,
+              onUpdateDailyTaskPlan: updateDailyTaskPlan,
               onCreateCorrection: createCorrection,
               onDownloadPayroll: downloadPayroll,
               onDeletePayroll: deletePayroll,
               onUpdateEmployeeCard: updateSelectedEmployeeCard,
               onUpdateGpsRadius: updateGpsRadius,
-              onSubmitLeave: submitLeave,
-              onSubmitOvertime: submitOvertime,
+              onSubmitLeave: () => openRequestDialog("leave"),
+              onSubmitOvertime: () => openRequestDialog("overtime"),
               onUploadPayroll: uploadPayroll,
               canAdmin: effectiveMode === "ADMIN",
-              employeeCardRows
+              employeeCardRows,
+              employees,
+              dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
+              isSavingTaskPlan,
+              taskPlanError
             })}
           </>
         ) : (
           <EmptyState title="데이터를 불러오는 중" description="API/DB 계층에서 파일럿 데이터를 동기화하고 있습니다." />
         )}
       </ErpShell>
+      <FormDialog
+        busy={isSubmittingRequest}
+        error={requestDialog === "leave" ? requestError ?? undefined : undefined}
+        onClose={() => setRequestDialog(null)}
+        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          void submitLeave();
+        }}
+        open={requestDialog === "leave"}
+        submitLabel="휴가 신청"
+        title="휴가 신청"
+        description="승인 전까지는 대기 상태로 표시됩니다."
+      >
+        <RequestField label="휴가 유형">
+          <select value={leaveDraft.type} onChange={(event) => setLeaveDraft((current) => ({ ...current, type: event.target.value as LeaveType }))}>
+            <option value="ANNUAL">연차</option>
+            <option value="HALF_DAY">반차</option>
+            <option value="SPECIAL">특별휴가</option>
+            <option value="UNPAID">무급휴가</option>
+          </select>
+        </RequestField>
+        <div className="request-form__split">
+          <RequestField label="시작일"><input required type="date" value={leaveDraft.startsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, startsOn: event.target.value }))} /></RequestField>
+          <RequestField label="종료일"><input required min={leaveDraft.startsOn || undefined} type="date" value={leaveDraft.endsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, endsOn: event.target.value }))} /></RequestField>
+        </div>
+        <RequestField label="사용 일수"><input required min="0.5" step="0.5" type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
+        <RequestField label="사유"><textarea required rows={3} value={leaveDraft.reason} onChange={(event) => setLeaveDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
+      </FormDialog>
+      <FormDialog
+        busy={isSubmittingRequest}
+        error={requestDialog === "overtime" ? requestError ?? undefined : undefined}
+        onClose={() => setRequestDialog(null)}
+        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          void submitOvertime();
+        }}
+        open={requestDialog === "overtime"}
+        submitLabel="야근 신청"
+        title="야근 신청"
+        description="관리자 승인 후 상계 또는 수당 인정 대상이 됩니다."
+      >
+        <RequestField label="근무일"><input required type="date" value={overtimeDraft.date} onChange={(event) => setOvertimeDraft((current) => ({ ...current, date: event.target.value }))} /></RequestField>
+        <div className="request-form__split">
+          <RequestField label="시작 시각"><input required type="time" value={overtimeDraft.startsAt} onChange={(event) => setOvertimeDraft((current) => ({ ...current, startsAt: event.target.value }))} /></RequestField>
+          <RequestField label="종료 시각"><input required type="time" value={overtimeDraft.endsAt} onChange={(event) => setOvertimeDraft((current) => ({ ...current, endsAt: event.target.value }))} /></RequestField>
+        </div>
+        <RequestField label="사유"><textarea required rows={3} value={overtimeDraft.reason} onChange={(event) => setOvertimeDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
+      </FormDialog>
     </div>
   );
+}
+
+function RequestField({ children, label }: { children: ReactNode; label: string }) {
+  return <label className="request-field"><span>{label}</span>{children}</label>;
 }
 
 function renderSection(props: {
   activeSection: ErpActiveSection;
   canAdmin: boolean;
+  dailyWorkTasks: DailyWorkTask[];
   employeeCardRows: EmployeeCardRow[];
+  employees: Employee[];
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
+  onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
   onUpdateDailyTask: (task: DailyWorkTask) => void;
+  onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
   onCreateCorrection: () => void;
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string) => void;
@@ -625,6 +841,8 @@ function renderSection(props: {
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
   onUploadPayroll: () => void;
+  isSavingTaskPlan: boolean;
+  taskPlanError: string | null;
 }) {
   switch (props.activeSection) {
     case "self-service":
@@ -649,39 +867,30 @@ function renderSection(props: {
 }
 
 function LoginScreen(props: {
-  employees: Employee[];
+  authError: string | null;
   isLoading: boolean;
-  onEmployeeChange: (employeeId: string) => void;
-  onLogin: () => void;
+  onLogin: (employeeNumber: string, password: string) => void;
   onRememberChange: (remember: boolean) => void;
   rememberLogin: boolean;
-  selectedEmployeeId: string;
 }) {
+  const [employeeNumber, setEmployeeNumber] = useState("");
+  const [password, setPassword] = useState("");
+
   return (
     <div className="app-shell login-shell">
       <DetailPanel
         title="사내 근태 관리 로그인"
-        description="계정을 선택하고 로그인 상태 유지 여부를 확인합니다."
-        actions={
-          <InlineActions>
-            <button disabled={props.isLoading || props.employees.length === 0} onClick={props.onLogin}>
-              <LogIn size={14} />
-              로그인
-            </button>
-          </InlineActions>
-        }
+        description="사번과 비밀번호로 로그인합니다."
       >
-        <div className="login-grid">
-          <label className="select-label">
-            계정
-            <select value={props.selectedEmployeeId} onChange={(event) => void props.onEmployeeChange(event.target.value)}>
-              {props.employees.map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.name} · {employee.department} · {roleLabel(employee.role)}
-                </option>
-              ))}
-            </select>
-          </label>
+        <form
+          className="login-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            props.onLogin(employeeNumber, password);
+          }}
+        >
+          <RequestField label="사번"><input autoComplete="username" required value={employeeNumber} onChange={(event) => setEmployeeNumber(event.target.value)} /></RequestField>
+          <RequestField label="비밀번호"><input autoComplete="current-password" required type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></RequestField>
           <label className="checkbox-label">
             <input
               checked={props.rememberLogin}
@@ -690,7 +899,14 @@ function LoginScreen(props: {
             />
             로그인 상태 유지
           </label>
-        </div>
+          {props.authError ? <InlineNotice title="로그인 실패" tone="danger">{props.authError}</InlineNotice> : null}
+          <div className="login-form__actions">
+            <button disabled={props.isLoading} type="submit">
+              <LogIn size={14} />
+              {props.isLoading ? "로그인 확인 중..." : "로그인"}
+            </button>
+          </div>
+        </form>
       </DetailPanel>
     </div>
   );
@@ -865,37 +1081,53 @@ function AttendanceSection(props: { canAdmin: boolean; erpViewModel: ErpViewMode
 }
 
 function ApprovalsSection(props: {
+  dailyWorkTasks: DailyWorkTask[];
+  employees: Employee[];
   erpViewModel: ErpViewModel;
   isLoading: boolean;
+  isSavingTaskPlan: boolean;
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
+  onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
+  onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
+  taskPlanError: string | null;
 }) {
   const firstLeaveId = props.erpViewModel.leaveRows.find((row) => row.status === "PENDING")?.id;
   const firstOvertimeId = props.erpViewModel.overtimeRows.find((row) => row.status === "PENDING")?.id;
 
   return (
-    <DetailPanel
-      title="업무 큐"
-      description="승인 대기, GPS 실패, 보정 확인이 한 화면에 모입니다."
-      actions={
-        <InlineActions>
-          <button disabled={props.isLoading || !firstLeaveId} onClick={() => props.onApproveLeave(firstLeaveId)}>
-            휴가 승인
-          </button>
-          <button disabled={props.isLoading || !firstLeaveId} onClick={() => props.onApproveLeave(firstLeaveId, "REJECTED")}>
-            휴가 반려
-          </button>
-          <button disabled={props.isLoading || !firstOvertimeId} onClick={() => props.onApproveOvertime(firstOvertimeId)}>
-            야근 승인
-          </button>
-          <button disabled={props.isLoading || !firstOvertimeId} onClick={() => props.onApproveOvertime(firstOvertimeId, "REJECTED")}>
-            야근 반려
-          </button>
-        </InlineActions>
-      }
-    >
-      <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="처리할 업무 없음" />} />
-    </DetailPanel>
+    <div className="admin-operations-stack">
+      <DetailPanel
+        title="업무 큐"
+        description="승인 대기, GPS 실패, 보정 확인이 한 화면에 모입니다."
+        actions={
+          <InlineActions>
+            <button disabled={props.isLoading || !firstLeaveId} onClick={() => props.onApproveLeave(firstLeaveId)}>
+              휴가 승인
+            </button>
+            <button disabled={props.isLoading || !firstLeaveId} onClick={() => props.onApproveLeave(firstLeaveId, "REJECTED")}>
+              휴가 반려
+            </button>
+            <button disabled={props.isLoading || !firstOvertimeId} onClick={() => props.onApproveOvertime(firstOvertimeId)}>
+              야근 승인
+            </button>
+            <button disabled={props.isLoading || !firstOvertimeId} onClick={() => props.onApproveOvertime(firstOvertimeId, "REJECTED")}>
+              야근 반려
+            </button>
+          </InlineActions>
+        }
+      >
+        <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="처리할 업무 없음" />} />
+      </DetailPanel>
+      <DailyWorkPlanManager
+        busy={props.isSavingTaskPlan}
+        employees={props.employees}
+        error={props.taskPlanError}
+        onCreate={props.onCreateDailyTaskPlan}
+        onUpdate={props.onUpdateDailyTaskPlan}
+        tasks={props.dailyWorkTasks}
+      />
+    </div>
   );
 }
 

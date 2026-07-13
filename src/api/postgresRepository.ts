@@ -141,6 +141,11 @@ export class PostgresHrRepository implements HrRepository {
     return rows.map(dailyWorkTaskFromRow);
   }
 
+  async addDailyWorkTask(task: DailyWorkTask) {
+    const [row] = await this.insert<DailyWorkTaskRow>("daily_work_tasks", dailyWorkTaskToRow(task));
+    return dailyWorkTaskFromRow(requireRow(row, "daily_work_tasks", task.id));
+  }
+
   async updateDailyWorkTask(task: DailyWorkTask) {
     const [row] = await this.update<DailyWorkTaskRow>("daily_work_tasks", dailyWorkTaskToRow(task), "id", task.id);
     return dailyWorkTaskFromRow(requireRow(row, "daily_work_tasks", task.id));

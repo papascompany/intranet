@@ -1,0 +1,187 @@
+.daily-work-plan-manager {
+  display: grid;
+  gap: 16px;
+  color: var(--color-graphite);
+  font-family: var(--font-inter);
+}
+
+.daily-work-plan-manager__toolbar,
+.daily-work-plan-manager__toolbar-actions,
+.daily-work-plan-manager__summary,
+.daily-work-plan-row,
+.daily-work-plan-row__main,
+.daily-work-plan-row__meta,
+.daily-work-plan-manager__eyebrow {
+  display: flex;
+  align-items: center;
+}
+
+.daily-work-plan-manager__toolbar {
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.daily-work-plan-manager__toolbar h2,
+.daily-work-plan-manager__toolbar p {
+  margin: 0;
+}
+
+.daily-work-plan-manager__toolbar h2 {
+  font-family: var(--font-cal-sans);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.daily-work-plan-manager__toolbar > div > p:not(.daily-work-plan-manager__eyebrow) {
+  margin-top: 4px;
+  color: var(--color-slate);
+  font-size: 13px;
+}
+
+.daily-work-plan-manager__eyebrow {
+  gap: 6px;
+  margin-bottom: 6px !important;
+  color: var(--color-slate);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.daily-work-plan-manager__eyebrow svg { width: 15px; height: 15px; }
+
+.daily-work-plan-manager__toolbar-actions { gap: 8px; }
+
+.daily-work-plan-manager__toolbar-actions label,
+.daily-work-plan-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-slate);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.daily-work-plan-manager input,
+.daily-work-plan-manager select {
+  min-height: 36px;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+  font: inherit;
+  font-size: 13px;
+}
+
+.daily-work-plan-manager input:focus,
+.daily-work-plan-manager select:focus { outline: 2px solid #93c5fd; outline-offset: 1px; }
+
+.daily-work-plan-manager__create,
+.daily-work-plan-row__edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  border: 1px solid var(--color-ink);
+  border-radius: 6px;
+  padding: 0 12px;
+  color: var(--color-white);
+  background: var(--color-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.daily-work-plan-manager__create:disabled,
+.daily-work-plan-row__edit:disabled { cursor: not-allowed; opacity: .55; }
+.daily-work-plan-manager__create svg,
+.daily-work-plan-row__edit svg { width: 16px; height: 16px; }
+
+.daily-work-plan-manager__notice { margin: 0; }
+
+.daily-work-plan-manager__summary {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  background: var(--color-paper);
+}
+
+.daily-work-plan-manager__summary span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 12px;
+  border-right: 1px solid var(--color-silver);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.daily-work-plan-manager__summary span:last-child { border-right: 0; }
+.daily-work-plan-manager__summary svg { width: 15px; height: 15px; }
+
+.daily-work-plan-manager__list { display: grid; gap: 8px; }
+
+.daily-work-plan-row {
+  display: grid;
+  grid-template-columns: 36px minmax(160px, 1.6fr) minmax(155px, .8fr) 76px auto;
+  gap: 14px;
+  min-height: 68px;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--color-white);
+}
+
+.daily-work-plan-row__order {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--color-slate);
+  background: var(--color-paper);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.daily-work-plan-row__main,
+.daily-work-plan-row__meta { display: grid; gap: 3px; min-width: 0; }
+.daily-work-plan-row__main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.daily-work-plan-row__main span,
+.daily-work-plan-row__meta { color: var(--color-slate); font-size: 12px; }
+
+.daily-work-plan-row__status {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.daily-work-plan-row__status.is-todo { color: #1d4ed8; background: #eff6ff; }
+.daily-work-plan-row__status.is-in_progress { color: #a16207; background: #fffbeb; }
+.daily-work-plan-row__status.is-done { color: #15803d; background: #f0fdf4; }
+
+.daily-work-plan-row__edit { border-color: var(--color-silver); color: var(--color-graphite); background: var(--color-white); }
+.daily-work-plan-manager__empty { border: 1px dashed var(--color-silver); border-radius: 6px; padding: 32px; color: var(--color-slate); text-align: center; font-size: 13px; }
+
+.daily-work-plan-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.daily-work-plan-form__wide { grid-column: 1 / -1; }
+
+@media (max-width: 720px) {
+  .daily-work-plan-manager__toolbar { align-items: stretch; flex-direction: column; }
+  .daily-work-plan-manager__toolbar-actions { justify-content: space-between; }
+  .daily-work-plan-row { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 8px; }
+  .daily-work-plan-row__meta { grid-column: 2; }
+  .daily-work-plan-row__status { grid-column: 3; grid-row: 1; }
+  .daily-work-plan-row__edit { grid-column: 3; grid-row: 2; }
+}
+
+@media (max-width: 480px) {
+  .daily-work-plan-manager__toolbar-actions { align-items: end; flex-direction: column; }
+  .daily-work-plan-manager__toolbar-actions label,
+  .daily-work-plan-manager__toolbar-actions input,
+  .daily-work-plan-manager__create { width: 100%; }
+  .daily-work-plan-manager__summary { overflow-x: auto; }
+  .daily-work-plan-form { grid-template-columns: 1fr; }
+  .daily-work-plan-form__wide { grid-column: auto; }
+}
