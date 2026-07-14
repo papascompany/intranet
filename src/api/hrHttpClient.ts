@@ -29,6 +29,7 @@ import type {
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
 } from "./types";
+import type { AppBootstrap } from "./types";
 import type {
   AttendanceCorrection,
   AuditLog,
@@ -50,6 +51,10 @@ export async function getEmployees() {
 
 export async function getEmployeeDirectory(input: { session?: AuthSession } = {}) {
   return await post<Employee[]>("getEmployeeDirectory", input);
+}
+
+export async function getAppBootstrap(employeeId: string, asOf?: string, session?: AuthSession) {
+  return await post<AppBootstrap>("getAppBootstrap", { employeeId, asOf, session });
 }
 
 export async function getDashboard(input: string | DashboardInput) {
@@ -202,6 +207,8 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.getEmployees()) as T;
     case "getEmployeeDirectory":
       return (await api.getEmployeeDirectory(payload as never)) as T;
+    case "getAppBootstrap":
+      return (await api.getAppBootstrap(payload as never)) as T;
     case "getDashboard":
       return (await api.getDashboard(payload as never)) as T;
     case "getEmployeeSnapshot": {

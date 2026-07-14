@@ -31,13 +31,13 @@ export function buildEmployeeCardViewModel(
     row("department", "부서", employee.department),
     row("employmentStatus", "재직상태", employmentStatusLabel(employee.employmentStatus)),
     row("employmentType", "직원구분", employmentTypeLabel(employee.employmentType)),
-    row("hireDate", "입사일", employee.hireDate),
-    row("terminationDate", "퇴사일", employee.terminationDate),
+    row("hireDate", "입사일", formatDate(employee.hireDate)),
+    row("terminationDate", "퇴사일", formatDate(employee.terminationDate)),
     row("workplaceAssignment", "근무지 배정", workplaceAssignment(employee, options.workplaceName)),
     row("residentRegistrationNumber", "주민등록번호", revealSensitive ? employee.residentRegistrationNumber : maskResidentRegistrationNumber(employee.residentRegistrationNumber), {
       sensitive: true
     }),
-    row("birthday", "생일", employee.birthday),
+    row("birthday", "생일", formatDate(employee.birthday)),
     row("address", "주소", employee.address, { sensitive: true }),
     row("mobile", "휴대전화", employee.mobile, { sensitive: true }),
     row("emergencyContact", "비상연락처", employee.emergencyContact, { sensitive: true }),
@@ -125,6 +125,10 @@ function formatPeople(value: number | undefined) {
 
 function formatDays(value: number | undefined) {
   return value === undefined ? "-" : `${value.toLocaleString("ko-KR")}일`;
+}
+
+function formatDate(value: string | undefined) {
+  return value ? value.slice(0, 10) : undefined;
 }
 
 function employmentStatusLabel(value: Employee["employmentStatus"]) {

@@ -69,7 +69,7 @@ function defaultCustomFields(): EmployeeCustomAdminFields {
 
 function basicDraftFrom(employee: Employee): BasicDraft {
   return {
-    birthday: employee.birthday ?? "",
+    birthday: dateInputValue(employee.birthday),
     address: employee.address ?? "",
     mobile: employee.mobile ?? "",
     emergencyContact: employee.emergencyContact ?? "",
@@ -86,8 +86,8 @@ function adminDraftFrom(employee: Employee): AdminDraft {
     department: employee.department,
     position: employee.position ?? "",
     role: employee.role,
-    hireDate: employee.hireDate,
-    terminationDate: employee.terminationDate ?? "",
+    hireDate: dateInputValue(employee.hireDate),
+    terminationDate: dateInputValue(employee.terminationDate),
     residentRegistrationNumber: employee.residentRegistrationNumber ?? "",
     employmentStatus: employee.employmentStatus ?? "ACTIVE",
     employmentType: employee.employmentType ?? "REGULAR",
@@ -97,6 +97,10 @@ function adminDraftFrom(employee: Employee): AdminDraft {
     annualLeaveAdjustmentDays: employee.annualLeaveAdjustmentDays === undefined ? "0" : String(employee.annualLeaveAdjustmentDays),
     customAdminFields: (employee.customAdminFields ?? defaultCustomFields()).map((field) => ({ ...field })) as EmployeeCustomAdminFields
   };
+}
+
+function dateInputValue(value: string | undefined) {
+  return value?.slice(0, 10) ?? "";
 }
 
 function optionalNumber(value: string) {
@@ -125,6 +129,21 @@ function adminFieldsChanged(employee: Employee, draft: AdminDraft) {
 function basicFieldsChanged(employee: Employee, draft: BasicDraft) {
   const initial = basicDraftFrom(employee);
   return (Object.keys(initial) as EditableBasicField[]).some((key) => initial[key] !== draft[key]);
+}
+
+function sensitiveAdminFieldsChanged(employee: Employee, draft: AdminDraft) {
+  const initial = adminDraftFrom(employee);
+  return initial.name !== draft.name
+    || initial.role !== draft.role
+    || initial.employmentStatus !== draft.employmentStatus
+    || initial.hireDate !== draft.hireDate
+    || initial.terminationDate !== draft.terminationDate
+    || initial.residentRegistrationNumber !== draft.residentRegistrationNumber
+    || initial.annualSalary !== draft.annualSalary
+    || initial.severancePay !== draft.severancePay
+    || initial.incomeDeductionDependents !== draft.incomeDeductionDependents
+    || initial.annualLeaveAdjustmentDays !== draft.annualLeaveAdjustmentDays
+    || initial.customAdminFields.some((field, index) => field.label !== draft.customAdminFields[index].label || field.value !== draft.customAdminFields[index].value);
 }
 
 function adminUpdateFrom(draft: AdminDraft): EmployeeCardUpdateInput {
@@ -179,6 +198,7 @@ export function EmployeeCardEditor({
     () => canAdmin && (adminFieldsChanged(employee, adminDraft) || basicFieldsChanged(employee, basicDraft) || workplaceId !== workplaceIdFrom(employee)),
     [adminDraft, basicDraft, canAdmin, employee, workplaceId]
   );
+  const requiresReason = canAdmin && sensitiveAdminFieldsChanged(employee, adminDraft);
   const hasInvalidAdminNumbers = canAdmin && [adminDraft.annualSalary, adminDraft.severancePay, adminDraft.incomeDeductionDependents]
     .some((value) => value.trim() !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0));
   const hasInvalidLeaveAdjustment = canAdmin && adminDraft.annualLeaveAdjustmentDays.trim() !== "" && !Number.isFinite(Number(adminDraft.annualLeaveAdjustmentDays));
@@ -198,7 +218,7 @@ export function EmployeeCardEditor({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || hasInvalidAdminNumbers || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (hasAdminChanges && !reason.trim())) return;
+    if (busy || hasInvalidAdminNumbers || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())) return;
 
     const update: EmployeeCardBasicUpdate & Partial<EmployeeCardAdminUpdate> = { ...basicDraft };
     if (canAdmin) {
@@ -207,7 +227,7 @@ export function EmployeeCardEditor({
         Object.assign(update, { workplaceId: workplaceId || null });
       }
     }
-    await onSubmit({ employeeId: employee.id, update, reason: hasAdminChanges ? reason.trim() : undefined });
+    await onSubmit({ employeeId: employee.id, update, reason: reason.trim() || undefined });
   };
 
   return (
@@ -218,7 +238,7 @@ export function EmployeeCardEditor({
       onClose={onClose}
       onSubmit={submit}
       open={open}
-      submitDisabled={hasInvalidAdminNumbers || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (hasAdminChanges && !reason.trim())}
+      submitDisabled={hasInvalidAdminNumbers || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())}
       submitLabel="변경 저장"
       title={`${employee.name} 직원카드 편집`}
     >
@@ -289,8 +309,8 @@ export function EmployeeCardEditor({
             </div>
             {hasAdminChanges ? (
               <label className="employee-card-editor__reason">
-                <span>관리자 변경 사유</span>
-                <textarea onChange={(event) => setReason(event.target.value)} placeholder="급여, 관리자 항목 또는 근무지 변경 사유를 입력하세요." required value={reason} />
+                <span>관리자 변경 사유 {requiresReason ? "(필수)" : "(선택)"}</span>
+                <textarea aria-label="관리자 변경 사유" onChange={(event) => setReason(event.target.value)} placeholder={requiresReason ? "민감정보·급여·권한 변경 사유를 입력하세요." : "필요한 경우 변경 사유를 남기세요."} required={requiresReason} value={reason} />
               </label>
             ) : null}
           </section>

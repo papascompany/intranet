@@ -323,3 +323,10 @@ export type EmployeeSnapshot = {
   dailyWorkTasks: import("../domain/types.js").DailyWorkTask[];
   recentAuditLogs: AuditLog[];
 };
+
+export type AppBootstrap = {
+  employees: Employee[];
+  dashboard: Dashboard;
+  employeeSnapshot: EmployeeSnapshot;
+  employeeAccountStates: EmployeeAccountState[];
+};

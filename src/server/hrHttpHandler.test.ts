@@ -86,6 +86,28 @@ describe("hrHttpHandler", () => {
     });
   });
 
+  it("serves the initial app data through one authenticated bootstrap action", async () => {
+    const response = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "getAppBootstrap",
+          payload: { employeeId: "emp-ops-1", asOf: "2026-07-12T09:00:00+09:00" }
+        },
+        serverSession: employeeSession
+      },
+      api()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      employees: [{ id: "emp-ops-1" }],
+      dashboard: { employeesTotal: 1 },
+      employeeSnapshot: { employee: { id: "emp-ops-1" } },
+      employeeAccountStates: []
+    });
+  });
+
   it("serves persistence status without database credentials", async () => {
     const response = await handleHrHttpRequest(
       {

@@ -95,6 +95,8 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.getEmployeeDirectory({ session });
     case "getEmployeeDirectory":
       return await api.getEmployeeDirectory(payload as never);
+    case "getAppBootstrap":
+      return await api.getAppBootstrap(payload as never);
     case "getDashboard":
       return await api.getDashboard(payload as never);
     case "getEmployeeSnapshot": {

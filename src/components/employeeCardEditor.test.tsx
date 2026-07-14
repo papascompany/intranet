@@ -120,23 +120,36 @@ describe("EmployeeCardEditor", () => {
     expect(screen.getByLabelText("사번")).toBeRequired();
   });
 
-  it("lets an administrator assign a workplace and requires a reason", () => {
+  it("lets an administrator assign a workplace without blocking save on a reason", () => {
     const onSubmit = vi.fn();
     render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={onSubmit} open workplaces={workplaces} />);
 
     expect(screen.getByLabelText("배정 근무지")).toHaveValue("");
     fireEvent.change(screen.getByLabelText("배정 근무지"), { target: { value: "jichuk" } });
 
-    expect(screen.getByLabelText("관리자 변경 사유")).toBeRequired();
-    expect(screen.getByRole("button", { name: "변경 저장" })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText("관리자 변경 사유"), { target: { value: "지축역 근무 배정" } });
+    expect(screen.getByLabelText("관리자 변경 사유")).not.toBeRequired();
+    expect(screen.getByRole("button", { name: "변경 저장" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "변경 저장" }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-      reason: "지축역 근무 배정",
+      reason: undefined,
       update: expect.objectContaining({ workplaceId: "jichuk" })
     }));
+  });
+
+  it("normalizes database timestamps for date inputs and keeps save available", () => {
+    const onSubmit = vi.fn();
+    const timestampEmployee = {
+      ...employee,
+      hireDate: "2018-04-09T00:00:00.000Z",
+      birthday: "1990-03-10T00:00:00.000Z"
+    };
+    render(<EmployeeCardEditor canAdmin employee={timestampEmployee} onClose={vi.fn()} onSubmit={onSubmit} open workplaces={workplaces} />);
+
+    expect(screen.getByLabelText("입사일")).toHaveValue("2018-04-09");
+    expect(screen.getByLabelText("생일")).toHaveValue("1990-03-10");
+    fireEvent.change(screen.getByLabelText("직위"), { target: { value: "과장" } });
+    expect(screen.getByRole("button", { name: "변경 저장" })).toBeEnabled();
   });
 
   it("submits a null workplace when an administrator clears an existing assignment", () => {

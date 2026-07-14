@@ -28,9 +28,7 @@ import {
   createAttendanceCorrection,
   createEmployeeAccount,
   createDailyWorkTaskPlan,
-  getDashboard,
-  getEmployeeAccountStates,
-  getEmployeeDirectory,
+  getAppBootstrap,
   getEmployeeSnapshot,
   downloadPayrollStatement,
   resetEmployeeAccountPassword,
@@ -120,6 +118,12 @@ type PayrollUploadDraft = {
   month: string;
 };
 
+type ClockFeedback = {
+  label: string;
+  status: string;
+  time: string;
+};
+
 const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll"];
 const adminSections: ErpActiveSection[] = ["employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
 const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
@@ -165,9 +169,11 @@ function App() {
   const [employeeSnapshot, setEmployeeSnapshot] = useState<EmployeeSnapshot | null>(null);
   const [notice, setNotice] = useState("운영팀 파일럿 API/DB 계층이 준비되었습니다.");
   const [isLoading, setIsLoading] = useState(true);
+  const [isSelectingEmployee, setIsSelectingEmployee] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [clockingType, setClockingType] = useState<ClockType | null>(null);
   const [clockError, setClockError] = useState<string | null>(null);
+  const [clockFeedback, setClockFeedback] = useState<ClockFeedback | null>(null);
   const [requestDialog, setRequestDialog] = useState<RequestDialog>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
@@ -208,7 +214,7 @@ function App() {
   const [payrollUploadDraft, setPayrollUploadDraft] = useState<PayrollUploadDraft>({ file: null, month: today.slice(0, 7) });
 
   const refresh = useCallback(
-    async (employeeId = selectedEmployeeId) => {
+    async (employeeId: string) => {
       if (!isLoggedIn || !authSession || authSession.passwordChangeRequired) {
         setIsLoading(false);
         return;
@@ -218,20 +224,16 @@ function App() {
       try {
         const session = authSession;
         const snapshotEmployeeId = !isAdminSession(session) ? session.employeeId : employeeId;
-        const [nextEmployees, nextDashboard, nextSnapshot, nextAccountStates] = await Promise.all([
-          getEmployeeDirectory({ session }),
-          getDashboard({ asOf: today, session }),
-          getEmployeeSnapshot(snapshotEmployeeId, today, session),
-          isAdminSession(session) ? getEmployeeAccountStates() : Promise.resolve([])
-        ]);
+        const bootstrap = await getAppBootstrap(snapshotEmployeeId, today, session);
 
-        setEmployees(nextEmployees);
+        setEmployees(bootstrap.employees);
         setSelectedEmployeeId(snapshotEmployeeId);
-        setDashboard(nextDashboard);
-        setEmployeeSnapshot(nextSnapshot);
-        setEmployeeAccountStates(nextAccountStates);
+        setDashboard(bootstrap.dashboard);
+        setEmployeeSnapshot(bootstrap.employeeSnapshot);
+        setEmployeeAccountStates(bootstrap.employeeAccountStates);
         setIsEmployeeSensitiveDataRevealed(false);
         setRevealedEmployee(null);
+        setClockFeedback(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : "데이터를 불러오지 못했습니다.";
         setLoadError(message);
@@ -240,12 +242,14 @@ function App() {
         setIsLoading(false);
       }
     },
-    [authSession, isLoggedIn, selectedEmployeeId]
+    [authSession, isLoggedIn]
   );
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (authSession && isLoggedIn && !authSession.passwordChangeRequired) {
+      void refresh(authSession.employeeId);
+    }
+  }, [authSession, isLoggedIn, refresh]);
 
   useEffect(() => {
     let active = true;
@@ -271,6 +275,16 @@ function App() {
 
   const baseSelectedEmployee = employeeSnapshot?.employee ?? employees.find((employee) => employee.id === selectedEmployeeId);
   const selectedEmployee = revealedEmployee?.id === baseSelectedEmployee?.id ? revealedEmployee : baseSelectedEmployee;
+  const requestedLeaveDays = Number(leaveDraft.days);
+  const pendingAnnualLeaveDays = employeeSnapshot?.leaveRequests
+    .filter((request) => request.status === "PENDING" && (request.type === "ANNUAL" || request.type === "HALF_DAY"))
+    .reduce((sum, request) => sum + request.days, 0) ?? 0;
+  const requestableLeaveDays = Math.max((employeeSnapshot?.leaveBalance.availableDays ?? 0) - pendingAnnualLeaveDays, 0);
+  const checksLeaveBalance = leaveDraft.type === "ANNUAL" || leaveDraft.type === "HALF_DAY";
+  const leaveBalanceInsufficient = checksLeaveBalance
+    && !dashboard?.settings?.annualLeaveOveruseAllowed
+    && Number.isFinite(requestedLeaveDays)
+    && requestedLeaveDays > requestableLeaveDays;
   const isAdminAccount = isAdminSession(authSession ?? undefined);
   const effectiveMode: UserMode = userMode === "ADMIN" && isAdminAccount ? "ADMIN" : "EMPLOYEE";
   const allowedSections = effectiveMode === "ADMIN" ? adminSections : employeeSections;
@@ -322,11 +336,25 @@ function App() {
       return;
     }
 
-    setSelectedEmployeeId(employeeId);
-    if (rememberLogin) {
-      localStorage.setItem("intranet:employee-id", employeeId);
+    if (!authSession || isSelectingEmployee || employeeId === selectedEmployeeId) return;
+
+    setIsSelectingEmployee(true);
+    setLoadError(null);
+    try {
+      const nextSnapshot = await getEmployeeSnapshot(employeeId, today, authSession);
+      setSelectedEmployeeId(employeeId);
+      setEmployeeSnapshot(nextSnapshot);
+      setIsEmployeeSensitiveDataRevealed(false);
+      setRevealedEmployee(null);
+      setClockFeedback(null);
+      if (rememberLogin) {
+        localStorage.setItem("intranet:employee-id", employeeId);
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "직원 정보를 불러오지 못했습니다.");
+    } finally {
+      setIsSelectingEmployee(false);
     }
-    await refresh(employeeId);
   }
 
   async function handleLogin(loginId: string, password: string) {
@@ -349,7 +377,6 @@ function App() {
     const nextSession = await changeAuthenticatedPassword(newPassword);
     setAuthSession(nextSession);
     setNotice("비밀번호를 변경했습니다. 오늘의 업무를 시작합니다.");
-    await refresh(nextSession.employeeId);
   }
 
   async function handleLogout() {
@@ -382,6 +409,7 @@ function App() {
 
     setClockingType(type);
     setClockError(null);
+    setClockFeedback(null);
     try {
       const now = koreaTimestamp();
       let coordinate: { accuracyMeters?: number; latitude: number; longitude: number } | undefined;
@@ -405,8 +433,22 @@ function App() {
       });
 
       const fallbackNotice = method === "GPS" && verificationFailed ? " · 위치 확인 실패로 대체 인증 처리" : "";
+      const recordedAt = type === "CLOCK_IN" ? result.attendance.clockInAt : result.attendance.clockOutAt;
+      setEmployeeSnapshot((current) => current && current.employee.id === selectedEmployee.id ? {
+        ...current,
+        todayAttendance: result.attendance,
+        attendanceRecords: upsertRecord(current.attendanceRecords, result.attendance)
+      } : current);
+      setDashboard((current) => current ? {
+        ...current,
+        todayAttendance: upsertRecord(current.todayAttendance, result.attendance)
+      } : current);
+      setClockFeedback({
+        label: type === "CLOCK_IN" ? "출근 완료" : "퇴근 완료",
+        status: verificationStatusLabel(result.verification.status),
+        time: formatKoreaTime(recordedAt ?? now)
+      });
       setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}${fallbackNotice}`);
-      await refresh(selectedEmployee.id);
     } catch (error) {
       setClockError(error instanceof Error ? error.message : "출퇴근 기록을 처리하지 못했습니다.");
     } finally {
@@ -427,7 +469,10 @@ function App() {
     });
 
     setNotice(nextStatus === "DONE" ? `작업 완료 · ${result.task.title}` : `완료 취소 · ${result.task.title}`);
-    await refresh(selectedEmployee.id);
+    setEmployeeSnapshot((current) => current ? {
+      ...current,
+      dailyWorkTasks: upsertRecord(current.dailyWorkTasks, result.task)
+    } : current);
   }
 
   async function createDailyTaskPlan(draft: DailyWorkPlanDraft) {
@@ -441,7 +486,10 @@ function App() {
         session: authSession ?? undefined
       });
       setNotice(`작업 배정 · ${result.task.title}`);
-      await refresh(selectedEmployee.id);
+      setEmployeeSnapshot((current) => current && current.employee.id === result.task.employeeId ? {
+        ...current,
+        dailyWorkTasks: upsertRecord(current.dailyWorkTasks, result.task)
+      } : current);
     } catch (error) {
       setTaskPlanError(error instanceof Error ? error.message : "작업을 배정하지 못했습니다.");
       throw error;
@@ -462,7 +510,10 @@ function App() {
         session: authSession ?? undefined
       });
       setNotice(`작업계획 변경 · ${result.task.title}`);
-      await refresh(selectedEmployee.id);
+      setEmployeeSnapshot((current) => current && current.employee.id === result.task.employeeId ? {
+        ...current,
+        dailyWorkTasks: upsertRecord(current.dailyWorkTasks, result.task)
+      } : current);
     } catch (error) {
       setTaskPlanError(error instanceof Error ? error.message : "작업계획을 변경하지 못했습니다.");
       throw error;
@@ -477,6 +528,10 @@ function App() {
     const days = Number(leaveDraft.days);
     if (!leaveDraft.startsOn || !leaveDraft.endsOn || !leaveDraft.reason.trim() || !Number.isFinite(days) || days <= 0) {
       setRequestError("휴가 유형, 기간, 일수, 사유를 모두 입력해 주세요.");
+      return;
+    }
+    if (leaveBalanceInsufficient) {
+      setRequestError(`신청 가능한 연차는 ${formatLeaveDays(requestableLeaveDays)}입니다. 무급휴가를 선택하거나 관리자에게 연차 보정을 요청해 주세요.`);
       return;
     }
 
@@ -495,12 +550,19 @@ function App() {
       });
 
       setNotice(`${selectedEmployee.name} 휴가 신청 · ${result.request.status}`);
+      setEmployeeSnapshot((current) => current && current.employee.id === selectedEmployee.id
+        ? { ...current, leaveRequests: [result.request, ...current.leaveRequests] }
+        : current);
+      setDashboard((current) => current ? {
+        ...current,
+        leaveRequests: [result.request, ...current.leaveRequests],
+        pendingLeaveRequests: [result.request, ...current.pendingLeaveRequests]
+      } : current);
       setRequestDialog(null);
       setLeaveDraft({ type: "ANNUAL", startsOn: "", endsOn: "", days: "1", reason: "" });
       setActiveSection("leave");
-      await refresh(selectedEmployee.id);
     } catch (error) {
-      setRequestError(error instanceof Error ? error.message : "휴가 신청을 처리하지 못했습니다.");
+      setRequestError(humanizeLeaveError(error, requestableLeaveDays));
     } finally {
       setIsSubmittingRequest(false);
     }
@@ -537,10 +599,13 @@ function App() {
       });
 
       setNotice(`${selectedEmployee.name} 야근 신청 · ${result.request.status}`);
+      setEmployeeSnapshot((current) => current && current.employee.id === selectedEmployee.id
+        ? { ...current, overtimeRequests: [result.request, ...current.overtimeRequests] }
+        : current);
+      setDashboard((current) => current ? { ...current, overtimeRequests: [result.request, ...current.overtimeRequests] } : current);
       setRequestDialog(null);
       setOvertimeDraft({ date: "", startsAt: "", endsAt: "", reason: "" });
       setActiveSection("overtime");
-      await refresh(selectedEmployee.id);
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : "야근 신청을 처리하지 못했습니다.");
     } finally {
@@ -924,7 +989,7 @@ function App() {
           description={effectiveMode === "EMPLOYEE" && activeSection === "self-service" ? "필요한 일만 빠르게 확인하고 처리하세요." : notice}
           actions={
             <InlineActions>
-              <button disabled={isLoading} onClick={() => void refresh()}>
+              <button disabled={isLoading} onClick={() => void refresh(selectedEmployeeId)}>
                 새로고침
               </button>
             </InlineActions>
@@ -950,6 +1015,7 @@ function App() {
               employeeViewModel,
               erpViewModel,
               isLoading,
+              isSelectingEmployee,
               onApproveLeave: approveLeave,
               onApproveOvertime: approveOvertime,
               onCreateDailyTaskPlan: createDailyTaskPlan,
@@ -971,6 +1037,7 @@ function App() {
               canAdmin: effectiveMode === "ADMIN",
               canManageRoles: authSession?.role === "SYSTEM_ADMIN",
               clockError,
+              clockFeedback,
               clockingType,
               employeeAccountStates,
               employeeCardRows,
@@ -1004,6 +1071,7 @@ function App() {
           void submitLeave();
         }}
         open={requestDialog === "leave"}
+        submitDisabled={leaveBalanceInsufficient}
         submitLabel="휴가 신청"
         title="휴가 신청"
         description="승인 전까지는 대기 상태로 표시됩니다."
@@ -1024,6 +1092,12 @@ function App() {
           <RequestField label="종료일"><input required min={leaveDraft.startsOn || undefined} type="date" value={leaveDraft.endsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, endsOn: event.target.value }))} /></RequestField>
         </div>
         <RequestField label="사용 일수"><input disabled={leaveDraft.type === "HALF_DAY"} required min={dashboard?.settings?.annualLeaveUnit ?? 0.5} step={dashboard?.settings?.annualLeaveUnit ?? 0.5} type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
+        {checksLeaveBalance ? (
+          <InlineNotice tone={leaveBalanceInsufficient ? "warning" : "info"} title={leaveBalanceInsufficient ? "신청 가능한 연차가 부족합니다" : "신청 가능 연차"}>
+            현재 신청 가능 {formatLeaveDays(requestableLeaveDays)}{pendingAnnualLeaveDays > 0 ? ` · 승인 대기 ${formatLeaveDays(pendingAnnualLeaveDays)} 반영` : ""}
+            {leaveBalanceInsufficient ? " · 무급휴가를 선택하거나 관리자에게 HR 보정을 요청해 주세요." : ""}
+          </InlineNotice>
+        ) : null}
         <div aria-live="polite" className="request-summary">
           <span>신청 요약</span>
           <strong>{leaveTypeLabel(leaveDraft.type)} · {leaveDraft.startsOn || "시작일"}{leaveDraft.endsOn && leaveDraft.endsOn !== leaveDraft.startsOn ? ` ~ ${leaveDraft.endsOn}` : ""} · {leaveDraft.days || "0"}일</strong>
@@ -1133,6 +1207,45 @@ function koreaTimestamp(date = new Date()) {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}+09:00`;
 }
 
+function upsertRecord<T extends { id: string }>(records: T[], next: T) {
+  return records.some((record) => record.id === next.id)
+    ? records.map((record) => record.id === next.id ? next : record)
+    : [next, ...records];
+}
+
+function formatKoreaTime(value: string) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).format(new Date(value));
+}
+
+function verificationStatusLabel(status: string) {
+  return {
+    GPS_PASSED: "GPS 확인 완료",
+    GPS_FAILED_ALLOWED: "대체 인증 완료",
+    GPS_FAILED_QR_ALLOWED: "QR 인증 완료",
+    OUT_OF_RANGE: "근무지 범위 밖",
+    MANUAL_REVIEW_REQUIRED: "관리자 확인 필요"
+  }[status] ?? status;
+}
+
+function humanizeLeaveError(error: unknown, availableDays: number) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("Requested leave exceeds the available balance")) {
+    return `신청 가능한 연차는 ${formatLeaveDays(availableDays)}입니다. 무급휴가를 선택하거나 관리자에게 연차 보정을 요청해 주세요.`;
+  }
+  if (message.includes("Half-day leave is not allowed")) {
+    return "현재 운영 정책에서는 반차 신청을 허용하지 않습니다.";
+  }
+  if (message.includes("Leave must be requested in")) {
+    return "관리자가 설정한 연차 사용 단위에 맞춰 일수를 입력해 주세요.";
+  }
+  return message || "휴가 신청을 처리하지 못했습니다.";
+}
+
 function getBrowserCoordinate(): Promise<{ accuracyMeters?: number; latitude: number; longitude: number }> {
   if (!("geolocation" in navigator)) {
     return Promise.reject(new Error("Geolocation is not supported."));
@@ -1156,6 +1269,7 @@ function renderSection(props: {
   canAdmin: boolean;
   canManageRoles: boolean;
   clockError: string | null;
+  clockFeedback: ClockFeedback | null;
   clockingType: ClockType | null;
   dailyWorkTasks: DailyWorkTask[];
   employeeAccountStates: EmployeeAccountState[];
@@ -1165,6 +1279,7 @@ function renderSection(props: {
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
+  isSelectingEmployee: boolean;
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
@@ -1266,6 +1381,7 @@ function LoginScreen(props: {
 
 function SelfServiceSection(props: {
   clockError: string | null;
+  clockFeedback: ClockFeedback | null;
   clockingType: ClockType | null;
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
@@ -1318,6 +1434,13 @@ function SelfServiceSection(props: {
               <button disabled={props.isLoading || props.clockingType !== null} onClick={() => props.onClock(nextClockAction.type, "MANUAL_CLICK", true)} title="수동 인증">
                 <TimerReset size={15} /> 수동
               </button>
+            </div>
+          ) : null}
+          {props.clockFeedback ? (
+            <div className="attendance-feedback" role="status">
+              <Check aria-hidden="true" size={16} />
+              <strong>{props.clockFeedback.label}</strong>
+              <span>{props.clockFeedback.time} · {props.clockFeedback.status}</span>
             </div>
           ) : null}
           {props.clockError ? <p className="attendance-error" role="alert">{props.clockError}</p> : null}
@@ -1393,6 +1516,7 @@ function EmployeeCardSection(props: {
   erpViewModel: ErpViewModel;
   leaveBalance?: LeaveBalance;
   isLoading: boolean;
+  isSelectingEmployee: boolean;
   onSelectEmployee: (employeeId: string) => void | Promise<void>;
   onUpdateEmployeeCard: () => void;
   onToggleEmployeeSensitiveData: () => void;
@@ -1404,12 +1528,12 @@ function EmployeeCardSection(props: {
     <div className="people-workspace">
       <EmployeeDirectory
         accountStates={props.employeeAccountStates}
-        busy={props.isLoading}
+        busy={props.isLoading || props.isSelectingEmployee}
         employees={props.employees}
         onSelect={props.onSelectEmployee}
         selectedEmployeeId={props.selectedEmployeeId}
       />
-      <div className="people-workspace__detail">
+      <div aria-busy={props.isSelectingEmployee} className="people-workspace__detail">
         <DetailPanel
           title={`${props.erpViewModel.employeeSummary.name} 인사기록 카드`}
           description="기본 인사정보와 급여·퇴직·소득공제 항목을 함께 관리합니다."

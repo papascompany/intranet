@@ -53,6 +53,7 @@ import type {
   UpdateRequestStatusInput,
   UploadPayrollStatementInput
 } from "./types.js";
+import type { AppBootstrap } from "./types.js";
 
 type Clock = () => string;
 
@@ -79,6 +80,20 @@ export class HrApi {
     }
 
     return employees.filter((employee) => employee.id === input.session?.employeeId);
+  }
+
+  async getAppBootstrap(input: { employeeId: string; asOf?: string; session?: AuthSession }): Promise<AppBootstrap> {
+    const asOf = input.asOf ?? this.clock();
+    const [employees, dashboard, employeeSnapshot, employeeAccountStates] = await Promise.all([
+      this.getEmployeeDirectory({ session: input.session }),
+      this.getDashboard({ asOf, session: input.session }),
+      this.getEmployeeSnapshot(input.employeeId, asOf, input.session),
+      isAdminSession(input.session)
+        ? this.getEmployeeAccountStates({ actorId: input.session!.employeeId, session: input.session })
+        : Promise.resolve([])
+    ]);
+
+    return { employees, dashboard, employeeSnapshot, employeeAccountStates };
   }
 
   async getDashboard(input: string | DashboardInput = this.clock()): Promise<Dashboard> {
@@ -1250,6 +1265,7 @@ export const defaultHrApi = createHrApi(defaultDatabase);
 
 export const getEmployees = defaultHrApi.getEmployees.bind(defaultHrApi);
 export const getEmployeeDirectory = defaultHrApi.getEmployeeDirectory.bind(defaultHrApi);
+export const getAppBootstrap = defaultHrApi.getAppBootstrap.bind(defaultHrApi);
 export const getDashboard = defaultHrApi.getDashboard.bind(defaultHrApi);
 export const getEmployeeSnapshot = defaultHrApi.getEmployeeSnapshot.bind(defaultHrApi);
 export const getDailyWorkTasks = defaultHrApi.getDailyWorkTasks.bind(defaultHrApi);

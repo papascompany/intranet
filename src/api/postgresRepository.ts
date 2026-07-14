@@ -267,14 +267,14 @@ export class PostgresHrRepository implements HrRepository {
       name: stringValue(row.name),
       role: row.role,
       department: row.department,
-      hireDate: stringValue(row.hire_date),
+      hireDate: dateValue(row.hire_date),
       employeeNumber: optionalString(row.employee_number),
       position: optionalString(row.position),
       employmentStatus: optionalString(row.employment_status) as Employee["employmentStatus"],
       employmentType: optionalString(row.employment_type) as Employee["employmentType"],
-      terminationDate: optionalString(row.termination_date),
+      terminationDate: optionalDateValue(row.termination_date),
       residentRegistrationNumber: this.config.decodeSensitiveText?.("resident_registration_number_enc", row.resident_registration_number_enc),
-      birthday: optionalString(row.birthday),
+      birthday: optionalDateValue(row.birthday),
       address: this.config.decodeSensitiveText?.("address_enc", row.address_enc),
       mobile: this.config.decodeSensitiveText?.("mobile_enc", row.mobile_enc),
       emergencyContact: this.config.decodeSensitiveText?.("emergency_contact_enc", row.emergency_contact_enc),
@@ -396,7 +396,7 @@ function attendanceFromRow(row: AttendanceRow): AttendanceRecord {
   return {
     id: stringValue(row.id),
     employeeId: stringValue(row.employee_id),
-    date: stringValue(row.work_date),
+    date: dateValue(row.work_date),
     clockInAt: optionalString(row.clock_in_at),
     clockOutAt: optionalString(row.clock_out_at),
     status: row.status,
@@ -451,8 +451,8 @@ function leaveRequestFromRow(row: LeaveRequestRow): LeaveRequest {
     id: stringValue(row.id),
     employeeId: stringValue(row.employee_id),
     type: row.type,
-    startsOn: stringValue(row.starts_on),
-    endsOn: stringValue(row.ends_on),
+    startsOn: dateValue(row.starts_on),
+    endsOn: dateValue(row.ends_on),
     days: Number(row.days),
     reason: stringValue(row.reason),
     status: row.status
@@ -476,7 +476,7 @@ function earlyLeaveFromRow(row: EarlyLeaveRow): EarlyLeaveLedger {
   return {
     id: stringValue(row.id),
     employeeId: stringValue(row.employee_id),
-    date: stringValue(row.work_date),
+    date: dateValue(row.work_date),
     minutes: Number(row.minutes),
     status: row.status,
     reason: optionalString(row.reason)
@@ -498,7 +498,7 @@ function overtimeFromRow(row: OvertimeRow): OvertimeRequest {
   return {
     id: stringValue(row.id),
     employeeId: stringValue(row.employee_id),
-    date: stringValue(row.work_date),
+    date: dateValue(row.work_date),
     startsAt: stringValue(row.starts_at),
     endsAt: stringValue(row.ends_at),
     minutes: Number(row.minutes),
@@ -587,7 +587,7 @@ function dailyWorkTaskFromRow(row: DailyWorkTaskRow): DailyWorkTask {
     id: stringValue(row.id),
     employeeId: stringValue(row.employee_id),
     department: row.department,
-    date: stringValue(row.work_date),
+    date: dateValue(row.work_date),
     title: stringValue(row.title),
     dueLabel: optionalString(row.due_label),
     displayOrder: Number(row.display_order),
@@ -699,6 +699,14 @@ function stringValue(value: unknown) {
 
 function optionalString(value: unknown) {
   return value === null || value === undefined ? undefined : stringValue(value);
+}
+
+function dateValue(value: unknown) {
+  return stringValue(value).slice(0, 10);
+}
+
+function optionalDateValue(value: unknown) {
+  return value === null || value === undefined ? undefined : dateValue(value);
 }
 
 function optionalNumber(value: unknown) {
