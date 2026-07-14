@@ -3,6 +3,7 @@ import type {
   AuditLogFilter,
   ClockAttendanceInput,
   ClockAttendanceResult,
+  CreateEmployeeAccountInput,
   CreateDailyWorkTaskPlanInput,
   CreateAttendanceCorrectionInput,
   Dashboard,
@@ -10,7 +11,11 @@ import type {
   DownloadPayrollStatementInput,
   DownloadPayrollStatementResult,
   EmployeeSnapshot,
+  EmployeeAccountState,
   GetDailyWorkTasksInput,
+  RegisterUploadedPayrollStatementInput,
+  ResetEmployeeAccountPasswordInput,
+  SetEmployeeAccountAccessInput,
   SetOvertimePayApprovalInput,
   SoftDeletePayrollStatementInput,
   SubmitLeaveRequestInput,
@@ -114,8 +119,28 @@ export async function updateEmployeeCard(input: UpdateEmployeeCardInput) {
   return await post<{ employee: Employee; auditLog: AuditLog }>("updateEmployeeCard", input);
 }
 
+export async function createEmployeeAccount(input: Omit<CreateEmployeeAccountInput, "actorId" | "session">) {
+  return await post<{ employee: Employee; temporaryPassword: string; auditLog: AuditLog }>("createEmployeeAccount", input);
+}
+
+export async function resetEmployeeAccountPassword(employeeId: string) {
+  return await post<{ employeeId: string; temporaryPassword: string; auditLog: AuditLog }>("resetEmployeeAccountPassword", { employeeId });
+}
+
+export async function setEmployeeAccountAccess(employeeId: string, enabled: boolean) {
+  return await post<{ employeeId: string; enabled: boolean; auditLog: AuditLog }>("setEmployeeAccountAccess", { employeeId, enabled });
+}
+
+export async function getEmployeeAccountStates() {
+  return await post<EmployeeAccountState[]>("getEmployeeAccountStates");
+}
+
 export async function uploadPayrollStatement(input: UploadPayrollStatementInput) {
   return await post<{ statement: PayrollStatement; auditLog: AuditLog }>("uploadPayrollStatement", input);
+}
+
+export async function registerUploadedPayrollStatement(input: Omit<RegisterUploadedPayrollStatementInput, "actorId" | "session">) {
+  return await post<{ statement: PayrollStatement; auditLog: AuditLog }>("registerUploadedPayrollStatement", input);
 }
 
 export async function downloadPayrollStatement(input: DownloadPayrollStatementInput) {
@@ -212,8 +237,18 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.createAttendanceCorrection(payload as never)) as T;
     case "updateEmployeeCard":
       return (await api.updateEmployeeCard(payload as never)) as T;
+    case "createEmployeeAccount":
+      return (await api.createEmployeeAccount(payload as never)) as T;
+    case "resetEmployeeAccountPassword":
+      return (await api.resetEmployeeAccountPassword(payload as never)) as T;
+    case "setEmployeeAccountAccess":
+      return (await api.setEmployeeAccountAccess(payload as never)) as T;
+    case "getEmployeeAccountStates":
+      return (await api.getEmployeeAccountStates(payload as never)) as T;
     case "uploadPayrollStatement":
       return (await api.uploadPayrollStatement(payload as never)) as T;
+    case "registerUploadedPayrollStatement":
+      return (await api.registerUploadedPayrollStatement(payload as never)) as T;
     case "downloadPayrollStatement":
       return (await api.downloadPayrollStatement(payload as never)) as T;
     case "softDeletePayrollStatement":

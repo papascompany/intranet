@@ -26,16 +26,23 @@ import type { HrRepository } from "./hrRepository.js";
 import type {
   AuditLogFilter,
   ClockAttendanceInput,
+  CreateEmployeeAccountInput,
   CreateDailyWorkTaskPlanInput,
   CreateAttendanceCorrectionInput,
   Dashboard,
   DashboardInput,
   DownloadPayrollStatementInput,
   DownloadPayrollStatementResult,
+  EmployeeAuthAccount,
+  EmployeeAccountState,
   EmployeeSnapshot,
   GetDailyWorkTasksInput,
+  GetEmployeeAccountStatesInput,
   SetOvertimePayApprovalInput,
+  SetEmployeeAccountAccessInput,
   SoftDeletePayrollStatementInput,
+  RegisterUploadedPayrollStatementInput,
+  ResetEmployeeAccountPasswordInput,
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
   UpdateEmployeeCardInput,
@@ -142,6 +149,90 @@ export class HrApi {
     });
 
     return { settings, auditLog };
+  }
+
+  async createEmployeeAccount(input: CreateEmployeeAccountInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    const employee = { ...this.buildNewEmployee(input.employee), id: await this.db.nextId("emp") };
+    await this.assertEmployeeNumberAvailable(employee.employeeNumber!);
+
+    const credential = await createTemporaryCredential();
+    const account: EmployeeAuthAccount = {
+      id: await this.db.nextId("account"),
+      employeeId: employee.id,
+      employeeNumber: employee.employeeNumber!,
+      passwordHash: credential.passwordHash,
+      passwordChangedAt: this.clock(),
+      failedSignInCount: 0
+    };
+    const saved = await this.db.createEmployeeWithAccount(employee, account);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "EMPLOYEE_ACCOUNT_CREATED",
+      targetType: "Employee",
+      targetId: saved.employee.id,
+      detail: `Employee ${saved.employee.employeeNumber} created with an account`
+    });
+
+    return { employee: saved.employee, temporaryPassword: credential.password, auditLog };
+  }
+
+  async resetEmployeeAccountPassword(input: ResetEmployeeAccountPasswordInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    await this.assertEmployee(input.employeeId);
+    const account = await this.requireEmployeeAccount(input.employeeId);
+    const credential = await createTemporaryCredential();
+    const saved = await this.db.updateEmployeeAccount({
+      ...account,
+      passwordHash: credential.passwordHash,
+      passwordChangedAt: this.clock(),
+      failedSignInCount: 0,
+      lockedUntil: undefined
+    });
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "EMPLOYEE_ACCOUNT_PASSWORD_RESET",
+      targetType: "Employee",
+      targetId: input.employeeId,
+      detail: `Temporary password issued for ${saved.employeeNumber}`
+    });
+
+    return { employeeId: input.employeeId, temporaryPassword: credential.password, auditLog };
+  }
+
+  async setEmployeeAccountAccess(input: SetEmployeeAccountAccessInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    await this.assertEmployee(input.employeeId);
+    const account = await this.requireEmployeeAccount(input.employeeId);
+    const saved = await this.db.updateEmployeeAccount({
+      ...account,
+      disabledAt: input.enabled ? undefined : this.clock(),
+      failedSignInCount: input.enabled ? 0 : account.failedSignInCount,
+      lockedUntil: input.enabled ? undefined : account.lockedUntil
+    });
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: input.enabled ? "EMPLOYEE_ACCOUNT_ENABLED" : "EMPLOYEE_ACCOUNT_DISABLED",
+      targetType: "Employee",
+      targetId: input.employeeId,
+      detail: `Account access ${input.enabled ? "enabled" : "disabled"} for ${saved.employeeNumber}`
+    });
+
+    return { employeeId: input.employeeId, enabled: !saved.disabledAt, auditLog };
+  }
+
+  async getEmployeeAccountStates(input: GetEmployeeAccountStatesInput = {}) {
+    const actorId = this.resolveActorId(input, input.actorId ?? input.session?.employeeId ?? "");
+    await this.assertAdmin(actorId, input.session);
+    return (await this.db.listEmployeeAccounts()).map((account): EmployeeAccountState => ({
+      employeeId: account.employeeId,
+      enabled: !account.disabledAt,
+      passwordChangedAt: account.passwordChangedAt,
+      lastSignedInAt: account.lastSignedInAt
+    }));
   }
 
   async getEmployeeSnapshot(employeeId: string, asOf = this.clock(), session?: AuthSession): Promise<EmployeeSnapshot> {
@@ -545,6 +636,34 @@ export class HrApi {
     return { statement: saved, auditLog };
   }
 
+  async registerUploadedPayrollStatement(input: RegisterUploadedPayrollStatementInput) {
+    await this.assertEmployee(input.employeeId);
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    const filename = validatePayrollFilename(input.filename);
+    const month = validatePayrollMonth(input.month);
+    const storagePath = this.validateRegisteredPayrollStoragePath(input.employeeId, month, filename, input.storagePath);
+    const statement: PayrollStatement = {
+      id: await this.db.nextId("pay"),
+      employeeId: input.employeeId,
+      month,
+      filename,
+      storagePath,
+      uploadedBy: actorId,
+      uploadedAt: input.uploadedAt ?? this.clock()
+    };
+    const saved = await this.db.addPayrollStatement(statement);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "PAYROLL_STATEMENT_REGISTERED",
+      targetType: "PayrollStatement",
+      targetId: saved.id,
+      detail: `${saved.month} ${saved.filename}`
+    });
+
+    return { statement: saved, auditLog };
+  }
+
   async downloadPayrollStatement(input: DownloadPayrollStatementInput): Promise<DownloadPayrollStatementResult> {
     const actorId = this.resolveActorId(input, input.actorId ?? input.session?.employeeId ?? "");
     await this.assertEmployee(actorId);
@@ -830,6 +949,41 @@ export class HrApi {
     return employee;
   }
 
+  private buildNewEmployee(input: CreateEmployeeAccountInput["employee"]): Omit<Employee, "id"> {
+    const employeeNumber = input.employeeNumber?.trim().toUpperCase();
+    if (!employeeNumber || !/^[A-Z0-9][A-Z0-9-]{1,63}$/.test(employeeNumber)) {
+      throw new Error("Employee number must use 2-64 uppercase letters, numbers, or hyphens.");
+    }
+    if (!input.name.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(input.hireDate)) {
+      throw new Error("Employee name and hire date are required.");
+    }
+
+    return { ...input, name: input.name.trim(), employeeNumber, pilot: input.pilot ?? false };
+  }
+
+  private async assertEmployeeNumberAvailable(employeeNumber: string) {
+    const normalized = employeeNumber.toUpperCase();
+    if ((await this.db.listEmployees()).some((employee) => employee.employeeNumber?.trim().toUpperCase() === normalized)) {
+      throw new Error(`Employee number already exists: ${employeeNumber}`);
+    }
+  }
+
+  private async requireEmployeeAccount(employeeId: string) {
+    const account = await this.db.findEmployeeAccount(employeeId);
+    if (!account) {
+      throw new Error(`Employee account not found: ${employeeId}`);
+    }
+    return account;
+  }
+
+  private validateRegisteredPayrollStoragePath(employeeId: string, month: string, filename: string, storagePath: string) {
+    const expectedPrefix = `${employeeId}/${month}/`;
+    if (!storagePath.startsWith(expectedPrefix) || storagePath === expectedPrefix) {
+      throw new Error("Payroll storage path must match the employee payroll path.");
+    }
+    return storagePath;
+  }
+
   private assertDailyWorkTaskPlan(input: { title: string; date: string; displayOrder?: number }) {
     if (!input.title.trim()) {
       throw new Error("Daily work task title is required");
@@ -855,6 +1009,47 @@ function normalizeOptionalText(value: string | null | undefined) {
   const normalized = value?.trim();
   return normalized || undefined;
 }
+
+const TEMPORARY_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+
+async function createTemporaryCredential() {
+  const password = createTemporaryPassword();
+  const salt = randomBase64Url(16);
+  const crypto = globalThis.crypto;
+  if (!crypto?.subtle) {
+    throw new Error("Secure password generation is unavailable.");
+  }
+  const derivedKey = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: 310_000, hash: "SHA-256" },
+    await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]),
+    256
+  );
+  return { password, passwordHash: `pbkdf2_sha256$310000$${salt}$${bytesToBase64Url(new Uint8Array(derivedKey))}` };
+}
+
+function createTemporaryPassword() {
+  const crypto = globalThis.crypto;
+  if (!crypto?.getRandomValues) {
+    throw new Error("Secure password generation is unavailable.");
+  }
+  const values = crypto.getRandomValues(new Uint32Array(20));
+  return Array.from(values, (value) => TEMPORARY_PASSWORD_ALPHABET[value % TEMPORARY_PASSWORD_ALPHABET.length]).join("");
+}
+
+function randomBase64Url(length: number) {
+  const crypto = globalThis.crypto;
+  if (!crypto?.getRandomValues) {
+    throw new Error("Secure password generation is unavailable.");
+  }
+  return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(length)));
+}
+
+function bytesToBase64Url(bytes: Uint8Array) {
+  let binary = "";
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
 
 export function createHrApi(
   db: HrRepository = new InMemoryDatabase(),
@@ -887,6 +1082,11 @@ export const updateDailyWorkTaskStatus = defaultHrApi.updateDailyWorkTaskStatus.
 export const createDailyWorkTaskPlan = defaultHrApi.createDailyWorkTaskPlan.bind(defaultHrApi);
 export const updateDailyWorkTaskPlan = defaultHrApi.updateDailyWorkTaskPlan.bind(defaultHrApi);
 export const updateEmployeeCard = defaultHrApi.updateEmployeeCard.bind(defaultHrApi);
+export const createEmployeeAccount = defaultHrApi.createEmployeeAccount.bind(defaultHrApi);
+export const resetEmployeeAccountPassword = defaultHrApi.resetEmployeeAccountPassword.bind(defaultHrApi);
+export const setEmployeeAccountAccess = defaultHrApi.setEmployeeAccountAccess.bind(defaultHrApi);
+export const getEmployeeAccountStates = defaultHrApi.getEmployeeAccountStates.bind(defaultHrApi);
+export const registerUploadedPayrollStatement = defaultHrApi.registerUploadedPayrollStatement.bind(defaultHrApi);
 export const getSettings = defaultHrApi.getSettings.bind(defaultHrApi);
 export const updateSettings = defaultHrApi.updateSettings.bind(defaultHrApi);
 export const clockAttendance = defaultHrApi.clockAttendance.bind(defaultHrApi);

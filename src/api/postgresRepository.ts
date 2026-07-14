@@ -13,7 +13,7 @@ import type {
   Workplace
 } from "../domain/types.js";
 import type { HrRepository } from "./hrRepository.js";
-import { defaultSystemPolicy, type SystemPolicy } from "./types.js";
+import { defaultSystemPolicy, type EmployeeAuthAccount, type SystemPolicy } from "./types.js";
 
 export type PostgresQuery = <T extends Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>;
 
@@ -36,6 +36,47 @@ export class PostgresHrRepository implements HrRepository {
   async updateEmployee(employee: Employee) {
     const [row] = await this.update<EmployeeRow>("employees", employeeToRow(employee, this.config), "id", employee.id);
     return this.employeeFromRow(requireRow(row, "employees", employee.id));
+  }
+
+  async createEmployeeWithAccount(employee: Employee, account: EmployeeAuthAccount) {
+    const employeeRow = compactRow(employeeToRow(employee, this.config));
+    const employeeColumns = Object.keys(employeeRow);
+    const employeeValues = Object.values(employeeRow);
+    const accountRow = compactRow(employeeAccountToRow(account));
+    const accountColumns = Object.keys(accountRow);
+    const accountParameters = Object.entries(accountRow).filter(([column]) => column !== "employee_id");
+    const accountParameterIndex = new Map(accountParameters.map(([column], index) => [column, employeeValues.length + index + 1]));
+    const sql = [
+      `with new_employee as (insert into employees (${employeeColumns.join(", ")}) values (${employeeColumns.map((_, index) => `$${index + 1}`).join(", ")}) returning id)`,
+      `, new_account as (insert into auth_accounts (${accountColumns.join(", ")}) select ${accountColumns.map((column) => column === "employee_id" ? "new_employee.id" : `$${accountParameterIndex.get(column)}`).join(", ")} from new_employee returning id)`,
+      "select new_employee.id as employee_id, new_account.id as account_id from new_employee cross join new_account"
+    ].join(" ");
+    const rows = await this.query<DbRow>(sql, [...employeeValues, ...accountParameters.map(([, value]) => value)]);
+    requireRow(rows[0], "employees/auth_accounts", employee.id);
+    return { employee, account };
+  }
+
+  async findEmployeeAccount(employeeId: string) {
+    const rows = await this.query<AuthAccountRow>("select * from auth_accounts where employee_id = $1 limit 1", [employeeId]);
+    return rows[0] ? employeeAccountFromRow(rows[0]) : undefined;
+  }
+
+  async listEmployeeAccounts() {
+    const rows = await this.query<AuthAccountRow>("select * from auth_accounts order by employee_id asc");
+    return rows.map(employeeAccountFromRow);
+  }
+
+  async updateEmployeeAccount(account: EmployeeAuthAccount) {
+    const row = compactRow(employeeAccountToRow(account));
+    delete row.id;
+    const columns = Object.keys(row);
+    const assignments = columns.map((column, index) => `${column} = $${index + 2}`);
+    const rows = await this.query<AuthAccountRow>(
+      `update auth_accounts set ${assignments.join(", ")}, updated_at = now() where id = $1 returning *`,
+      [account.id, ...Object.values(row)]
+    );
+    const [saved] = rows;
+    return employeeAccountFromRow(requireRow(saved, "auth_accounts", account.id));
   }
 
   async listWorkplaces() {
@@ -253,6 +294,7 @@ type EmployeeRow = DbRow & {
   department: Employee["department"];
   custom_admin_fields?: EmployeeCustomAdminFields | null;
 };
+type AuthAccountRow = DbRow;
 type WorkplaceRow = DbRow;
 type AttendanceRow = DbRow & { status: AttendanceRecord["status"] };
 type VerificationRow = DbRow & { method: VerificationAttempt["method"]; status: VerificationAttempt["status"] };
@@ -295,6 +337,34 @@ function employeeToRow(employee: Employee, config: PostgresRepositoryConfig): Db
     approver_id: employee.approverId,
     workplace_id: employee.workplaceId ?? null,
     pilot: employee.pilot
+  };
+}
+
+function employeeAccountFromRow(row: AuthAccountRow): EmployeeAuthAccount {
+  return {
+    id: stringValue(row.id),
+    employeeId: stringValue(row.employee_id),
+    employeeNumber: stringValue(row.employee_number),
+    passwordHash: stringValue(row.password_hash),
+    passwordChangedAt: stringValue(row.password_changed_at),
+    failedSignInCount: Number(row.failed_sign_in_count),
+    lockedUntil: optionalString(row.locked_until),
+    lastSignedInAt: optionalString(row.last_signed_in_at),
+    disabledAt: optionalString(row.disabled_at)
+  };
+}
+
+function employeeAccountToRow(account: EmployeeAuthAccount): DbRow {
+  return {
+    id: account.id,
+    employee_id: account.employeeId,
+    employee_number: account.employeeNumber,
+    password_hash: account.passwordHash,
+    password_changed_at: account.passwordChangedAt,
+    failed_sign_in_count: account.failedSignInCount,
+    locked_until: account.lockedUntil ?? null,
+    last_signed_in_at: account.lastSignedInAt ?? null,
+    disabled_at: account.disabledAt ?? null
   };
 }
 

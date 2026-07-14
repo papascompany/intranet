@@ -109,6 +109,54 @@ export type UploadPayrollStatementInput = AuthenticatedInput & {
   uploadedAt?: string;
 };
 
+export type RegisterUploadedPayrollStatementInput = AuthenticatedInput & {
+  employeeId: string;
+  month: string;
+  filename: string;
+  storagePath: string;
+  actorId: string;
+  uploadedAt?: string;
+};
+
+export type CreateEmployeeAccountInput = AuthenticatedInput & {
+  actorId: string;
+  employee: Omit<Employee, "id">;
+};
+
+export type ResetEmployeeAccountPasswordInput = AuthenticatedInput & {
+  actorId: string;
+  employeeId: string;
+};
+
+export type SetEmployeeAccountAccessInput = AuthenticatedInput & {
+  actorId: string;
+  employeeId: string;
+  enabled: boolean;
+};
+
+export type GetEmployeeAccountStatesInput = AuthenticatedInput & {
+  actorId?: string;
+};
+
+export type EmployeeAccountState = {
+  employeeId: string;
+  enabled: boolean;
+  passwordChangedAt: string;
+  lastSignedInAt?: string;
+};
+
+export type EmployeeAuthAccount = {
+  id: string;
+  employeeId: string;
+  employeeNumber: string;
+  passwordHash: string;
+  passwordChangedAt: string;
+  failedSignInCount: number;
+  lockedUntil?: string;
+  lastSignedInAt?: string;
+  disabledAt?: string;
+};
+
 export type DownloadPayrollStatementInput = AuthenticatedInput & {
   statementId: string;
   actorId?: string;

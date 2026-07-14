@@ -124,8 +124,18 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.createAttendanceCorrection(payload as never);
     case "updateEmployeeCard":
       return await api.updateEmployeeCard(payload as never);
+    case "createEmployeeAccount":
+      return await api.createEmployeeAccount(payload as never);
+    case "resetEmployeeAccountPassword":
+      return await api.resetEmployeeAccountPassword(payload as never);
+    case "setEmployeeAccountAccess":
+      return await api.setEmployeeAccountAccess(payload as never);
+    case "getEmployeeAccountStates":
+      return await api.getEmployeeAccountStates(payload as never);
     case "uploadPayrollStatement":
       return await api.uploadPayrollStatement(payload as never);
+    case "registerUploadedPayrollStatement":
+      return await api.registerUploadedPayrollStatement(payload as never);
     case "downloadPayrollStatement":
       return await api.downloadPayrollStatement(payload as never);
     case "softDeletePayrollStatement":

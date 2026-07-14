@@ -20,6 +20,27 @@ function repositoryWithRows(rows: Record<string, unknown>[][]) {
 }
 
 describe("PostgresHrRepository", () => {
+  it("creates the employee and auth account atomically", async () => {
+    const { calls, repository } = repositoryWithRows([[{ employee_id: "emp-0099", account_id: "account-0099" }]]);
+
+    await repository.createEmployeeWithAccount(
+      {
+        id: "emp-0099", name: "신규 직원", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-14", employeeNumber: "EMP-0099", pilot: false
+      },
+      {
+        id: "account-0099", employeeId: "emp-0099", employeeNumber: "EMP-0099", passwordHash: "pbkdf2_sha256$310000$salt$hash", passwordChangedAt: "2026-07-14T00:00:00Z", failedSignInCount: 0
+      }
+    );
+
+    expect(calls[0].sql).toContain("with new_employee as");
+    expect(calls[0].sql).toContain("insert into auth_accounts");
+    expect(calls[0].params).toContain("EMP-0099");
+    const placeholders = [...calls[0].sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
+    expect([...new Set(placeholders)].sort((left, right) => left - right)).toEqual(
+      Array.from({ length: calls[0].params.length }, (_, index) => index + 1)
+    );
+  });
+
   it("maps and persists the employee workplace assignment", async () => {
     const employeeRow = {
       id: "emp-ops-1",

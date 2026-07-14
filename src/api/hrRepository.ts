@@ -11,13 +11,17 @@ import type {
   VerificationAttempt,
   Workplace
 } from "../domain/types";
-import type { SystemPolicy } from "./types";
+import type { EmployeeAuthAccount, SystemPolicy } from "./types";
 
 export type MaybePromise<T> = T | Promise<T>;
 
 export interface HrRepository {
   listEmployees(): MaybePromise<Employee[]>;
   updateEmployee(employee: Employee): MaybePromise<Employee>;
+  createEmployeeWithAccount(employee: Employee, account: EmployeeAuthAccount): MaybePromise<{ employee: Employee; account: EmployeeAuthAccount }>;
+  listEmployeeAccounts(): MaybePromise<EmployeeAuthAccount[]>;
+  findEmployeeAccount(employeeId: string): MaybePromise<EmployeeAuthAccount | undefined>;
+  updateEmployeeAccount(account: EmployeeAuthAccount): MaybePromise<EmployeeAuthAccount>;
   listWorkplaces(): MaybePromise<Workplace[]>;
   listAttendanceRecords(): MaybePromise<AttendanceRecord[]>;
   findAttendanceByEmployeeDate(employeeId: string, date: string): MaybePromise<AttendanceRecord | undefined>;

@@ -3,9 +3,13 @@ import {
   createDailyWorkTaskPlan,
   getDailyWorkTasks,
   getDashboard,
+  getEmployeeAccountStates,
   getEmployees,
   getSystemStatus,
   submitLeaveRequest,
+  createEmployeeAccount,
+  resetEmployeeAccountPassword,
+  setEmployeeAccountAccess,
   updateDailyWorkTaskPlan,
   updateDailyWorkTaskStatus
 } from "./hrHttpClient";
@@ -129,6 +133,23 @@ describe("hrHttpClient", () => {
       "/api/hr",
       expect.objectContaining({ body: JSON.stringify({ action: "getSystemStatus" }) })
     );
+  });
+
+  it("posts employee account lifecycle and safe state actions", async () => {
+    const fetch = mockFetch(200, { employee: { id: "emp-1" }, temporaryPassword: "temporary-password" });
+    await createEmployeeAccount({
+      employee: { name: "신규", employeeNumber: "EMP-0099", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-14", pilot: false }
+    });
+    await resetEmployeeAccountPassword("emp-1");
+    await setEmployeeAccountAccess("emp-1", false);
+    await getEmployeeAccountStates();
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "createEmployeeAccount", payload: {
+      employee: { name: "신규", employeeNumber: "EMP-0099", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-14", pilot: false }
+    } }) }));
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "resetEmployeeAccountPassword", payload: { employeeId: "emp-1" } }) }));
+    expect(fetch).toHaveBeenNthCalledWith(3, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "setEmployeeAccountAccess", payload: { employeeId: "emp-1", enabled: false } }) }));
+    expect(fetch).toHaveBeenNthCalledWith(4, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "getEmployeeAccountStates" }) }));
   });
 
   it("reports the local Vite fallback as demo-only", async () => {

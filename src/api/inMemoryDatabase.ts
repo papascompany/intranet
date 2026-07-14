@@ -11,7 +11,7 @@ import type {
   VerificationAttempt,
   Workplace
 } from "../domain/types.js";
-import { defaultSystemPolicy, type SystemPolicy } from "./types.js";
+import { defaultSystemPolicy, type EmployeeAuthAccount, type SystemPolicy } from "./types.js";
 import type { HrRepository } from "./hrRepository.js";
 import {
   auditLogs,
@@ -38,6 +38,7 @@ export type InMemoryDatabaseSeed = {
   payrollStatements?: PayrollStatement[];
   auditLogs?: AuditLog[];
   dailyWorkTasks?: DailyWorkTask[];
+  employeeAccounts?: EmployeeAuthAccount[];
   settings?: SystemPolicy;
 };
 
@@ -53,6 +54,7 @@ export class InMemoryDatabase implements HrRepository {
   private readonly payrollStatements: PayrollStatement[];
   private readonly auditLogs: AuditLog[];
   private readonly dailyWorkTasks: DailyWorkTask[];
+  private readonly employeeAccounts: EmployeeAuthAccount[];
   private settings: SystemPolicy;
 
   constructor(seed: InMemoryDatabaseSeed = {}) {
@@ -67,6 +69,7 @@ export class InMemoryDatabase implements HrRepository {
     this.payrollStatements = cloneList(seed.payrollStatements ?? payrollStatements);
     this.auditLogs = cloneList(seed.auditLogs ?? auditLogs);
     this.dailyWorkTasks = cloneList(seed.dailyWorkTasks ?? dailyWorkTasks);
+    this.employeeAccounts = cloneList(seed.employeeAccounts ?? []);
     this.settings = cloneItem(seed.settings ?? defaultSystemPolicy);
   }
 
@@ -82,6 +85,40 @@ export class InMemoryDatabase implements HrRepository {
 
     this.employees[index] = cloneItem(employee);
     return cloneItem(this.employees[index]);
+  }
+
+  createEmployeeWithAccount(employee: Employee, account: EmployeeAuthAccount) {
+    if (this.employees.some((item) => item.id === employee.id)) {
+      throw new Error(`Employee already exists: ${employee.id}`);
+    }
+    if (this.employees.some((item) => sameEmployeeNumber(item.employeeNumber, employee.employeeNumber))) {
+      throw new Error(`Employee number already exists: ${employee.employeeNumber}`);
+    }
+    if (this.employeeAccounts.some((item) => sameEmployeeNumber(item.employeeNumber, account.employeeNumber))) {
+      throw new Error(`Employee number already exists: ${account.employeeNumber}`);
+    }
+
+    this.employees.push(cloneItem(employee));
+    this.employeeAccounts.push(cloneItem(account));
+    return { employee: cloneItem(employee), account: cloneItem(account) };
+  }
+
+  listEmployeeAccounts() {
+    return cloneList(this.employeeAccounts);
+  }
+
+  findEmployeeAccount(employeeId: string) {
+    return cloneItem(this.employeeAccounts.find((account) => account.employeeId === employeeId));
+  }
+
+  updateEmployeeAccount(account: EmployeeAuthAccount) {
+    const index = this.employeeAccounts.findIndex((item) => item.id === account.id);
+    if (index < 0) {
+      throw new Error(`Employee account not found: ${account.employeeId}`);
+    }
+
+    this.employeeAccounts[index] = cloneItem(account);
+    return cloneItem(this.employeeAccounts[index]);
   }
 
   listWorkplaces() {
@@ -258,4 +295,8 @@ function cloneItem<T extends object>(item: T): T;
 function cloneItem<T extends object>(item: T | undefined): T | undefined;
 function cloneItem<T extends object>(item: T | undefined) {
   return item ? ({ ...item } as T) : undefined;
+}
+
+function sameEmployeeNumber(left: string | undefined, right: string | undefined) {
+  return Boolean(left && right && left.trim().toUpperCase() === right.trim().toUpperCase());
 }

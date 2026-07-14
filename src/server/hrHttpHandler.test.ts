@@ -28,6 +28,13 @@ const productionEmployeeSession = {
   rememberLogin: false
 };
 
+const adminSession = {
+  employeeId: "emp-ceo",
+  role: "HR_ADMIN" as const,
+  authenticatedAt: "2026-07-12T09:00:00+09:00",
+  rememberLogin: false
+};
+
 describe("hrHttpHandler", () => {
   it("serves dashboard data through the GET API surface", async () => {
     const response = await handleHrHttpRequest(
@@ -139,6 +146,62 @@ describe("hrHttpHandler", () => {
         employeeId: "emp-ops-1",
         status: "PENDING"
       }
+    });
+  });
+
+  it("routes admin employee account and Blob payroll registration actions with the trusted actor", async () => {
+    const hrApi = api();
+    const created = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "createEmployeeAccount",
+          payload: {
+            actorId: "emp-ops-1",
+            employee: {
+              name: "HTTP 신규",
+              role: "EMPLOYEE",
+              department: "운영팀",
+              hireDate: "2026-07-12",
+              employeeNumber: "EMP-0200",
+              pilot: false
+            }
+          }
+        },
+        serverSession: adminSession
+      },
+      hrApi
+    );
+
+    expect(created.status).toBe(200);
+    expect(created.body).toMatchObject({ employee: { employeeNumber: "EMP-0200" }, auditLog: { actorId: "emp-ceo" } });
+    const employeeId = (created.body as { employee: { id: string } }).employee.id;
+    const registered = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "registerUploadedPayrollStatement",
+          payload: {
+            employeeId,
+            month: "2026-07",
+            filename: "2026-07-payroll-http.pdf",
+            storagePath: `${employeeId}/2026-07/2026-07-payroll-http.pdf`
+          }
+        },
+        serverSession: adminSession
+      },
+      hrApi
+    );
+
+    expect(registered.status).toBe(200);
+    expect(registered.body).toMatchObject({ auditLog: { action: "PAYROLL_STATEMENT_REGISTERED", actorId: "emp-ceo" } });
+    const accountStates = await handleHrHttpRequest(
+      { method: "POST", body: { action: "getEmployeeAccountStates" }, serverSession: adminSession },
+      hrApi
+    );
+    expect(accountStates).toMatchObject({
+      status: 200,
+      body: [expect.objectContaining({ employeeId, enabled: true, passwordChangedAt: expect.any(String) })]
     });
   });
 

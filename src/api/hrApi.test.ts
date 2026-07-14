@@ -4,6 +4,7 @@ import { createHrApi } from "./hrApi";
 import type { AuthSession } from "./auth";
 import type { HrRepository } from "./hrRepository";
 import { employees } from "../domain/seed";
+import { verifyPassword } from "../server/sessionAuth";
 
 const fixedNow = "2026-07-08T09:00:00+09:00";
 const payrollFile = { contentBase64: "JVBERi0xLjQK", contentType: "application/pdf" as const, sizeBytes: 9 };
@@ -50,6 +51,95 @@ const adminSession: AuthSession = {
 };
 
 describe("hr api", () => {
+  it("creates an employee account with a server-generated temporary password and audits it", async () => {
+    const db = new InMemoryDatabase();
+    const hrApi = createHrApi(db, () => fixedNow);
+
+    const result = await hrApi.createEmployeeAccount({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      employee: {
+        name: "신규 직원",
+        role: "EMPLOYEE",
+        department: "운영팀",
+        hireDate: "2026-07-08",
+        employeeNumber: "emp-0099",
+        pilot: false
+      }
+    });
+
+    expect(result.employee).toMatchObject({ employeeNumber: "EMP-0099" });
+    expect(result.temporaryPassword).toHaveLength(20);
+    expect(result.auditLog).toMatchObject({ action: "EMPLOYEE_ACCOUNT_CREATED", actorId: adminSession.employeeId });
+    const account = await db.findEmployeeAccount(result.employee.id);
+    expect(account && await verifyPassword(result.temporaryPassword, account.passwordHash)).toBe(true);
+
+    await expect(
+      hrApi.createEmployeeAccount({
+        actorId: adminSession.employeeId,
+        session: adminSession,
+        employee: { ...result.employee, employeeNumber: "emp-0099" }
+      })
+    ).rejects.toThrow("Employee number already exists");
+  });
+
+  it("allows only admins to reset, disable, and re-enable employee account access", async () => {
+    const db = new InMemoryDatabase();
+    const hrApi = createHrApi(db, () => fixedNow);
+    const created = await hrApi.createEmployeeAccount({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      employee: {
+        name: "계정 직원",
+        role: "EMPLOYEE",
+        department: "제작팀",
+        hireDate: "2026-07-08",
+        employeeNumber: "EMP-0100",
+        pilot: false
+      }
+    });
+
+    await expect(hrApi.resetEmployeeAccountPassword({ actorId: employeeSession.employeeId, employeeId: created.employee.id, session: employeeSession }))
+      .rejects.toThrow("Admin permission required");
+
+    const reset = await hrApi.resetEmployeeAccountPassword({ actorId: adminSession.employeeId, employeeId: created.employee.id, session: adminSession });
+    expect(reset.temporaryPassword).not.toBe(created.temporaryPassword);
+    expect(reset.auditLog.action).toBe("EMPLOYEE_ACCOUNT_PASSWORD_RESET");
+
+    await expect(hrApi.setEmployeeAccountAccess({ actorId: adminSession.employeeId, employeeId: created.employee.id, enabled: false, session: adminSession }))
+      .resolves.toMatchObject({ enabled: false, auditLog: { action: "EMPLOYEE_ACCOUNT_DISABLED" } });
+    await expect(hrApi.setEmployeeAccountAccess({ actorId: adminSession.employeeId, employeeId: created.employee.id, enabled: true, session: adminSession }))
+      .resolves.toMatchObject({ enabled: true, auditLog: { action: "EMPLOYEE_ACCOUNT_ENABLED" } });
+    expect((await hrApi.getEmployees()).some((employee) => employee.id === created.employee.id)).toBe(true);
+    await expect(hrApi.getEmployeeAccountStates({ actorId: adminSession.employeeId, session: adminSession })).resolves.toContainEqual({
+      employeeId: created.employee.id,
+      enabled: true,
+      passwordChangedAt: expect.any(String),
+      lastSignedInAt: undefined
+    });
+    await expect(hrApi.getEmployeeAccountStates({ actorId: employeeSession.employeeId, session: employeeSession }))
+      .rejects.toThrow("Admin permission required");
+  });
+
+  it("registers Blob-uploaded payroll only at the expected employee path", async () => {
+    const hrApi = api();
+    const input = {
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      employeeId: "emp-ops-1",
+      month: "2026-07",
+      filename: "2026-07-payroll-kim.pdf",
+      storagePath: "emp-ops-1/2026-07/2026-07-payroll-kim.pdf"
+    };
+
+    await expect(hrApi.registerUploadedPayrollStatement(input)).resolves.toMatchObject({
+      statement: { storagePath: input.storagePath },
+      auditLog: { action: "PAYROLL_STATEMENT_REGISTERED" }
+    });
+    await expect(hrApi.registerUploadedPayrollStatement({ ...input, storagePath: "emp-ops-2/2026-07/2026-07-payroll-kim.pdf" }))
+      .rejects.toThrow("Payroll storage path must match");
+  });
+
   it("awaits async repository permission checks before payroll writes", async () => {
     const hrApi = createHrApi(asyncRepository(), () => fixedNow);
 

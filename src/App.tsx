@@ -24,12 +24,16 @@ import {
 import {
   clockAttendance,
   createAttendanceCorrection,
+  createEmployeeAccount,
   createDailyWorkTaskPlan,
   getDashboard,
+  getEmployeeAccountStates,
   getEmployeeDirectory,
   getEmployeeSnapshot,
   downloadPayrollStatement,
+  resetEmployeeAccountPassword,
   setOvertimePayApproval,
+  setEmployeeAccountAccess,
   softDeletePayrollStatement,
   submitLeaveRequest,
   submitOvertimeRequest,
@@ -37,10 +41,9 @@ import {
   updateDailyWorkTaskStatus,
   updateDailyWorkTaskPlan,
   updateSettings,
-  updateRequestStatus,
-  uploadPayrollStatement
+  updateRequestStatus
 } from "./api/hrHttpClient";
-import { defaultSystemPolicy, type Dashboard, type EmployeeSnapshot, type SystemPolicy } from "./api/types";
+import { defaultSystemPolicy, type Dashboard, type EmployeeAccountState, type EmployeeSnapshot, type SystemPolicy } from "./api/types";
 import { isAdminSession, type AuthSession } from "./api/auth";
 import { getAuthenticatedSession, loginWithEmployeeNumber, logoutAuthenticatedSession } from "./api/authHttpClient";
 import {
@@ -59,6 +62,7 @@ import {
 import { FormDialog, InlineNotice } from "./components/operational";
 import { DailyWorkPlanManager, type DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
 import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/employeeCardEditor";
+import { EmployeeAccountManager, type EmployeeAccountCreateInput } from "./components/employeeAccountManager";
 import { ApprovalQueue, type ApprovalQueueItem } from "./components/approvalQueue";
 import { AuditLogExplorer } from "./components/auditLogExplorer";
 import { PayrollStatementManager } from "./components/payrollStatementManager";
@@ -66,6 +70,7 @@ import { SystemPolicyEditor } from "./components/systemPolicyEditor";
 import type { AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveType, PayrollStatement, VerificationMethod } from "./domain/types";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
+import { uploadPayrollPdfDirect } from "./api/payrollClientUpload";
 import {
   buildErpViewModel,
   type ErpActiveSection,
@@ -150,6 +155,7 @@ function App() {
   const [rememberLogin, setRememberLogin] = useState(false);
   const [userMode, setUserMode] = useState<UserMode>("EMPLOYEE");
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeeAccountStates, setEmployeeAccountStates] = useState<EmployeeAccountState[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [employeeSnapshot, setEmployeeSnapshot] = useState<EmployeeSnapshot | null>(null);
   const [notice, setNotice] = useState("운영팀 파일럿 API/DB 계층이 준비되었습니다.");
@@ -202,16 +208,18 @@ function App() {
       try {
         const session = authSession;
         const snapshotEmployeeId = !isAdminSession(session) ? session.employeeId : employeeId;
-        const [nextEmployees, nextDashboard, nextSnapshot] = await Promise.all([
+        const [nextEmployees, nextDashboard, nextSnapshot, nextAccountStates] = await Promise.all([
           getEmployeeDirectory({ session }),
           getDashboard({ asOf: today, session }),
-          getEmployeeSnapshot(snapshotEmployeeId, today, session)
+          getEmployeeSnapshot(snapshotEmployeeId, today, session),
+          isAdminSession(session) ? getEmployeeAccountStates() : Promise.resolve([])
         ]);
 
         setEmployees(nextEmployees);
         setSelectedEmployeeId(snapshotEmployeeId);
         setDashboard(nextDashboard);
         setEmployeeSnapshot(nextSnapshot);
+        setEmployeeAccountStates(nextAccountStates);
       } catch (error) {
         const message = error instanceof Error ? error.message : "데이터를 불러오지 못했습니다.";
         setLoadError(message);
@@ -622,20 +630,14 @@ function App() {
     setIsUploadingPayroll(true);
     setPayrollUploadError(null);
     try {
-      const result = await uploadPayrollStatement({
+      await uploadPayrollPdfDirect({
         employeeId: selectedEmployee.id,
         month: payrollUploadDraft.month,
-        filename: payrollUploadDraft.file.name,
-        actorId: authActorId(authSession, selectedEmployee.id),
-        session: authSession ?? undefined,
-        file: {
-          contentBase64: await fileToBase64(payrollUploadDraft.file),
-          contentType: "application/pdf",
-          sizeBytes: payrollUploadDraft.file.size
-        }
+        file: payrollUploadDraft.file
       });
-      setNotice(`${selectedEmployee.name} 급여명세서 업로드 · ${result.statement.month}`);
+      setNotice(`${selectedEmployee.name} 급여명세서 업로드 완료 · 명세서 등록 중`);
       setIsPayrollUploadOpen(false);
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
       await refresh(selectedEmployee.id);
     } catch (error) {
       setPayrollUploadError(error instanceof Error ? error.message : "급여명세서를 업로드하지 못했습니다.");
@@ -703,6 +705,28 @@ function App() {
     } finally {
       setIsSavingEmployeeCard(false);
     }
+  }
+
+  async function createManagedEmployeeAccount(input: EmployeeAccountCreateInput) {
+    const result = await createEmployeeAccount({ employee: { ...input, pilot: false } });
+    setNotice(`${result.employee.name} 직원 계정 발급 · 임시 비밀번호를 안전하게 전달하세요.`);
+    await refresh(result.employee.id);
+    return { temporaryPassword: result.temporaryPassword };
+  }
+
+  async function resetManagedEmployeePassword(employeeId: string) {
+    const result = await resetEmployeeAccountPassword(employeeId);
+    const employee = employees.find((item) => item.id === employeeId);
+    setNotice(`${employee?.name ?? "직원"} 임시 비밀번호 재발급`);
+    await refresh(employeeId);
+    return { temporaryPassword: result.temporaryPassword };
+  }
+
+  async function setManagedEmployeeAccountAccess(employeeId: string, enabled: boolean) {
+    const result = await setEmployeeAccountAccess(employeeId, enabled);
+    const employee = employees.find((item) => item.id === employeeId);
+    setNotice(`${employee?.name ?? "직원"} 계정 ${result.enabled ? "사용 설정" : "사용 중지"}`);
+    await refresh(selectedEmployeeId);
   }
 
   async function updateSystemPolicy(settings: SystemPolicy) {
@@ -843,11 +867,15 @@ function App() {
                 setEmployeeCardError(null);
                 setIsEmployeeCardEditorOpen(true);
               },
+              onCreateEmployeeAccount: createManagedEmployeeAccount,
+              onResetEmployeePassword: resetManagedEmployeePassword,
+              onSetEmployeeAccountAccess: setManagedEmployeeAccountAccess,
               onUpdateSystemPolicy: updateSystemPolicy,
               onSubmitLeave: () => openRequestDialog("leave"),
               onSubmitOvertime: () => openRequestDialog("overtime"),
               onUploadPayroll: openPayrollUpload,
               canAdmin: effectiveMode === "ADMIN",
+              employeeAccountStates,
               employeeCardRows,
               employees,
               dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
@@ -855,6 +883,7 @@ function App() {
               overtimeRequests: dashboard?.overtimeRequests ?? [],
               payrollStatements: employeeSnapshot?.payrollStatements ?? [],
               systemPolicy: dashboard?.settings ?? defaultSystemPolicy,
+              workplaces: employeeSnapshot?.workplaceOptions ?? [],
               auditLogs: dashboard?.recentAuditLogs ?? [],
               isSavingTaskPlan,
               taskPlanError
@@ -973,16 +1002,6 @@ function RequestField({ children, label }: { children: ReactNode; label: string 
   return <label className="request-field"><span>{label}</span>{children}</label>;
 }
 
-async function fileToBase64(file: File) {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  return btoa(binary);
-}
-
 function koreaTimestamp(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul",
@@ -1022,6 +1041,7 @@ function renderSection(props: {
   activeSection: ErpActiveSection;
   canAdmin: boolean;
   dailyWorkTasks: DailyWorkTask[];
+  employeeAccountStates: EmployeeAccountState[];
   employeeCardRows: EmployeeCardRow[];
   employees: Employee[];
   employeeViewModel: EmployeeViewModel | null;
@@ -1031,12 +1051,15 @@ function renderSection(props: {
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
   onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
+  onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
   onUpdateDailyTask: (task: DailyWorkTask) => void;
   onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
   onCreateCorrection: () => void;
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
   onUpdateEmployeeCard: () => void;
+  onResetEmployeePassword: (employeeId: string) => Promise<{ temporaryPassword: string }>;
+  onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
@@ -1046,6 +1069,7 @@ function renderSection(props: {
   overtimeRequests: import("./domain/types").OvertimeRequest[];
   payrollStatements: PayrollStatement[];
   systemPolicy: SystemPolicy;
+  workplaces: import("./domain/types").Workplace[];
   auditLogs: AuditLog[];
   taskPlanError: string | null;
 }) {
@@ -1231,26 +1255,45 @@ function SelfServiceSection(props: {
 
 function EmployeeCardSection(props: {
   canAdmin: boolean;
+  employeeAccountStates: EmployeeAccountState[];
   employeeCardRows: EmployeeCardRow[];
+  employees: Employee[];
   erpViewModel: ErpViewModel;
   isLoading: boolean;
+  onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
+  onResetEmployeePassword: (employeeId: string) => Promise<{ temporaryPassword: string }>;
+  onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateEmployeeCard: () => void;
+  workplaces: import("./domain/types").Workplace[];
 }) {
   return (
-    <DetailPanel
-      title={`${props.erpViewModel.employeeSummary.name} 직원카드`}
-      description={props.canAdmin ? "관리자 전용 급여·퇴직·소득공제·커스텀 항목까지 표시합니다." : "직원모드에서는 기본 인사카드 항목만 표시합니다."}
-      actions={
-        <InlineActions>
-          <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
-            <BadgeCheck size={14} />
-            {props.canAdmin ? "직원카드 편집" : "내 정보 수정"}
-          </button>
-        </InlineActions>
-      }
-    >
-      <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
-    </DetailPanel>
+    <div className="admin-operations-stack">
+      <DetailPanel
+        title={`${props.erpViewModel.employeeSummary.name} 직원카드`}
+        description={props.canAdmin ? "관리자 전용 급여·퇴직·소득공제·커스텀 항목까지 표시합니다." : "직원모드에서는 기본 인사카드 항목만 표시합니다."}
+        actions={
+          <InlineActions>
+            <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
+              <BadgeCheck size={14} />
+              {props.canAdmin ? "직원카드 편집" : "내 정보 수정"}
+            </button>
+          </InlineActions>
+        }
+      >
+        <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
+      </DetailPanel>
+      {props.canAdmin ? (
+        <EmployeeAccountManager
+          accountStates={props.employeeAccountStates}
+          busy={props.isLoading}
+          employees={props.employees}
+          onCreate={props.onCreateEmployeeAccount}
+          onResetPassword={props.onResetEmployeePassword}
+          onSetEnabled={props.onSetEmployeeAccountAccess}
+          workplaces={props.workplaces}
+        />
+      ) : null}
+    </div>
   );
 }
 
