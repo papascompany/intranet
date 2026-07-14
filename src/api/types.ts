@@ -136,6 +136,11 @@ export type SetEmployeeAccountAccessInput = AuthenticatedInput & {
   enabled: boolean;
 };
 
+export type RevealEmployeeSensitiveDataInput = AuthenticatedInput & {
+  actorId: string;
+  employeeId: string;
+};
+
 export type GetEmployeeAccountStatesInput = AuthenticatedInput & {
   actorId?: string;
 };

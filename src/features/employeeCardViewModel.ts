@@ -18,14 +18,15 @@ const defaultCustomAdminFields: EmployeeCustomAdminFields = [
   { id: "custom-admin-field-5", label: "관리자 항목 5", value: "-" }
 ];
 
-export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCardMode): EmployeeCardRow[] {
+export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCardMode, options: { revealSensitive?: boolean } = {}): EmployeeCardRow[] {
+  const revealSensitive = mode === "ADMIN" && options.revealSensitive === true;
   const baseRows: EmployeeCardRow[] = [
     row("employeeNumber", "사번", employee.employeeNumber),
     row("name", "이름", employee.name),
     row("position", "직위", employee.position),
     row("hireDate", "입사일", employee.hireDate),
     row("workplaceAssignment", "근무지 배정", workplaceAssignment(employee)),
-    row("residentRegistrationNumber", "주민등록번호", maskResidentRegistrationNumber(employee.residentRegistrationNumber), {
+    row("residentRegistrationNumber", "주민등록번호", revealSensitive ? employee.residentRegistrationNumber : maskResidentRegistrationNumber(employee.residentRegistrationNumber), {
       sensitive: true
     }),
     row("birthday", "생일", employee.birthday),
@@ -34,7 +35,7 @@ export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCar
     row("emergencyContact", "비상연락처", employee.emergencyContact, { sensitive: true }),
     row("familyRelations", "가족관계", employee.familyRelations, { sensitive: true }),
     row("payrollBank", "급여은행", employee.payrollBank),
-    row("payrollAccount", "급여계좌", employee.payrollAccount, { sensitive: true })
+    row("payrollAccount", "급여계좌", revealSensitive || mode === "EMPLOYEE" ? employee.payrollAccount : maskPayrollAccount(employee.payrollAccount), { sensitive: true })
   ];
 
   if (mode === "EMPLOYEE") {
@@ -98,6 +99,12 @@ function maskResidentRegistrationNumber(value: string | undefined) {
 
   const visibleEnd = Math.min(hyphenIndex + 2, value.length);
   return `${value.slice(0, visibleEnd)}${"*".repeat(value.length - visibleEnd)}`;
+}
+
+function maskPayrollAccount(value: string | undefined) {
+  if (!value) return "-";
+  if (value.length <= 4) return "*".repeat(value.length);
+  return `${"*".repeat(Math.max(0, value.length - 4))}${value.slice(-4)}`;
 }
 
 function formatWon(value: number | undefined) {

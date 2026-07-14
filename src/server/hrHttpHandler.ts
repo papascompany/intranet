@@ -127,6 +127,8 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.createAttendanceCorrection(payload as never);
     case "updateEmployeeCard":
       return await api.updateEmployeeCard(payload as never);
+    case "revealEmployeeSensitiveData":
+      return await api.revealEmployeeSensitiveData(payload as never);
     case "createEmployeeAccount":
       return await api.createEmployeeAccount(payload as never);
     case "resetEmployeeAccountPassword":

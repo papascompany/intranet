@@ -621,6 +621,28 @@ describe("hr api", () => {
     expect(snapshot.employee.position).toBe("운영 리드");
   });
 
+  it("records administrator access to employee resident and payroll identifiers", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.revealEmployeeSensitiveData({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession
+    })).resolves.toMatchObject({
+      auditLog: {
+        action: "EMPLOYEE_SENSITIVE_DATA_VIEWED",
+        targetType: "Employee",
+        targetId: "emp-ops-1",
+        detail: "residentRegistrationNumber,payrollAccount"
+      }
+    });
+    await expect(hrApi.revealEmployeeSensitiveData({
+      employeeId: "emp-ops-1",
+      actorId: employeeSession.employeeId,
+      session: employeeSession
+    })).rejects.toThrow("Admin permission required");
+  });
+
   it("rejects unknown workplace assignments before updating an employee card", async () => {
     const hrApi = api();
 

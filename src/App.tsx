@@ -7,6 +7,8 @@ import {
   ChevronDown,
   ClipboardCheck,
   Clock,
+  Eye,
+  EyeOff,
   FileText,
   Fingerprint,
   History,
@@ -32,6 +34,7 @@ import {
   getEmployeeSnapshot,
   downloadPayrollStatement,
   resetEmployeeAccountPassword,
+  revealEmployeeSensitiveData,
   setOvertimePayApproval,
   setEmployeeAccountAccess,
   softDeletePayrollStatement,
@@ -193,6 +196,8 @@ function App() {
   const [isEmployeeCardEditorOpen, setIsEmployeeCardEditorOpen] = useState(false);
   const [isSavingEmployeeCard, setIsSavingEmployeeCard] = useState(false);
   const [employeeCardError, setEmployeeCardError] = useState<string | null>(null);
+  const [isRevealingEmployeeSensitiveData, setIsRevealingEmployeeSensitiveData] = useState(false);
+  const [isEmployeeSensitiveDataRevealed, setIsEmployeeSensitiveDataRevealed] = useState(false);
   const [isPayrollUploadOpen, setIsPayrollUploadOpen] = useState(false);
   const [isUploadingPayroll, setIsUploadingPayroll] = useState(false);
   const [payrollUploadError, setPayrollUploadError] = useState<string | null>(null);
@@ -221,6 +226,7 @@ function App() {
         setDashboard(nextDashboard);
         setEmployeeSnapshot(nextSnapshot);
         setEmployeeAccountStates(nextAccountStates);
+        setIsEmployeeSensitiveDataRevealed(false);
       } catch (error) {
         const message = error instanceof Error ? error.message : "데이터를 불러오지 못했습니다.";
         setLoadError(message);
@@ -274,8 +280,8 @@ function App() {
     [dashboard, employeeSnapshot, employees, activeSection]
   );
   const employeeCardRows = useMemo(
-    () => (selectedEmployee ? buildEmployeeCardViewModel(selectedEmployee, effectiveMode) : []),
-    [effectiveMode, selectedEmployee]
+    () => (selectedEmployee ? buildEmployeeCardViewModel(selectedEmployee, effectiveMode, { revealSensitive: isEmployeeSensitiveDataRevealed }) : []),
+    [effectiveMode, isEmployeeSensitiveDataRevealed, selectedEmployee]
   );
   const visibleNavItems = useMemo(
     () =>
@@ -715,6 +721,26 @@ function App() {
     }
   }
 
+  async function toggleEmployeeSensitiveData() {
+    if (isEmployeeSensitiveDataRevealed) {
+      setIsEmployeeSensitiveDataRevealed(false);
+      return;
+    }
+    if (!selectedEmployee) return;
+
+    setIsRevealingEmployeeSensitiveData(true);
+    setEmployeeCardError(null);
+    try {
+      const result = await revealEmployeeSensitiveData({ employeeId: selectedEmployee.id });
+      setIsEmployeeSensitiveDataRevealed(true);
+      setNotice(`${selectedEmployee.name} 민감정보 열람 · 감사로그 ${result.auditLog.id}`);
+    } catch (error) {
+      setEmployeeCardError(error instanceof Error ? error.message : "민감정보를 열람하지 못했습니다.");
+    } finally {
+      setIsRevealingEmployeeSensitiveData(false);
+    }
+  }
+
   async function createManagedEmployeeAccount(input: EmployeeAccountCreateInput) {
     const { loginId, ...employee } = input;
     const result = await createEmployeeAccount({ loginId, employee: { ...employee, pilot: false } });
@@ -879,6 +905,7 @@ function App() {
                 setEmployeeCardError(null);
                 setIsEmployeeCardEditorOpen(true);
               },
+              onToggleEmployeeSensitiveData: toggleEmployeeSensitiveData,
               onCreateEmployeeAccount: createManagedEmployeeAccount,
               onResetEmployeePassword: resetManagedEmployeePassword,
               onSetEmployeeAccountAccess: setManagedEmployeeAccountAccess,
@@ -898,6 +925,8 @@ function App() {
               workplaces: employeeSnapshot?.workplaceOptions ?? [],
               auditLogs: dashboard?.recentAuditLogs ?? [],
               isSavingTaskPlan,
+              isRevealingEmployeeSensitiveData,
+              isEmployeeSensitiveDataRevealed,
               taskPlanError
             })}
           </>
@@ -1070,6 +1099,7 @@ function renderSection(props: {
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
   onUpdateEmployeeCard: () => void;
+  onToggleEmployeeSensitiveData: () => void;
   onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
@@ -1077,6 +1107,8 @@ function renderSection(props: {
   onSubmitOvertime: () => void;
   onUploadPayroll: () => void;
   isSavingTaskPlan: boolean;
+  isRevealingEmployeeSensitiveData: boolean;
+  isEmployeeSensitiveDataRevealed: boolean;
   leaveRequests: import("./domain/types").LeaveRequest[];
   overtimeRequests: import("./domain/types").OvertimeRequest[];
   payrollStatements: PayrollStatement[];
@@ -1276,6 +1308,9 @@ function EmployeeCardSection(props: {
   onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateEmployeeCard: () => void;
+  onToggleEmployeeSensitiveData: () => void;
+  isRevealingEmployeeSensitiveData: boolean;
+  isEmployeeSensitiveDataRevealed: boolean;
   workplaces: import("./domain/types").Workplace[];
 }) {
   return (
@@ -1285,6 +1320,12 @@ function EmployeeCardSection(props: {
         description={props.canAdmin ? "관리자 전용 급여·퇴직·소득공제·커스텀 항목까지 표시합니다." : "직원모드에서는 기본 인사카드 항목만 표시합니다."}
         actions={
           <InlineActions>
+            {props.canAdmin ? (
+              <button disabled={props.isLoading || props.isRevealingEmployeeSensitiveData} onClick={props.onToggleEmployeeSensitiveData} type="button">
+                {props.isEmployeeSensitiveDataRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
+                {props.isEmployeeSensitiveDataRevealed ? "민감정보 숨기기" : "민감정보 열람"}
+              </button>
+            ) : null}
             <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
               <BadgeCheck size={14} />
               {props.canAdmin ? "직원카드 편집" : "내 정보 수정"}

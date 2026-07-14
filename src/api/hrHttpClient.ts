@@ -14,6 +14,7 @@ import type {
   EmployeeAccountState,
   GetDailyWorkTasksInput,
   RegisterUploadedPayrollStatementInput,
+  RevealEmployeeSensitiveDataInput,
   ResetEmployeeAccountPasswordInput,
   SetEmployeeAccountAccessInput,
   SetOvertimePayApprovalInput,
@@ -117,6 +118,10 @@ export async function createAttendanceCorrection(input: CreateAttendanceCorrecti
 
 export async function updateEmployeeCard(input: UpdateEmployeeCardInput) {
   return await post<{ employee: Employee; auditLog: AuditLog }>("updateEmployeeCard", input);
+}
+
+export async function revealEmployeeSensitiveData(input: Omit<RevealEmployeeSensitiveDataInput, "actorId" | "session">) {
+  return await post<{ auditLog: AuditLog }>("revealEmployeeSensitiveData", input);
 }
 
 export async function createEmployeeAccount(input: Omit<CreateEmployeeAccountInput, "actorId" | "session">) {
@@ -237,6 +242,8 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.createAttendanceCorrection(payload as never)) as T;
     case "updateEmployeeCard":
       return (await api.updateEmployeeCard(payload as never)) as T;
+    case "revealEmployeeSensitiveData":
+      return (await api.revealEmployeeSensitiveData(payload as never)) as T;
     case "createEmployeeAccount":
       return (await api.createEmployeeAccount(payload as never)) as T;
     case "resetEmployeeAccountPassword":

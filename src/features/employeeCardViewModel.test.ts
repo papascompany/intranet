@@ -84,6 +84,16 @@ describe("buildEmployeeCardViewModel", () => {
     expect(customRows).toHaveLength(5);
     expect(customRows.every((row) => row.adminOnly)).toBe(true);
   });
+
+  it("reveals resident registration and payroll account only after an administrator records the access", () => {
+    const masked = buildEmployeeCardViewModel(employee, "ADMIN");
+    const revealed = buildEmployeeCardViewModel(employee, "ADMIN", { revealSensitive: true });
+
+    expect(rowValue(masked, "residentRegistrationNumber")).toBe("000000-0******");
+    expect(rowValue(masked, "payrollAccount")).not.toBe(employee.payrollAccount);
+    expect(rowValue(revealed, "residentRegistrationNumber")).toBe(employee.residentRegistrationNumber);
+    expect(rowValue(revealed, "payrollAccount")).toBe(employee.payrollAccount);
+  });
 });
 
 function rowValue(rows: ReturnType<typeof buildEmployeeCardViewModel>, id: string) {

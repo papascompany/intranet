@@ -42,6 +42,7 @@ import type {
   SetEmployeeAccountAccessInput,
   SoftDeletePayrollStatementInput,
   RegisterUploadedPayrollStatementInput,
+  RevealEmployeeSensitiveDataInput,
   ResetEmployeeAccountPasswordInput,
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
@@ -436,6 +437,22 @@ export class HrApi {
     });
 
     return { employee: saved, auditLog };
+  }
+
+  async revealEmployeeSensitiveData(input: RevealEmployeeSensitiveDataInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    await this.findEmployee(input.employeeId);
+
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "EMPLOYEE_SENSITIVE_DATA_VIEWED",
+      targetType: "Employee",
+      targetId: input.employeeId,
+      detail: "residentRegistrationNumber,payrollAccount"
+    });
+
+    return { auditLog };
   }
 
   async clockAttendance(input: ClockAttendanceInput) {
@@ -1109,6 +1126,7 @@ export const updateDailyWorkTaskStatus = defaultHrApi.updateDailyWorkTaskStatus.
 export const createDailyWorkTaskPlan = defaultHrApi.createDailyWorkTaskPlan.bind(defaultHrApi);
 export const updateDailyWorkTaskPlan = defaultHrApi.updateDailyWorkTaskPlan.bind(defaultHrApi);
 export const updateEmployeeCard = defaultHrApi.updateEmployeeCard.bind(defaultHrApi);
+export const revealEmployeeSensitiveData = defaultHrApi.revealEmployeeSensitiveData.bind(defaultHrApi);
 export const createEmployeeAccount = defaultHrApi.createEmployeeAccount.bind(defaultHrApi);
 export const resetEmployeeAccountPassword = defaultHrApi.resetEmployeeAccountPassword.bind(defaultHrApi);
 export const setEmployeeAccountAccess = defaultHrApi.setEmployeeAccountAccess.bind(defaultHrApi);
