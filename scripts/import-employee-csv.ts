@@ -109,7 +109,7 @@ export async function importEmployees(options: { csvPath?: string; apply?: boole
     passwordHash,
     employeeId,
     accountId
-  }) => transaction(
+  }) => transaction.query(
     `with upserted_employee as (
        insert into employees (
          id, name, department, position, hire_date, annual_salary, payroll_bank, employee_number, resident_registration_number_enc, payroll_account_enc
@@ -241,7 +241,7 @@ function assertUnique(values: string[]): void {
 }
 
 async function assertRequiredAccountColumns(sql: ReturnType<typeof neon>): Promise<void> {
-  const columns = await sql<{ column_name: string }>(
+  const columns = await sql.query<{ column_name: string }>(
     "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'auth_accounts' and column_name in ('login_id', 'password_change_required')"
   );
   if (columns.length !== 2) throw new Error("Required account schema is unavailable.");
