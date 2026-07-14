@@ -136,7 +136,9 @@ export async function handlePayrollUploadHttpRequest(
       onUploadCompleted: async ({ blob, tokenPayload }) => {
         const payload = parseTokenPayload(tokenPayload ?? null);
         const pathname = payload.pathname;
-        if (blob.pathname !== pathname || blob.contentType !== "application/pdf" || blob.size < 1 || blob.size > MAX_PAYROLL_FILE_BYTES) {
+        // The client token already enforces the byte limit. PutBlobResult does
+        // not expose object size in every supported Blob SDK runtime.
+        if (blob.pathname !== pathname || blob.contentType !== "application/pdf") {
           throw new Error("Payroll upload completion is invalid.");
         }
         const session: AuthSession = {

@@ -94,9 +94,9 @@ describe("payroll direct upload API", () => {
               pathname: "emp-ops-1/2026-07/statement.pdf",
               url: "https://blob.example/statement.pdf",
               downloadUrl: "https://blob.example/statement.pdf?download=1",
+              etag: "test-etag",
               contentType: "application/pdf",
-              contentDisposition: "inline",
-              size: 128
+              contentDisposition: "inline"
             },
             tokenPayload
           });
