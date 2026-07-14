@@ -11,6 +11,7 @@ import type {
 } from "../domain/types";
 
 export type ErpActiveSection =
+  | "overview"
   | "self-service"
   | "employee-card"
   | "attendance"
@@ -69,6 +70,7 @@ export type ErpViewModel = {
 };
 
 const navLabels = {
+  overview: "대시보드",
   "self-service": "셀프서비스",
   "employee-card": "인사 관리",
   attendance: "근태",
@@ -196,6 +198,7 @@ function buildNavItems({
   pendingApprovalCount: number;
 }) {
   const sectionCounts = {
+    overview: dashboard.pendingLeaveRequests.length + dashboard.overtimeRequests.filter((request) => request.status === "PENDING").length + dashboard.gpsFailedAttendance.length + dashboard.corrections.length,
     "self-service":
       employeeSnapshot.leaveRequests.filter((request) => request.status === "PENDING").length +
       employeeSnapshot.overtimeRequests.filter((request) => request.status === "PENDING").length,

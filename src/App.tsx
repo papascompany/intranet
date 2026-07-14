@@ -15,6 +15,7 @@ import {
   LogIn,
   LogOut,
   ListChecks,
+  LayoutDashboard,
   MapPin,
   QrCode,
   Settings,
@@ -86,6 +87,7 @@ import {
 const today = koreaTimestamp();
 
 const navIcons: Record<ErpActiveSection, React.ReactNode> = {
+  overview: <LayoutDashboard size={16} />,
   "self-service": <Fingerprint size={16} />,
   "employee-card": <BadgeCheck size={16} />,
   attendance: <MapPin size={16} />,
@@ -128,7 +130,7 @@ type ClockFeedback = {
 
 const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll"];
 const approverSections: ErpActiveSection[] = [...employeeSections, "approvals"];
-const adminSections: ErpActiveSection[] = ["employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
+const adminSections: ErpActiveSection[] = ["overview", "employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
 const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
   "self-service": "나의 하루",
   "employee-card": "내 정보",
@@ -160,7 +162,7 @@ const employeeCardColumns: DataTableColumn<EmployeeCardRow>[] = [
 ];
 
 function App() {
-  const [activeSection, setActiveSection] = useState<ErpActiveSection>("self-service");
+  const [activeSection, setActiveSection] = useState<ErpActiveSection>(() => sectionFromLocation());
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("emp-ops-1");
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -329,6 +331,19 @@ function App() {
   }, [activeSection, allowedSections]);
 
   useEffect(() => {
+    const handlePopState = () => setActiveSection(sectionFromLocation());
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("section", activeSection);
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}?${query}`);
+  }, [activeSection]);
+
+  useEffect(() => {
     if (userMode === "ADMIN" && selectedEmployee && !isAdminAccount) {
       setUserMode("EMPLOYEE");
       setNotice("관리자모드는 관리자 지정 계정만 사용할 수 있습니다.");
@@ -409,7 +424,7 @@ function App() {
     }
 
     setUserMode(nextMode);
-    setActiveSection(nextMode === "ADMIN" ? "approvals" : "self-service");
+    setActiveSection(nextMode === "ADMIN" ? "overview" : "self-service");
     setNotice(nextMode === "ADMIN" ? "관리자모드로 전환했습니다." : "직원모드로 전환했습니다.");
   }
 
@@ -1370,6 +1385,8 @@ function renderSection(props: {
   taskPlanError: string | null;
 }) {
   switch (props.activeSection) {
+    case "overview":
+      return <AdminOverviewSection erpViewModel={props.erpViewModel} isLoading={props.isLoading} />;
     case "self-service":
       return <SelfServiceSection {...props} />;
     case "employee-card":
@@ -1389,6 +1406,20 @@ function renderSection(props: {
     case "audit":
       return <AuditSection auditLogs={props.auditLogs} employees={props.employees} viewModel={props.erpViewModel} />;
   }
+}
+
+function AdminOverviewSection(props: { erpViewModel: ErpViewModel; isLoading: boolean }) {
+  return (
+    <div className="erp-two-column admin-overview">
+      <DetailPanel title="오늘 처리 큐" description="승인·예외·보정처럼 관리자 확인이 필요한 업무를 우선 표시합니다.">
+        <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="오늘 처리할 업무가 없습니다." />} />
+      </DetailPanel>
+      <DetailPanel title="운영 요약" description="전체 직원의 오늘 상태를 빠르게 확인합니다.">
+        <DataTable columns={rowColumns} rows={props.erpViewModel.attendanceRows.slice(0, 10)} emptyState={<EmptyState title="오늘 근태 기록이 없습니다." />} />
+      </DetailPanel>
+      {props.isLoading ? <p className="sr-only" aria-live="polite">관리자 대시보드를 불러오는 중입니다.</p> : null}
+    </div>
+  );
 }
 
 function LoginScreen(props: {
@@ -1873,6 +1904,7 @@ function toEmployeeViewModelSnapshot(snapshot: EmployeeSnapshot) {
 
 function sectionTitle(section: ErpActiveSection) {
   const titles: Record<ErpActiveSection, string> = {
+    overview: "관리자 대시보드",
     "self-service": "직원 셀프서비스",
     "employee-card": "인사 관리",
     attendance: "근태/보정",
@@ -1885,6 +1917,13 @@ function sectionTitle(section: ErpActiveSection) {
   };
 
   return titles[section];
+}
+
+function sectionFromLocation(): ErpActiveSection {
+  if (typeof window === "undefined") return "self-service";
+  const candidate = new URLSearchParams(window.location.search).get("section");
+  const sections: ErpActiveSection[] = ["overview", "self-service", "employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
+  return sections.includes(candidate as ErpActiveSection) ? candidate as ErpActiveSection : "self-service";
 }
 
 function formatToday(value: string) {
