@@ -70,7 +70,7 @@ export type ErpViewModel = {
 
 const navLabels = {
   "self-service": "셀프서비스",
-  "employee-card": "직원카드",
+  "employee-card": "인사 관리",
   attendance: "근태",
   approvals: "승인",
   leave: "휴가",

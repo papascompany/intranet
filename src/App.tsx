@@ -66,6 +66,7 @@ import { FormDialog, InlineNotice } from "./components/operational";
 import { DailyWorkPlanManager, type DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
 import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/employeeCardEditor";
 import { EmployeeAccountManager, type EmployeeAccountCreateInput } from "./components/employeeAccountManager";
+import { EmployeeDirectory } from "./components/employeeDirectory";
 import { ForcePasswordChange } from "./components/forcePasswordChange";
 import { ApprovalQueue, type ApprovalQueueItem } from "./components/approvalQueue";
 import { AuditLogExplorer } from "./components/auditLogExplorer";
@@ -120,7 +121,7 @@ type PayrollUploadDraft = {
 };
 
 const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll"];
-const adminSections: ErpActiveSection[] = ["attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
+const adminSections: ErpActiveSection[] = ["employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
 const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
   "self-service": "나의 하루",
   "employee-card": "내 정보",
@@ -165,6 +166,8 @@ function App() {
   const [notice, setNotice] = useState("운영팀 파일럿 API/DB 계층이 준비되었습니다.");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [clockingType, setClockingType] = useState<ClockType | null>(null);
+  const [clockError, setClockError] = useState<string | null>(null);
   const [requestDialog, setRequestDialog] = useState<RequestDialog>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
@@ -367,32 +370,40 @@ function App() {
   }
 
   async function clock(type: ClockType, method: VerificationMethod, gpsError = false) {
-    if (!selectedEmployee) return;
+    if (!selectedEmployee || clockingType) return;
 
-    const now = koreaTimestamp();
-    let coordinate: { accuracyMeters?: number; latitude: number; longitude: number } | undefined;
-    let verificationFailed = gpsError;
+    setClockingType(type);
+    setClockError(null);
+    try {
+      const now = koreaTimestamp();
+      let coordinate: { accuracyMeters?: number; latitude: number; longitude: number } | undefined;
+      let verificationFailed = gpsError;
 
-    if (method === "GPS" && !gpsError) {
-      try {
-        coordinate = await getBrowserCoordinate();
-      } catch {
-        verificationFailed = true;
+      if (method === "GPS" && !gpsError) {
+        try {
+          coordinate = await getBrowserCoordinate();
+        } catch {
+          verificationFailed = true;
+        }
       }
-    }
-    const result = await clockAttendance({
-      employeeId: selectedEmployee.id,
-      type,
-      method,
-      session: authSession ?? undefined,
-      now,
-      gpsError: verificationFailed,
-      coordinate
-    });
+      const result = await clockAttendance({
+        employeeId: selectedEmployee.id,
+        type,
+        method,
+        session: authSession ?? undefined,
+        now,
+        gpsError: verificationFailed,
+        coordinate
+      });
 
-    const fallbackNotice = method === "GPS" && verificationFailed ? " · 위치 확인 실패로 대체 인증 처리" : "";
-    setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}${fallbackNotice}`);
-    await refresh(selectedEmployee.id);
+      const fallbackNotice = method === "GPS" && verificationFailed ? " · 위치 확인 실패로 대체 인증 처리" : "";
+      setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}${fallbackNotice}`);
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setClockError(error instanceof Error ? error.message : "출퇴근 기록을 처리하지 못했습니다.");
+    } finally {
+      setClockingType(null);
+    }
   }
 
   async function updateDailyTask(task: DailyWorkTask) {
@@ -531,6 +542,20 @@ function App() {
 
   function openRequestDialog(nextDialog: Exclude<RequestDialog, null>) {
     setRequestError(null);
+    const workDate = today.slice(0, 10);
+    if (nextDialog === "leave") {
+      setLeaveDraft((current) => ({
+        ...current,
+        startsOn: current.startsOn || workDate,
+        endsOn: current.endsOn || workDate
+      }));
+    } else {
+      setOvertimeDraft((current) => ({
+        ...current,
+        date: current.date || workDate,
+        startsAt: current.startsAt || "18:00"
+      }));
+    }
     setRequestDialog(nextDialog);
   }
 
@@ -914,9 +939,13 @@ function App() {
               onSubmitOvertime: () => openRequestDialog("overtime"),
               onUploadPayroll: openPayrollUpload,
               canAdmin: effectiveMode === "ADMIN",
+              clockError,
+              clockingType,
               employeeAccountStates,
               employeeCardRows,
               employees,
+              selectedEmployeeId,
+              onSelectEmployee: handleEmployeeChange,
               dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
               leaveRequests: dashboard?.leaveRequests ?? [],
               overtimeRequests: dashboard?.overtimeRequests ?? [],
@@ -948,7 +977,10 @@ function App() {
         description="승인 전까지는 대기 상태로 표시됩니다."
       >
         <RequestField label="휴가 유형">
-          <select value={leaveDraft.type} onChange={(event) => setLeaveDraft((current) => ({ ...current, type: event.target.value as LeaveType }))}>
+          <select value={leaveDraft.type} onChange={(event) => setLeaveDraft((current) => {
+            const type = event.target.value as LeaveType;
+            return { ...current, type, days: type === "HALF_DAY" ? "0.5" : current.days === "0.5" ? "1" : current.days, endsOn: type === "HALF_DAY" ? current.startsOn : current.endsOn };
+          })}>
             <option value="ANNUAL">연차</option>
             <option value="HALF_DAY">반차</option>
             <option value="SPECIAL">특별휴가</option>
@@ -956,10 +988,14 @@ function App() {
           </select>
         </RequestField>
         <div className="request-form__split">
-          <RequestField label="시작일"><input required type="date" value={leaveDraft.startsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, startsOn: event.target.value }))} /></RequestField>
+          <RequestField label="시작일"><input required type="date" value={leaveDraft.startsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, startsOn: event.target.value, endsOn: !current.endsOn || current.endsOn < event.target.value || current.type === "HALF_DAY" ? event.target.value : current.endsOn }))} /></RequestField>
           <RequestField label="종료일"><input required min={leaveDraft.startsOn || undefined} type="date" value={leaveDraft.endsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, endsOn: event.target.value }))} /></RequestField>
         </div>
-        <RequestField label="사용 일수"><input required min="0.5" step="0.5" type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
+        <RequestField label="사용 일수"><input disabled={leaveDraft.type === "HALF_DAY"} required min="0.5" step="0.5" type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
+        <div aria-live="polite" className="request-summary">
+          <span>신청 요약</span>
+          <strong>{leaveTypeLabel(leaveDraft.type)} · {leaveDraft.startsOn || "시작일"}{leaveDraft.endsOn && leaveDraft.endsOn !== leaveDraft.startsOn ? ` ~ ${leaveDraft.endsOn}` : ""} · {leaveDraft.days || "0"}일</strong>
+        </div>
         <RequestField label="사유"><textarea required rows={3} value={leaveDraft.reason} onChange={(event) => setLeaveDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
       </FormDialog>
       {selectedEmployee ? (
@@ -1008,6 +1044,10 @@ function App() {
         <div className="request-form__split">
           <RequestField label="시작 시각"><input required type="time" value={overtimeDraft.startsAt} onChange={(event) => setOvertimeDraft((current) => ({ ...current, startsAt: event.target.value }))} /></RequestField>
           <RequestField label="종료 시각"><input required type="time" value={overtimeDraft.endsAt} onChange={(event) => setOvertimeDraft((current) => ({ ...current, endsAt: event.target.value }))} /></RequestField>
+        </div>
+        <div aria-live="polite" className="request-summary">
+          <span>신청 요약</span>
+          <strong>{overtimeSummary(overtimeDraft)}</strong>
         </div>
         <RequestField label="사유"><textarea required rows={3} value={overtimeDraft.reason} onChange={(event) => setOvertimeDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
       </FormDialog>
@@ -1081,10 +1121,13 @@ function getBrowserCoordinate(): Promise<{ accuracyMeters?: number; latitude: nu
 function renderSection(props: {
   activeSection: ErpActiveSection;
   canAdmin: boolean;
+  clockError: string | null;
+  clockingType: ClockType | null;
   dailyWorkTasks: DailyWorkTask[];
   employeeAccountStates: EmployeeAccountState[];
   employeeCardRows: EmployeeCardRow[];
   employees: Employee[];
+  selectedEmployeeId: string;
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
@@ -1102,6 +1145,7 @@ function renderSection(props: {
   onToggleEmployeeSensitiveData: () => void;
   onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
+  onSelectEmployee: (employeeId: string) => void | Promise<void>;
   onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
@@ -1133,12 +1177,7 @@ function renderSection(props: {
     case "payroll":
       return <PayrollSection {...props} />;
     case "settings":
-      return (
-        <div className="admin-operations-stack">
-          {props.canAdmin ? <EmployeeCardSection {...props} /> : null}
-          <SettingsSection viewModel={props.erpViewModel} canAdmin={props.canAdmin} isLoading={props.isLoading} onUpdateSystemPolicy={props.onUpdateSystemPolicy} systemPolicy={props.systemPolicy} />
-        </div>
-      );
+      return <SettingsSection {...props} />;
     case "audit":
       return <AuditSection auditLogs={props.auditLogs} employees={props.employees} viewModel={props.erpViewModel} />;
   }
@@ -1191,6 +1230,8 @@ function LoginScreen(props: {
 }
 
 function SelfServiceSection(props: {
+  clockError: string | null;
+  clockingType: ClockType | null;
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
@@ -1223,11 +1264,11 @@ function SelfServiceSection(props: {
           {nextClockAction ? (
             <button
               className="attendance-check"
-              disabled={props.isLoading}
+              disabled={props.isLoading || props.clockingType !== null}
               onClick={() => props.onClock(nextClockAction.type, "GPS")}
             >
               <CircleCheck size={24} />
-              <span>{nextClockAction.label}</span>
+              <span>{props.clockingType ? "위치와 시간을 확인하는 중" : nextClockAction.label}</span>
             </button>
           ) : (
             <div className="attendance-complete"><Check size={20} /> 오늘 근태 완료</div>
@@ -1235,14 +1276,15 @@ function SelfServiceSection(props: {
           {nextClockAction ? (
             <div className="attendance-alternatives">
               <span>GPS가 어렵다면</span>
-              <button disabled={props.isLoading} onClick={() => props.onClock(nextClockAction.type, "QR", true)} title="QR 인증">
+              <button disabled={props.isLoading || props.clockingType !== null} onClick={() => props.onClock(nextClockAction.type, "QR", true)} title="QR 인증">
                 <QrCode size={15} /> QR
               </button>
-              <button disabled={props.isLoading} onClick={() => props.onClock(nextClockAction.type, "MANUAL_CLICK", true)} title="수동 인증">
+              <button disabled={props.isLoading || props.clockingType !== null} onClick={() => props.onClock(nextClockAction.type, "MANUAL_CLICK", true)} title="수동 인증">
                 <TimerReset size={15} /> 수동
               </button>
             </div>
           ) : null}
+          {props.clockError ? <p className="attendance-error" role="alert">{props.clockError}</p> : null}
         </div>
         <dl className="attendance-summary">
           <div><dt>출근</dt><dd>{attendance?.clockInLabel ?? "--:--"}</dd></div>
@@ -1285,10 +1327,15 @@ function SelfServiceSection(props: {
         <div className="my-day__aside">
           <DetailPanel title="내 일정" description="자주 쓰는 신청만 간단히 처리합니다.">
             <div className="quick-actions">
-              <button disabled={props.isLoading} onClick={props.onSubmitLeave}><CalendarDays size={16} /> 휴가 신청</button>
-              <button disabled={props.isLoading} onClick={props.onSubmitOvertime}><Clock size={16} /> 야근 신청</button>
+              <button disabled={props.isLoading} onClick={props.onSubmitLeave}>
+                <CalendarDays size={18} />
+                <span><strong>휴가 신청</strong><small>{attendance?.leaveAvailableLabel ?? "잔여 연차 확인"}</small></span>
+              </button>
+              <button disabled={props.isLoading} onClick={props.onSubmitOvertime}>
+                <Clock size={18} />
+                <span><strong>야근 신청</strong><small>예정 시간을 미리 등록</small></span>
+              </button>
             </div>
-            <p className="leave-summary">{attendance?.leaveAvailableLabel ?? "연차 정보를 불러오는 중"}</p>
           </DetailPanel>
           <DetailPanel title="급여명세서" description={payrollNotice.description}>
             <div className={`payroll-notice ${payrollNotice.isNoticeDay ? "is-active" : ""}`}>
@@ -1309,48 +1356,42 @@ function EmployeeCardSection(props: {
   employees: Employee[];
   erpViewModel: ErpViewModel;
   isLoading: boolean;
-  onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
-  onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
-  onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
+  onSelectEmployee: (employeeId: string) => void | Promise<void>;
   onUpdateEmployeeCard: () => void;
   onToggleEmployeeSensitiveData: () => void;
   isRevealingEmployeeSensitiveData: boolean;
   isEmployeeSensitiveDataRevealed: boolean;
-  workplaces: import("./domain/types").Workplace[];
+  selectedEmployeeId: string;
 }) {
   return (
-    <div className="admin-operations-stack">
-      <DetailPanel
-        title={`${props.erpViewModel.employeeSummary.name} 직원카드`}
-        description={props.canAdmin ? "관리자 전용 급여·퇴직·소득공제·커스텀 항목까지 표시합니다." : "직원모드에서는 기본 인사카드 항목만 표시합니다."}
-        actions={
-          <InlineActions>
-            {props.canAdmin ? (
+    <div className="people-workspace">
+      <EmployeeDirectory
+        accountStates={props.employeeAccountStates}
+        busy={props.isLoading}
+        employees={props.employees}
+        onSelect={props.onSelectEmployee}
+        selectedEmployeeId={props.selectedEmployeeId}
+      />
+      <div className="people-workspace__detail">
+        <DetailPanel
+          title={`${props.erpViewModel.employeeSummary.name} 인사기록 카드`}
+          description="기본 인사정보와 급여·퇴직·소득공제 항목을 함께 관리합니다."
+          actions={
+            <InlineActions>
               <button disabled={props.isLoading || props.isRevealingEmployeeSensitiveData} onClick={props.onToggleEmployeeSensitiveData} type="button">
                 {props.isEmployeeSensitiveDataRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
                 {props.isEmployeeSensitiveDataRevealed ? "민감정보 숨기기" : "민감정보 열람"}
               </button>
-            ) : null}
-            <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
-              <BadgeCheck size={14} />
-              {props.canAdmin ? "직원카드 편집" : "내 정보 수정"}
-            </button>
-          </InlineActions>
-        }
-      >
-        <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
-      </DetailPanel>
-      {props.canAdmin ? (
-        <EmployeeAccountManager
-          accountStates={props.employeeAccountStates}
-          busy={props.isLoading}
-          employees={props.employees}
-          onCreate={props.onCreateEmployeeAccount}
-          onResetPassword={props.onResetEmployeePassword}
-          onSetEnabled={props.onSetEmployeeAccountAccess}
-          workplaces={props.workplaces}
-        />
-      ) : null}
+              <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
+                <BadgeCheck size={14} />
+                인사카드 편집
+              </button>
+            </InlineActions>
+          }
+        >
+          <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
+        </DetailPanel>
+      </div>
     </div>
   );
 }
@@ -1441,7 +1482,7 @@ function LeaveSection(props: {
       actions={
         <InlineActions>
           <button disabled={props.isLoading} onClick={props.onSubmitLeave}>
-            반차 신청 생성
+            휴가 신청
           </button>
           {props.canAdmin ? (
             <>
@@ -1478,7 +1519,7 @@ function OvertimeSection(props: {
       actions={
         <InlineActions>
           <button disabled={props.isLoading} onClick={props.onSubmitOvertime}>
-            야근 신청 생성
+            야근 신청
           </button>
           {props.canAdmin ? (
             <>
@@ -1530,24 +1571,34 @@ function PayrollSection(props: {
 
 function SettingsSection(props: {
   canAdmin: boolean;
+  employeeAccountStates: EmployeeAccountState[];
+  employees: Employee[];
   isLoading: boolean;
+  onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
+  onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
+  onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
   systemPolicy: SystemPolicy;
-  viewModel: ErpViewModel;
+  workplaces: import("./domain/types").Workplace[];
 }) {
   return (
-    <div className="erp-two-column">
-      <DetailPanel title="선택 직원" description="파일럿 적용 범위와 권한을 확인합니다.">
-        <DataTable
-          columns={rowColumns}
-          rows={[
-            { id: "employee-name", label: "이름", value: props.viewModel.employeeSummary.name, meta: props.viewModel.employeeSummary.department },
-            { id: "employee-role", label: "권한", value: props.viewModel.employeeSummary.role, meta: props.viewModel.employeeSummary.pilotLabel },
-            { id: "employee-hire", label: "입사일", value: props.viewModel.employeeSummary.hireDate, meta: "입사일 기준 연차" }
-          ]}
+    <div className="admin-operations-stack">
+      <EmployeeAccountManager
+        accountStates={props.employeeAccountStates}
+        busy={props.isLoading}
+        employees={props.employees}
+        onCreate={props.onCreateEmployeeAccount}
+        onResetPassword={props.onResetEmployeePassword}
+        onSetEnabled={props.onSetEmployeeAccountAccess}
+        workplaces={props.workplaces}
+      />
+      {props.canAdmin ? (
+        <SystemPolicyEditor
+          busy={props.isLoading}
+          onSave={props.onUpdateSystemPolicy}
+          settings={props.systemPolicy}
         />
-      </DetailPanel>
-      {props.canAdmin ? <SystemPolicyEditor busy={props.isLoading} onSave={props.onUpdateSystemPolicy} settings={props.systemPolicy} /> : null}
+      ) : null}
     </div>
   );
 }
@@ -1579,7 +1630,7 @@ function toEmployeeViewModelSnapshot(snapshot: EmployeeSnapshot) {
 function sectionTitle(section: ErpActiveSection) {
   const titles: Record<ErpActiveSection, string> = {
     "self-service": "직원 셀프서비스",
-    "employee-card": "직원카드",
+    "employee-card": "인사 관리",
     attendance: "근태/보정",
     approvals: "승인 업무 큐",
     leave: "휴가/연차",
@@ -1594,6 +1645,27 @@ function sectionTitle(section: ErpActiveSection) {
 
 function formatToday(value: string) {
   return new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Seoul" }).format(new Date(value));
+}
+
+function leaveTypeLabel(type: LeaveType) {
+  return ({
+    ANNUAL: "연차",
+    HALF_DAY: "반차",
+    SPECIAL: "특별휴가",
+    UNPAID: "무급휴가"
+  } satisfies Record<LeaveType, string>)[type];
+}
+
+function overtimeSummary(draft: OvertimeDraft) {
+  if (!draft.date || !draft.startsAt || !draft.endsAt) return "날짜와 시작·종료 시각을 입력해 주세요.";
+  const startsAt = Date.parse(`${draft.date}T${draft.startsAt}:00+09:00`);
+  const endsAt = Date.parse(`${draft.date}T${draft.endsAt}:00+09:00`);
+  const minutes = Math.round((endsAt - startsAt) / 60000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return "종료 시각은 시작 시각 이후여야 합니다.";
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  const duration = [hours ? `${hours}시간` : "", remainingMinutes ? `${remainingMinutes}분` : ""].filter(Boolean).join(" ");
+  return `${draft.date} · ${draft.startsAt} ~ ${draft.endsAt} · ${duration}`;
 }
 
 function payrollNoticeForToday(value: string) {
