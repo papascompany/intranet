@@ -119,8 +119,8 @@ type PayrollUploadDraft = {
   month: string;
 };
 
-const employeeSections: ErpActiveSection[] = ["self-service", "employee-card", "attendance", "leave", "overtime", "payroll"];
-const adminSections: ErpActiveSection[] = ["employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
+const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll"];
+const adminSections: ErpActiveSection[] = ["attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
 const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
   "self-service": "나의 하루",
   "employee-card": "내 정보",
@@ -1133,7 +1133,12 @@ function renderSection(props: {
     case "payroll":
       return <PayrollSection {...props} />;
     case "settings":
-      return <SettingsSection viewModel={props.erpViewModel} canAdmin={props.canAdmin} isLoading={props.isLoading} onUpdateSystemPolicy={props.onUpdateSystemPolicy} systemPolicy={props.systemPolicy} />;
+      return (
+        <div className="admin-operations-stack">
+          {props.canAdmin ? <EmployeeCardSection {...props} /> : null}
+          <SettingsSection viewModel={props.erpViewModel} canAdmin={props.canAdmin} isLoading={props.isLoading} onUpdateSystemPolicy={props.onUpdateSystemPolicy} systemPolicy={props.systemPolicy} />
+        </div>
+      );
     case "audit":
       return <AuditSection auditLogs={props.auditLogs} employees={props.employees} viewModel={props.erpViewModel} />;
   }
