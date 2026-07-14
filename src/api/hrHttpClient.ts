@@ -123,8 +123,8 @@ export async function createEmployeeAccount(input: Omit<CreateEmployeeAccountInp
   return await post<{ employee: Employee; temporaryPassword: string; auditLog: AuditLog }>("createEmployeeAccount", input);
 }
 
-export async function resetEmployeeAccountPassword(employeeId: string) {
-  return await post<{ employeeId: string; temporaryPassword: string; auditLog: AuditLog }>("resetEmployeeAccountPassword", { employeeId });
+export async function resetEmployeeAccountPassword(employeeId: string, temporaryPassword: string) {
+  return await post<{ employeeId: string; auditLog: AuditLog }>("resetEmployeeAccountPassword", { employeeId, temporaryPassword });
 }
 
 export async function setEmployeeAccountAccess(employeeId: string, enabled: boolean) {

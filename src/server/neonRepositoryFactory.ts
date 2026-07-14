@@ -6,11 +6,13 @@ import type { HrRepository } from "../api/hrRepository.js";
 import type { PersistenceStatus } from "../api/types.js";
 import type { PayrollFileStorage } from "../api/payrollFileStorage.js";
 import { createPayrollFileStorageFromEnv } from "./vercelBlobPayrollStorage.js";
+import { createSensitiveDataCrypto } from "./sensitiveDataCrypto.js";
 
 export type HrServerEnv = {
   DATABASE_URL?: string;
   HR_REPOSITORY_MODE?: "memory" | "postgres";
   BLOB_READ_WRITE_TOKEN?: string;
+  EMPLOYEE_DATA_ENCRYPTION_KEY?: string;
 };
 
 export type HrRepositoryFactoryOptions = {
@@ -67,8 +69,12 @@ export function createHrRepositoryFromEnv(
   }
 
   if (env.DATABASE_URL) {
+    const sensitiveDataCrypto = env.EMPLOYEE_DATA_ENCRYPTION_KEY
+      ? createSensitiveDataCrypto(env.EMPLOYEE_DATA_ENCRYPTION_KEY)
+      : undefined;
     return new PostgresHrRepository({
-      query: options.query ?? createNeonQuery(env.DATABASE_URL)
+      query: options.query ?? createNeonQuery(env.DATABASE_URL),
+      ...(sensitiveDataCrypto ?? {})
     });
   }
 

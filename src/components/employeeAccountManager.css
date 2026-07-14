@@ -29,5 +29,6 @@
 .employee-account-manager__form label { display: grid; gap: 6px; color: var(--color-graphite); font-size: 13px; font-weight: 600; }
 .employee-account-manager__form input, .employee-account-manager__form select { width: 100%; min-height: 40px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 8px 10px; color: var(--color-graphite); background: var(--color-white); font: inherit; font-weight: 400; }
 .employee-account-manager__form input:focus, .employee-account-manager__form select:focus { outline: 2px solid #bfdbfe; outline-offset: 1px; }
+.employee-account-manager__password-help { grid-column: 1 / -1; margin: -4px 0 0; color: #b91c1c; font-size: 12px; }
 @media (max-width: 720px) { .employee-account-manager__header { align-items: stretch; flex-direction: column; } .employee-account-row { grid-template-columns: minmax(0, 1fr) auto; } .employee-account-row__actions { grid-column: 1 / -1; justify-content: flex-start; } }
 @media (max-width: 480px) { .employee-account-manager__create, .employee-account-row__actions button { width: 100%; } .employee-account-row__actions { display: grid; grid-template-columns: 1fr; } .employee-account-manager__form { grid-template-columns: 1fr; } }

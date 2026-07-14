@@ -58,6 +58,7 @@ describe("hr api", () => {
     const result = await hrApi.createEmployeeAccount({
       actorId: adminSession.employeeId,
       session: adminSession,
+      loginId: "new-staff",
       employee: {
         name: "신규 직원",
         role: "EMPLOYEE",
@@ -78,6 +79,7 @@ describe("hr api", () => {
       hrApi.createEmployeeAccount({
         actorId: adminSession.employeeId,
         session: adminSession,
+        loginId: "new-staff-duplicate",
         employee: { ...result.employee, employeeNumber: "emp-0099" }
       })
     ).rejects.toThrow("Employee number already exists");
@@ -89,6 +91,7 @@ describe("hr api", () => {
     const created = await hrApi.createEmployeeAccount({
       actorId: adminSession.employeeId,
       session: adminSession,
+      loginId: "account-staff",
       employee: {
         name: "계정 직원",
         role: "EMPLOYEE",
@@ -99,12 +102,26 @@ describe("hr api", () => {
       }
     });
 
-    await expect(hrApi.resetEmployeeAccountPassword({ actorId: employeeSession.employeeId, employeeId: created.employee.id, session: employeeSession }))
+    await expect(hrApi.resetEmployeeAccountPassword({ actorId: employeeSession.employeeId, employeeId: created.employee.id, temporaryPassword: "EmployeeReset-2026!", session: employeeSession }))
       .rejects.toThrow("Admin permission required");
 
-    const reset = await hrApi.resetEmployeeAccountPassword({ actorId: adminSession.employeeId, employeeId: created.employee.id, session: adminSession });
-    expect(reset.temporaryPassword).not.toBe(created.temporaryPassword);
-    expect(reset.auditLog.action).toBe("EMPLOYEE_ACCOUNT_PASSWORD_RESET");
+    const accountBeforeReset = await db.findEmployeeAccount(created.employee.id);
+    await db.updateEmployeeAccount({ ...accountBeforeReset!, failedSignInCount: 5, lockedUntil: "2026-07-09T09:00:00+09:00" });
+    const temporaryPassword = "AdminReset-2026!";
+    const reset = await hrApi.resetEmployeeAccountPassword({ actorId: adminSession.employeeId, employeeId: created.employee.id, temporaryPassword, session: adminSession });
+    expect(reset).toMatchObject({ employeeId: created.employee.id, auditLog: { action: "EMPLOYEE_ACCOUNT_PASSWORD_RESET" } });
+    expect(reset).not.toHaveProperty("temporaryPassword");
+    expect(JSON.stringify(reset.auditLog)).not.toContain(temporaryPassword);
+    const resetAccount = await db.findEmployeeAccount(created.employee.id);
+    expect(resetAccount).toMatchObject({ passwordChangeRequired: true, failedSignInCount: 0, lockedUntil: undefined });
+    expect(resetAccount && await verifyPassword(temporaryPassword, resetAccount.passwordHash)).toBe(true);
+
+    await expect(hrApi.resetEmployeeAccountPassword({
+      actorId: adminSession.employeeId,
+      employeeId: created.employee.id,
+      temporaryPassword: "too-short",
+      session: adminSession
+    })).rejects.toThrow("Temporary password must be at least 12 characters long.");
 
     await expect(hrApi.setEmployeeAccountAccess({ actorId: adminSession.employeeId, employeeId: created.employee.id, enabled: false, session: adminSession }))
       .resolves.toMatchObject({ enabled: false, auditLog: { action: "EMPLOYEE_ACCOUNT_DISABLED" } });
@@ -113,6 +130,7 @@ describe("hr api", () => {
     expect((await hrApi.getEmployees()).some((employee) => employee.id === created.employee.id)).toBe(true);
     await expect(hrApi.getEmployeeAccountStates({ actorId: adminSession.employeeId, session: adminSession })).resolves.toContainEqual({
       employeeId: created.employee.id,
+      loginId: "account-staff",
       enabled: true,
       passwordChangedAt: expect.any(String),
       lastSignedInAt: undefined

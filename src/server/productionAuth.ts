@@ -3,6 +3,7 @@ import { createNeonQuery } from "./neonRepositoryFactory.js";
 import {
   createSignedSessionToken,
   getRequiredSessionSecret,
+  hashPassword,
   parseCookieHeader,
   serializeSessionCookie,
   verifyPassword,
@@ -23,14 +24,16 @@ type AuthAccountRow = Record<string, unknown> & {
   account_id: string;
   employee_id: string;
   employee_number: string;
+  login_id: string;
   password_hash: string;
+  password_change_required: boolean;
   role: AuthSession["role"];
   disabled_at?: string | null;
   locked_until?: string | null;
 };
 
 export type CredentialLoginInput = {
-  employeeNumber: string;
+  loginId: string;
   password: string;
   rememberLogin?: boolean;
 };
@@ -42,7 +45,7 @@ export type AuthenticatedServerSession = {
 };
 
 const SESSION_COOKIE_NAME = "intranet_session";
-const INVALID_CREDENTIALS = "Invalid employee number or password.";
+const INVALID_CREDENTIALS = "Invalid login ID or password.";
 
 export function getAuthQuery(env: ServerAuthEnv = process.env): AuthAccountQuery {
   if (!env.DATABASE_URL) {
@@ -57,12 +60,12 @@ export async function authenticateCredentials(
   query: AuthAccountQuery = getAuthQuery(env),
   now = new Date()
 ): Promise<{ authenticated: AuthenticatedServerSession; cookie: string }> {
-  const employeeNumber = input.employeeNumber.trim();
-  if (!employeeNumber || !input.password) {
+  const loginId = input.loginId.trim();
+  if (!loginId || !input.password) {
     throw new AuthenticationError(INVALID_CREDENTIALS);
   }
 
-  const account = await findAccountByEmployeeNumber(query, employeeNumber);
+  const account = await findAccountByLoginId(query, loginId);
   if (!account || !isAccountActive(account, now)) {
     throw new AuthenticationError(INVALID_CREDENTIALS);
   }
@@ -94,6 +97,30 @@ export async function authenticateCredentials(
       maxAgeSeconds: lifetimeSeconds,
       secure: shouldUseSecureCookie(env)
     })
+  };
+}
+
+export async function changeAuthenticatedPassword(
+  cookieHeader: string | undefined,
+  newPassword: string,
+  env: ServerAuthEnv = process.env,
+  query: AuthAccountQuery = getAuthQuery(env),
+  now = new Date()
+): Promise<AuthenticatedServerSession> {
+  const authenticated = await getAuthenticatedSessionFromCookie(cookieHeader, env, query, now);
+  if (!authenticated) {
+    throw new AuthenticationError();
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await query(
+    "update auth_accounts set password_hash = $1, password_changed_at = now(), password_change_required = false, updated_at = now() where id = $2",
+    [passwordHash, authenticated.accountId]
+  );
+
+  return {
+    ...authenticated,
+    session: { ...authenticated.session, passwordChangeRequired: false }
   };
 }
 
@@ -132,32 +159,36 @@ export class AuthenticationError extends Error {
   }
 }
 
-async function findAccountByEmployeeNumber(query: AuthAccountQuery, employeeNumber: string) {
+export async function findAccountByLoginId(query: AuthAccountQuery, loginId: string) {
   const rows = await query<AuthAccountRow>(
     `select
        auth_accounts.id as account_id,
        auth_accounts.employee_id,
        auth_accounts.employee_number,
+       auth_accounts.login_id,
        auth_accounts.password_hash,
+       auth_accounts.password_change_required,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
        employees.role
      from auth_accounts
      join employees on employees.id = auth_accounts.employee_id
-     where auth_accounts.employee_number = $1
+     where auth_accounts.login_id = $1
      limit 1`,
-    [employeeNumber]
+    [loginId]
   );
   return rows[0];
 }
 
-async function findAccountBySignedSession(query: AuthAccountQuery, token: ServerAuthSession) {
+export async function findAccountBySignedSession(query: AuthAccountQuery, token: ServerAuthSession) {
   const rows = await query<AuthAccountRow>(
     `select
        auth_accounts.id as account_id,
        auth_accounts.employee_id,
        auth_accounts.employee_number,
+       auth_accounts.login_id,
        auth_accounts.password_hash,
+       auth_accounts.password_change_required,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
        employees.role
@@ -172,7 +203,7 @@ async function findAccountBySignedSession(query: AuthAccountQuery, token: Server
   return rows[0];
 }
 
-function toAuthenticatedSession(account: AuthAccountRow, rememberLogin: boolean, now: Date): AuthenticatedServerSession {
+export function toAuthenticatedSession(account: AuthAccountRow, rememberLogin: boolean, now: Date): AuthenticatedServerSession {
   return {
     accountId: account.account_id,
     employeeNumber: account.employee_number,
@@ -180,12 +211,13 @@ function toAuthenticatedSession(account: AuthAccountRow, rememberLogin: boolean,
       employeeId: account.employee_id,
       role: account.role,
       authenticatedAt: now.toISOString(),
-      rememberLogin
+      rememberLogin,
+      passwordChangeRequired: account.password_change_required
     }
   };
 }
 
-function isAccountActive(account: AuthAccountRow, now: Date) {
+export function isAccountActive(account: AuthAccountRow, now: Date) {
   return !account.disabled_at && (!account.locked_until || new Date(account.locked_until).getTime() <= now.getTime());
 }
 

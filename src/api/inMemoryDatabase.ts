@@ -97,6 +97,9 @@ export class InMemoryDatabase implements HrRepository {
     if (this.employeeAccounts.some((item) => sameEmployeeNumber(item.employeeNumber, account.employeeNumber))) {
       throw new Error(`Employee number already exists: ${account.employeeNumber}`);
     }
+    if (this.employeeAccounts.some((item) => sameLoginId(item.loginId, account.loginId))) {
+      throw new Error(`Login ID already exists: ${account.loginId}`);
+    }
 
     this.employees.push(cloneItem(employee));
     this.employeeAccounts.push(cloneItem(account));
@@ -299,4 +302,8 @@ function cloneItem<T extends object>(item: T | undefined) {
 
 function sameEmployeeNumber(left: string | undefined, right: string | undefined) {
   return Boolean(left && right && left.trim().toUpperCase() === right.trim().toUpperCase());
+}
+
+function sameLoginId(left: string | undefined, right: string | undefined) {
+  return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
 }

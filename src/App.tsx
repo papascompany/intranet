@@ -45,7 +45,7 @@ import {
 } from "./api/hrHttpClient";
 import { defaultSystemPolicy, type Dashboard, type EmployeeAccountState, type EmployeeSnapshot, type SystemPolicy } from "./api/types";
 import { isAdminSession, type AuthSession } from "./api/auth";
-import { getAuthenticatedSession, loginWithEmployeeNumber, logoutAuthenticatedSession } from "./api/authHttpClient";
+import { changeAuthenticatedPassword, getAuthenticatedSession, loginWithLoginId, logoutAuthenticatedSession } from "./api/authHttpClient";
 import {
   DataTable,
   DetailPanel,
@@ -63,6 +63,7 @@ import { FormDialog, InlineNotice } from "./components/operational";
 import { DailyWorkPlanManager, type DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
 import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/employeeCardEditor";
 import { EmployeeAccountManager, type EmployeeAccountCreateInput } from "./components/employeeAccountManager";
+import { ForcePasswordChange } from "./components/forcePasswordChange";
 import { ApprovalQueue, type ApprovalQueueItem } from "./components/approvalQueue";
 import { AuditLogExplorer } from "./components/auditLogExplorer";
 import { PayrollStatementManager } from "./components/payrollStatementManager";
@@ -199,7 +200,7 @@ function App() {
 
   const refresh = useCallback(
     async (employeeId = selectedEmployeeId) => {
-      if (!isLoggedIn || !authSession) {
+      if (!isLoggedIn || !authSession || authSession.passwordChangeRequired) {
         setIsLoading(false);
         return;
       }
@@ -311,20 +312,27 @@ function App() {
     await refresh(employeeId);
   }
 
-  async function handleLogin(employeeNumber: string, password: string) {
+  async function handleLogin(loginId: string, password: string) {
     setIsAuthenticating(true);
     setAuthError(null);
     try {
-      const nextSession = await loginWithEmployeeNumber({ employeeNumber, password, rememberLogin });
+      const nextSession = await loginWithLoginId({ loginId, password, rememberLogin });
       setAuthSession(nextSession);
       setSelectedEmployeeId(nextSession.employeeId);
       setIsLoggedIn(true);
-      setNotice("로그인되었습니다. 오늘의 업무를 시작합니다.");
+      setNotice(nextSession.passwordChangeRequired ? "새 비밀번호를 설정해 주세요." : "로그인되었습니다. 오늘의 업무를 시작합니다.");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "로그인하지 못했습니다.");
     } finally {
       setIsAuthenticating(false);
     }
+  }
+
+  async function handleRequiredPasswordChange(newPassword: string) {
+    const nextSession = await changeAuthenticatedPassword(newPassword);
+    setAuthSession(nextSession);
+    setNotice("비밀번호를 변경했습니다. 오늘의 업무를 시작합니다.");
+    await refresh(nextSession.employeeId);
   }
 
   async function handleLogout() {
@@ -708,18 +716,18 @@ function App() {
   }
 
   async function createManagedEmployeeAccount(input: EmployeeAccountCreateInput) {
-    const result = await createEmployeeAccount({ employee: { ...input, pilot: false } });
+    const { loginId, ...employee } = input;
+    const result = await createEmployeeAccount({ loginId, employee: { ...employee, pilot: false } });
     setNotice(`${result.employee.name} 직원 계정 발급 · 임시 비밀번호를 안전하게 전달하세요.`);
     await refresh(result.employee.id);
     return { temporaryPassword: result.temporaryPassword };
   }
 
-  async function resetManagedEmployeePassword(employeeId: string) {
-    const result = await resetEmployeeAccountPassword(employeeId);
+  async function resetManagedEmployeePassword(employeeId: string, temporaryPassword: string) {
+    await resetEmployeeAccountPassword(employeeId, temporaryPassword);
     const employee = employees.find((item) => item.id === employeeId);
-    setNotice(`${employee?.name ?? "직원"} 임시 비밀번호 재발급`);
+    setNotice(`${employee?.name ?? "직원"} 임시 비밀번호를 설정했습니다.`);
     await refresh(employeeId);
-    return { temporaryPassword: result.temporaryPassword };
   }
 
   async function setManagedEmployeeAccountAccess(employeeId: string, enabled: boolean) {
@@ -755,6 +763,10 @@ function App() {
         rememberLogin={rememberLogin}
       />
     );
+  }
+
+  if (authSession?.passwordChangeRequired) {
+    return <ForcePasswordChange onSubmit={handleRequiredPasswordChange} />;
   }
 
   return (
@@ -1058,7 +1070,7 @@ function renderSection(props: {
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
   onUpdateEmployeeCard: () => void;
-  onResetEmployeePassword: (employeeId: string) => Promise<{ temporaryPassword: string }>;
+  onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
   onSubmitLeave: () => void;
@@ -1098,27 +1110,27 @@ function renderSection(props: {
 function LoginScreen(props: {
   authError: string | null;
   isLoading: boolean;
-  onLogin: (employeeNumber: string, password: string) => void;
+  onLogin: (loginId: string, password: string) => void;
   onRememberChange: (remember: boolean) => void;
   rememberLogin: boolean;
 }) {
-  const [employeeNumber, setEmployeeNumber] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
 
   return (
     <div className="app-shell login-shell">
       <DetailPanel
         title="사내 근태 관리 로그인"
-        description="사번과 비밀번호로 로그인합니다."
+        description="아이디와 비밀번호로 로그인합니다."
       >
         <form
           className="login-form"
           onSubmit={(event) => {
             event.preventDefault();
-            props.onLogin(employeeNumber, password);
+            props.onLogin(loginId, password);
           }}
         >
-          <RequestField label="사번"><input autoComplete="username" required value={employeeNumber} onChange={(event) => setEmployeeNumber(event.target.value)} /></RequestField>
+          <RequestField label="아이디"><input autoComplete="username" required value={loginId} onChange={(event) => setLoginId(event.target.value)} /></RequestField>
           <RequestField label="비밀번호"><input autoComplete="current-password" required type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></RequestField>
           <label className="checkbox-label">
             <input
@@ -1261,7 +1273,7 @@ function EmployeeCardSection(props: {
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
-  onResetEmployeePassword: (employeeId: string) => Promise<{ temporaryPassword: string }>;
+  onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateEmployeeCard: () => void;
   workplaces: import("./domain/types").Workplace[];

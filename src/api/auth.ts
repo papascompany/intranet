@@ -5,6 +5,7 @@ export type AuthSession = {
   role: Role;
   authenticatedAt: string;
   rememberLogin: boolean;
+  passwordChangeRequired?: boolean;
 };
 
 export function createDemoAuthSession(
@@ -15,7 +16,8 @@ export function createDemoAuthSession(
     employeeId: employee.id,
     role: employee.role,
     authenticatedAt: options.now ?? new Date().toISOString(),
-    rememberLogin: options.rememberLogin ?? false
+    rememberLogin: options.rememberLogin ?? false,
+    passwordChangeRequired: false
   };
 }
 

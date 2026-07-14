@@ -36,6 +36,16 @@ const adminSession = {
 };
 
 describe("hrHttpHandler", () => {
+  it("blocks intranet actions until a required password change is completed", async () => {
+    const response = await handleHrHttpRequest({
+      method: "POST",
+      body: { action: "getEmployees" },
+      serverSession: { ...productionEmployeeSession, passwordChangeRequired: true }
+    });
+
+    expect(response).toEqual({ status: 403, body: { error: "Password change is required before using intranet services." } });
+  });
+
   it("serves dashboard data through the GET API surface", async () => {
     const response = await handleHrHttpRequest(
       {
@@ -158,6 +168,7 @@ describe("hrHttpHandler", () => {
           action: "createEmployeeAccount",
           payload: {
             actorId: "emp-ops-1",
+            loginId: "http-staff",
             employee: {
               name: "HTTP 신규",
               role: "EMPLOYEE",
@@ -176,6 +187,20 @@ describe("hrHttpHandler", () => {
     expect(created.status).toBe(200);
     expect(created.body).toMatchObject({ employee: { employeeNumber: "EMP-0200" }, auditLog: { actorId: "emp-ceo" } });
     const employeeId = (created.body as { employee: { id: string } }).employee.id;
+    const reset = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "resetEmployeeAccountPassword",
+          payload: { employeeId, temporaryPassword: "HandlerReset-2026!", actorId: "emp-ops-1" }
+        },
+        serverSession: adminSession
+      },
+      hrApi
+    );
+
+    expect(reset).toMatchObject({ status: 200, body: { employeeId, auditLog: { action: "EMPLOYEE_ACCOUNT_PASSWORD_RESET", actorId: "emp-ceo" } } });
+    expect(JSON.stringify(reset.body)).not.toContain("HandlerReset-2026!");
     const registered = await handleHrHttpRequest(
       {
         method: "POST",

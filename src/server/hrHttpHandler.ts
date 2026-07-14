@@ -28,6 +28,9 @@ export async function handleHrHttpRequest(
     if (!isPublicStatusRequest && !request.serverSession) {
       return { status: 401, body: { error: "Authentication required." } };
     }
+    if (!isPublicStatusRequest && request.serverSession?.passwordChangeRequired) {
+      return { status: 403, body: { error: "Password change is required before using intranet services." } };
+    }
 
     if (request.method === "GET") {
       return {

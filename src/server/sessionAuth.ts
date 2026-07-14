@@ -9,6 +9,13 @@ const HASH_KEY_LENGTH = 32;
 const SESSION_TOKEN_VERSION = 1;
 const MIN_SESSION_SECRET_LENGTH = 32;
 
+export class PasswordValidationError extends Error {
+  constructor(message = "Password must be at least 12 characters long.") {
+    super(message);
+    this.name = "PasswordValidationError";
+  }
+}
+
 export type ServerAuthSession = {
   accountId: string;
   employeeId: string;
@@ -106,7 +113,7 @@ function hasMatchingSignature(value: string, signature: string, secret: string):
 /** Hash a password for the auth_accounts.password_hash column. */
 export async function hashPassword(password: string, salt = randomBytes(16).toString("base64url")): Promise<string> {
   if (password.length < 12) {
-    throw new Error("Password must be at least 12 characters long.");
+    throw new PasswordValidationError();
   }
 
   const derivedKey = await pbkdf2Async(password, salt, HASH_ITERATIONS, HASH_KEY_LENGTH, HASH_ALGORITHM);

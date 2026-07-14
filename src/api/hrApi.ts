@@ -156,14 +156,17 @@ export class HrApi {
     await this.assertAdmin(actorId, input.session);
     const employee = { ...this.buildNewEmployee(input.employee), id: await this.db.nextId("emp") };
     await this.assertEmployeeNumberAvailable(employee.employeeNumber!);
+    const loginId = await this.assertLoginIdAvailable(input.loginId);
 
     const credential = await createTemporaryCredential();
     const account: EmployeeAuthAccount = {
       id: await this.db.nextId("account"),
       employeeId: employee.id,
       employeeNumber: employee.employeeNumber!,
+      loginId,
       passwordHash: credential.passwordHash,
       passwordChangedAt: this.clock(),
+      passwordChangeRequired: true,
       failedSignInCount: 0
     };
     const saved = await this.db.createEmployeeWithAccount(employee, account);
@@ -183,11 +186,12 @@ export class HrApi {
     await this.assertAdmin(actorId, input.session);
     await this.assertEmployee(input.employeeId);
     const account = await this.requireEmployeeAccount(input.employeeId);
-    const credential = await createTemporaryCredential();
+    const temporaryPassword = assertTemporaryPassword(input.temporaryPassword);
     const saved = await this.db.updateEmployeeAccount({
       ...account,
-      passwordHash: credential.passwordHash,
+      passwordHash: await hashPassword(temporaryPassword),
       passwordChangedAt: this.clock(),
+      passwordChangeRequired: true,
       failedSignInCount: 0,
       lockedUntil: undefined
     });
@@ -196,10 +200,10 @@ export class HrApi {
       action: "EMPLOYEE_ACCOUNT_PASSWORD_RESET",
       targetType: "Employee",
       targetId: input.employeeId,
-      detail: `Temporary password issued for ${saved.employeeNumber}`
+      detail: `Password reset for ${saved.employeeNumber}`
     });
 
-    return { employeeId: input.employeeId, temporaryPassword: credential.password, auditLog };
+    return { employeeId: input.employeeId, auditLog };
   }
 
   async setEmployeeAccountAccess(input: SetEmployeeAccountAccessInput) {
@@ -229,6 +233,7 @@ export class HrApi {
     await this.assertAdmin(actorId, input.session);
     return (await this.db.listEmployeeAccounts()).map((account): EmployeeAccountState => ({
       employeeId: account.employeeId,
+      loginId: account.loginId,
       enabled: !account.disabledAt,
       passwordChangedAt: account.passwordChangedAt,
       lastSignedInAt: account.lastSignedInAt
@@ -968,6 +973,17 @@ export class HrApi {
     }
   }
 
+  private async assertLoginIdAvailable(value: string) {
+    const loginId = value.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{2,63}$/.test(loginId)) {
+      throw new Error("Login ID must use 3-64 lowercase letters, numbers, dots, hyphens, or underscores.");
+    }
+    if ((await this.db.listEmployeeAccounts()).some((account) => account.loginId.trim().toLowerCase() === loginId)) {
+      throw new Error(`Login ID already exists: ${loginId}`);
+    }
+    return loginId;
+  }
+
   private async requireEmployeeAccount(employeeId: string) {
     const account = await this.db.findEmployeeAccount(employeeId);
     if (!account) {
@@ -1014,17 +1030,28 @@ const TEMPORARY_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrst
 
 async function createTemporaryCredential() {
   const password = createTemporaryPassword();
+  return { password, passwordHash: await hashPassword(password) };
+}
+
+function assertTemporaryPassword(value: unknown) {
+  if (typeof value !== "string" || value.length < 12) {
+    throw new Error("Temporary password must be at least 12 characters long.");
+  }
+  return value;
+}
+
+async function hashPassword(password: string) {
   const salt = randomBase64Url(16);
   const crypto = globalThis.crypto;
   if (!crypto?.subtle) {
-    throw new Error("Secure password generation is unavailable.");
+    throw new Error("Secure password hashing is unavailable.");
   }
   const derivedKey = await crypto.subtle.deriveBits(
     { name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: 310_000, hash: "SHA-256" },
     await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]),
     256
   );
-  return { password, passwordHash: `pbkdf2_sha256$310000$${salt}$${bytesToBase64Url(new Uint8Array(derivedKey))}` };
+  return `pbkdf2_sha256$310000$${salt}$${bytesToBase64Url(new Uint8Array(derivedKey))}`;
 }
 
 function createTemporaryPassword() {

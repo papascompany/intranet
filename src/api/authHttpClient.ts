@@ -13,8 +13,8 @@ export async function getAuthenticatedSession() {
   return await parseAuthResponse(response);
 }
 
-export async function loginWithEmployeeNumber(input: {
-  employeeNumber: string;
+export async function loginWithLoginId(input: {
+  loginId: string;
   password: string;
   rememberLogin: boolean;
 }) {
@@ -23,6 +23,29 @@ export async function loginWithEmployeeNumber(input: {
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "login", ...input })
+  });
+  return await parseAuthResponse(response);
+}
+
+/** @deprecated Use loginWithLoginId after the login form has been migrated. */
+export async function loginWithEmployeeNumber(input: {
+  employeeNumber: string;
+  password: string;
+  rememberLogin: boolean;
+}) {
+  return await loginWithLoginId({
+    loginId: input.employeeNumber,
+    password: input.password,
+    rememberLogin: input.rememberLogin
+  });
+}
+
+export async function changeAuthenticatedPassword(newPassword: string) {
+  const response = await fetch("/api/auth", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "changePassword", newPassword })
   });
   return await parseAuthResponse(response);
 }

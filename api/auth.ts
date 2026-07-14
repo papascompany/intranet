@@ -2,11 +2,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   AuthenticationError,
   authenticateCredentials,
+  changeAuthenticatedPassword,
   clearSessionCookie,
   getAuthenticatedSessionFromCookie,
   type AuthAccountQuery,
   type ServerAuthEnv
 } from "../src/server/productionAuth.js";
+import { PasswordValidationError } from "../src/server/sessionAuth.js";
 
 type VercelRequest = IncomingMessage & {
   method?: string;
@@ -54,11 +56,11 @@ export async function handleAuthHttpRequest(
     }
 
     if (request.method === "POST") {
-      const body = request.body as { action?: string; employeeNumber?: string; password?: string; rememberLogin?: boolean } | undefined;
+      const body = request.body as { action?: string; loginId?: string; password?: string; newPassword?: string; rememberLogin?: boolean } | undefined;
       if (body?.action === "login") {
         const result = await authenticateCredentials(
           {
-            employeeNumber: body.employeeNumber ?? "",
+            loginId: body.loginId ?? "",
             password: body.password ?? "",
             rememberLogin: body.rememberLogin
           },
@@ -66,6 +68,10 @@ export async function handleAuthHttpRequest(
           query
         );
         return { status: 200, body: { session: result.authenticated.session }, setCookie: result.cookie };
+      }
+      if (body?.action === "changePassword") {
+        const authenticated = await changeAuthenticatedPassword(request.cookie, body.newPassword ?? "", env, query);
+        return { status: 200, body: { session: authenticated.session } };
       }
       if (body?.action === "logout") {
         return { status: 200, body: { ok: true }, setCookie: clearSessionCookie(env) };
@@ -76,9 +82,10 @@ export async function handleAuthHttpRequest(
     return { status: 405, body: { error: "Method not allowed" } };
   } catch (error) {
     const isAuthenticationError = error instanceof AuthenticationError;
+    const isPasswordValidationError = error instanceof PasswordValidationError;
     return {
-      status: isAuthenticationError ? 401 : 500,
-      body: { error: isAuthenticationError ? error.message : "Authentication service unavailable." }
+      status: isAuthenticationError ? 401 : isPasswordValidationError ? 400 : 500,
+      body: { error: isAuthenticationError || isPasswordValidationError ? error.message : "Authentication service unavailable." }
     };
   }
 }

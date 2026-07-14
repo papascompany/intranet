@@ -138,16 +138,17 @@ describe("hrHttpClient", () => {
   it("posts employee account lifecycle and safe state actions", async () => {
     const fetch = mockFetch(200, { employee: { id: "emp-1" }, temporaryPassword: "temporary-password" });
     await createEmployeeAccount({
+      loginId: "new-staff",
       employee: { name: "신규", employeeNumber: "EMP-0099", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-14", pilot: false }
     });
-    await resetEmployeeAccountPassword("emp-1");
+    await resetEmployeeAccountPassword("emp-1", "AdminReset-2026!");
     await setEmployeeAccountAccess("emp-1", false);
     await getEmployeeAccountStates();
 
     expect(fetch).toHaveBeenNthCalledWith(1, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "createEmployeeAccount", payload: {
-      employee: { name: "신규", employeeNumber: "EMP-0099", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-14", pilot: false }
+      loginId: "new-staff", employee: { name: "신규", employeeNumber: "EMP-0099", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-14", pilot: false }
     } }) }));
-    expect(fetch).toHaveBeenNthCalledWith(2, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "resetEmployeeAccountPassword", payload: { employeeId: "emp-1" } }) }));
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "resetEmployeeAccountPassword", payload: { employeeId: "emp-1", temporaryPassword: "AdminReset-2026!" } }) }));
     expect(fetch).toHaveBeenNthCalledWith(3, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "setEmployeeAccountAccess", payload: { employeeId: "emp-1", enabled: false } }) }));
     expect(fetch).toHaveBeenNthCalledWith(4, "/api/hr", expect.objectContaining({ body: JSON.stringify({ action: "getEmployeeAccountStates" }) }));
   });

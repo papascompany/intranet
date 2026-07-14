@@ -121,11 +121,13 @@ export type RegisterUploadedPayrollStatementInput = AuthenticatedInput & {
 export type CreateEmployeeAccountInput = AuthenticatedInput & {
   actorId: string;
   employee: Omit<Employee, "id">;
+  loginId: string;
 };
 
 export type ResetEmployeeAccountPasswordInput = AuthenticatedInput & {
   actorId: string;
   employeeId: string;
+  temporaryPassword: string;
 };
 
 export type SetEmployeeAccountAccessInput = AuthenticatedInput & {
@@ -140,6 +142,7 @@ export type GetEmployeeAccountStatesInput = AuthenticatedInput & {
 
 export type EmployeeAccountState = {
   employeeId: string;
+  loginId: string;
   enabled: boolean;
   passwordChangedAt: string;
   lastSignedInAt?: string;
@@ -149,8 +152,10 @@ export type EmployeeAuthAccount = {
   id: string;
   employeeId: string;
   employeeNumber: string;
+  loginId: string;
   passwordHash: string;
   passwordChangedAt: string;
+  passwordChangeRequired: boolean;
   failedSignInCount: number;
   lockedUntil?: string;
   lastSignedInAt?: string;

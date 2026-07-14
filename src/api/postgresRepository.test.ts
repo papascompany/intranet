@@ -28,7 +28,7 @@ describe("PostgresHrRepository", () => {
         id: "emp-0099", name: "신규 직원", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-14", employeeNumber: "EMP-0099", pilot: false
       },
       {
-        id: "account-0099", employeeId: "emp-0099", employeeNumber: "EMP-0099", passwordHash: "pbkdf2_sha256$310000$salt$hash", passwordChangedAt: "2026-07-14T00:00:00Z", failedSignInCount: 0
+        id: "account-0099", employeeId: "emp-0099", employeeNumber: "EMP-0099", loginId: "new-staff", passwordHash: "pbkdf2_sha256$310000$salt$hash", passwordChangedAt: "2026-07-14T00:00:00Z", passwordChangeRequired: true, failedSignInCount: 0
       }
     );
 
