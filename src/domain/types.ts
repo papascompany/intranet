@@ -25,6 +25,9 @@ export type Employee = {
   hireDate: string;
   employeeNumber?: string;
   position?: string;
+  employmentStatus?: "ACTIVE" | "LEAVE" | "TERMINATED";
+  employmentType?: "REGULAR" | "CONTRACT" | "PART_TIME";
+  terminationDate?: string;
   residentRegistrationNumber?: string;
   birthday?: string;
   address?: string;
@@ -36,6 +39,7 @@ export type Employee = {
   annualSalary?: number;
   severancePay?: number;
   incomeDeductionDependents?: number;
+  annualLeaveAdjustmentDays?: number;
   customAdminFields?: EmployeeCustomAdminFields;
   approverId?: string;
   workplaceId?: string;

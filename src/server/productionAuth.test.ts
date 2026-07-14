@@ -30,6 +30,15 @@ describe("productionAuth", () => {
     );
   });
 
+  it("does not authenticate a terminated employee even when credentials are valid", async () => {
+    const passwordHash = await hashPassword("correct-password");
+    const query = accountQuery(passwordHash, [], "TERMINATED");
+
+    await expect(authenticateCredentials({ loginId: "operations.lee", password: "correct-password" }, env, query)).rejects.toThrow(
+      "Invalid login ID or password."
+    );
+  });
+
   it("changes the authenticated account password and clears the required flag", async () => {
     const passwordHash = await hashPassword("correct-password");
     const calls: Array<{ sql: string; params?: unknown[] }> = [];
@@ -54,12 +63,16 @@ describe("productionAuth", () => {
   });
 });
 
-function accountQuery(passwordHash: string, calls: Array<{ sql: string; params?: unknown[] }> = []): AuthAccountQuery {
+function accountQuery(
+  passwordHash: string,
+  calls: Array<{ sql: string; params?: unknown[] }> = [],
+  employmentStatus: "ACTIVE" | "LEAVE" | "TERMINATED" = "ACTIVE"
+): AuthAccountQuery {
   return async <T extends Record<string, unknown>>(sql: string, params?: unknown[]) => {
     calls.push({ sql, params });
     const rows = sql.includes("select") ? [{
       account_id: "account-1", employee_id: "emp-ops-1", employee_number: "EMP-0002", login_id: "operations.lee", password_hash: passwordHash,
-      password_change_required: true, role: "EMPLOYEE", disabled_at: null, locked_until: null
+      password_change_required: true, role: "EMPLOYEE", employment_status: employmentStatus, disabled_at: null, locked_until: null
     }] : [];
     return rows as unknown as T[];
   };

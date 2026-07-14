@@ -16,10 +16,16 @@ export type EmployeeCardBasicUpdate = {
 };
 
 export type EmployeeCardAdminUpdate = {
+  department?: Employee["department"];
+  role?: Employee["role"];
+  employmentStatus?: NonNullable<Employee["employmentStatus"]>;
+  employmentType?: NonNullable<Employee["employmentType"]>;
+  terminationDate?: string;
   workplaceId?: string | null;
   annualSalary?: number;
   severancePay?: number;
   incomeDeductionDependents?: number;
+  annualLeaveAdjustmentDays?: number;
   customAdminFields?: EmployeeCustomAdminFields;
 };
 
@@ -63,6 +69,10 @@ export function validateEmployeeCardUpdate(input: EmployeeCardUpdateInput) {
 
   if (input.incomeDeductionDependents !== undefined && input.incomeDeductionDependents < 0) {
     throw new Error("Income deduction dependents must be zero or greater");
+  }
+
+  if (input.annualLeaveAdjustmentDays !== undefined && !Number.isFinite(input.annualLeaveAdjustmentDays)) {
+    throw new Error("Annual leave adjustment must be a finite number");
   }
 
   if (input.customAdminFields) {

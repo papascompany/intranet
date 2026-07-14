@@ -5,6 +5,7 @@ import type { AuthSession } from "./auth";
 import type { HrRepository } from "./hrRepository";
 import { employees } from "../domain/seed";
 import { verifyPassword } from "../server/sessionAuth";
+import { defaultSystemPolicy } from "./types";
 
 const fixedNow = "2026-07-08T09:00:00+09:00";
 const payrollFile = { contentBase64: "JVBERi0xLjQK", contentType: "application/pdf" as const, sizeBytes: 9 };
@@ -83,6 +84,24 @@ describe("hr api", () => {
         employee: { ...result.employee, employeeNumber: "emp-0099" }
       })
     ).rejects.toThrow("Employee number already exists");
+  });
+
+  it("prevents HR administrators from creating another administrator account", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.createEmployeeAccount({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      loginId: "unauthorized-admin",
+      employee: {
+        name: "권한 검증",
+        role: "SYSTEM_ADMIN",
+        department: "운영팀",
+        hireDate: "2026-07-14",
+        employeeNumber: "EMP-0999",
+        pilot: false
+      }
+    })).rejects.toThrow("System administrator permission required");
   });
 
   it("allows only admins to reset, disable, and re-enable employee account access", async () => {
@@ -265,6 +284,68 @@ describe("hr api", () => {
     await expect(hrApi.getAuditLogs({ targetType: "LeaveRequest", targetId: result.request.id })).resolves.toHaveLength(
       1
     );
+  });
+
+  it("enforces annual leave policy units and applies HR balance corrections", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({ leaveRequests: [] }), () => fixedNow);
+    const leaveInput = {
+      employeeId: employeeSession.employeeId,
+      startsOn: "2026-07-20",
+      endsOn: "2026-07-20",
+      reason: "연차 정책 검증",
+      session: employeeSession
+    };
+
+    await hrApi.updateSettings({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      settings: {
+        annualLeaveAutoAccrual: false,
+        annualLeaveOveruseAllowed: false,
+        annualLeaveUnit: 1,
+        partialLeaveAllowed: false
+      }
+    });
+
+    await expect(hrApi.submitLeaveRequest({ ...leaveInput, type: "HALF_DAY", days: 0.5 }))
+      .rejects.toThrow("Half-day leave is not allowed by the current policy");
+    await expect(hrApi.submitLeaveRequest({ ...leaveInput, type: "ANNUAL", days: 0.5 }))
+      .rejects.toThrow("Leave must be requested in 1-day units");
+    await expect(hrApi.submitLeaveRequest({ ...leaveInput, type: "ANNUAL", days: 1 }))
+      .rejects.toThrow("Requested leave exceeds the available balance");
+
+    await hrApi.updateEmployeeCard({
+      employeeId: employeeSession.employeeId,
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { annualLeaveAdjustmentDays: 2 },
+      reason: "HR 연차 보정"
+    });
+    const correctedSnapshot = await hrApi.getEmployeeSnapshot(employeeSession.employeeId, fixedNow, employeeSession);
+    expect(correctedSnapshot.leaveBalance).toMatchObject({ availableDays: 2 });
+
+    await expect(hrApi.submitLeaveRequest({ ...leaveInput, type: "ANNUAL", days: 1 }))
+      .resolves.toMatchObject({ request: { status: "PENDING", days: 1 } });
+    await expect(hrApi.submitLeaveRequest({ ...leaveInput, startsOn: "2026-07-21", endsOn: "2026-07-22", type: "ANNUAL", days: 2 }))
+      .rejects.toThrow("Requested leave exceeds the available balance");
+  });
+
+  it("blocks attendance and new requests while an employee is on leave", async () => {
+    const db = new InMemoryDatabase({
+      employees: employees.map((employee) => employee.id === "emp-ops-1" ? { ...employee, employmentStatus: "LEAVE" } : employee)
+    });
+    const hrApi = createHrApi(db, () => fixedNow);
+
+    await expect(hrApi.clockAttendance({ employeeId: "emp-ops-1", type: "CLOCK_IN", method: "MANUAL_CLICK" }))
+      .rejects.toThrow("Active employment required");
+    await expect(hrApi.submitLeaveRequest({
+      employeeId: "emp-ops-1",
+      type: "ANNUAL",
+      startsOn: "2026-07-20",
+      endsOn: "2026-07-20",
+      days: 1,
+      reason: "휴직 중 신청"
+    })).rejects.toThrow("Active employment required");
   });
 
   it("excludes approved leave requests from pending leave dashboard list", async () => {
@@ -619,6 +700,27 @@ describe("hr api", () => {
       detail: "직원카드 정기 갱신"
     });
     expect(snapshot.employee.position).toBe("운영 리드");
+    expect(snapshot.employee.residentRegistrationNumber).toBeUndefined();
+  });
+
+  it("prevents HR administrators from escalating account roles or changing immutable employee numbers", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { role: "SYSTEM_ADMIN" },
+      reason: "권한 변경"
+    })).rejects.toThrow("System administrator permission required");
+
+    await expect(hrApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { employeeNumber: "EMP-9999" },
+      reason: "사번 변경"
+    })).rejects.toThrow("Employee number cannot be changed");
   });
 
   it("records administrator access to employee resident and payroll identifiers", async () => {
@@ -629,6 +731,10 @@ describe("hr api", () => {
       actorId: adminSession.employeeId,
       session: adminSession
     })).resolves.toMatchObject({
+      employee: {
+        residentRegistrationNumber: "000000-0000002",
+        payrollAccount: "000-0000-000002"
+      },
       auditLog: {
         action: "EMPLOYEE_SENSITIVE_DATA_VIEWED",
         targetType: "Employee",
@@ -641,6 +747,16 @@ describe("hr api", () => {
       actorId: employeeSession.employeeId,
       session: employeeSession
     })).rejects.toThrow("Admin permission required");
+  });
+
+  it("redacts sensitive fields from the administrator directory until an audited reveal", async () => {
+    const directory = await api().getEmployeeDirectory({ session: adminSession });
+    const employee = directory.find((item) => item.id === "emp-ops-1");
+
+    expect(employee).toMatchObject({ name: "김운영", employeeNumber: "EMP-0002" });
+    expect(employee?.residentRegistrationNumber).toBeUndefined();
+    expect(employee?.payrollAccount).toBeUndefined();
+    expect(employee?.annualSalary).toBeUndefined();
   });
 
   it("rejects unknown workplace assignments before updating an employee card", async () => {
@@ -730,6 +846,20 @@ describe("hr api", () => {
     expect(result.auditLog.action).toBe("SETTINGS_UPDATED");
   });
 
+  it("rejects invalid work policy values at the API boundary", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.updateSettings({
+      actorId: "emp-ceo",
+      settings: { workStartTime: "18:00", workEndTime: "09:00" }
+    })).rejects.toThrow("valid schedule");
+    await expect(hrApi.updateSettings({
+      actorId: "emp-ceo",
+      settings: { workDays: [] }
+    })).rejects.toThrow("work day");
+    await expect(hrApi.getSettings()).resolves.toMatchObject(defaultSystemPolicy);
+  });
+
   it("rejects employee settings updates", async () => {
     const hrApi = api();
 
@@ -766,14 +896,7 @@ describe("hr api", () => {
 
     const dashboard = await hrApi.getDashboard(fixedNow);
 
-    expect(dashboard.settings).toEqual({
-      gpsAllowedRadiusMeters: 300,
-      gpsFailureFallback: "QR_OR_MANUAL_EQUAL",
-      payrollEmployeeAccess: "VIEW_ONLY",
-      payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE",
-      overtimePayApproverRole: "ADMIN_ONLY",
-      advanceLeaveExceptionHandling: "HR_CORRECTION"
-    });
+    expect(dashboard.settings).toEqual(defaultSystemPolicy);
   });
 
   it("creates attendance correction audit history", async () => {

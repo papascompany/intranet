@@ -61,7 +61,7 @@
 }
 .employee-directory__list > div:first-child button { border-top: 0; }
 .employee-directory__list button:hover { background: var(--color-paper); }
-.employee-directory__list button.is-selected { background: #f0f0f0; box-shadow: inset 3px 0 0 var(--color-ink); }
+.employee-directory__list button.is-selected { background: #fff9dc; box-shadow: inset 3px 0 0 var(--color-brand-yellow); }
 .employee-directory__avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9999px; color: var(--color-slate); background: var(--color-paper); }
 .employee-directory__avatar svg { width: 16px; }
 .employee-directory__identity, .employee-directory__meta { display: grid; gap: 4px; min-width: 0; }

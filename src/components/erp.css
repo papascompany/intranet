@@ -83,8 +83,8 @@
 }
 
 .erp-nav-item.is-active {
-  color: var(--color-white);
-  background: var(--color-ink);
+  color: var(--color-ink);
+  background: var(--color-brand-yellow);
 }
 
 .erp-nav-item__icon,

@@ -42,15 +42,16 @@ describe("buildEmployeeCardViewModel", () => {
     expect(rows.some((row) => row.id.startsWith("custom-admin-field-"))).toBe(false);
   });
 
-  it("shows a neutral assigned workplace state without exposing workplace details", () => {
+  it("shows the assigned workplace name when the caller provides an authorized label", () => {
     const rows = buildEmployeeCardViewModel(
       { ...employee, workplaceId: "workplace-samsong" } as Employee & { workplaceId?: string },
-      "EMPLOYEE"
+      "EMPLOYEE",
+      { workplaceName: "삼송테크노밸리" }
     );
 
     expect(rows.find((row) => row.id === "workplaceAssignment")).toMatchObject({
       label: "근무지 배정",
-      value: "지정됨"
+      value: "삼송테크노밸리"
     });
     expect(JSON.stringify(rows)).not.toContain("workplace-samsong");
   });

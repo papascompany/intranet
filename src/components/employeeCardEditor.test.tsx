@@ -76,6 +76,50 @@ describe("EmployeeCardEditor", () => {
     }));
   });
 
+  it("exposes new administrator employment and leave-adjustment fields with labels", () => {
+    render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={vi.fn()} open />);
+
+    expect(screen.getByRole("heading", { name: "재직 및 소속" })).toBeVisible();
+    expect(screen.getByLabelText("직원구분")).toHaveValue("REGULAR");
+    expect(screen.getByLabelText("재직상태")).toHaveValue("ACTIVE");
+    expect(screen.getByLabelText("퇴사일")).toHaveValue("");
+    expect(screen.getByLabelText("주민등록번호")).toHaveValue("");
+    expect(screen.getByLabelText("연차 HR 보정")).toHaveValue(0);
+    expect(screen.getByLabelText("연차 HR 보정")).toHaveAttribute("step", "0.5");
+  });
+
+  it("submits edited employment details and a negative leave adjustment with an audit reason", () => {
+    const onSubmit = vi.fn();
+    render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={onSubmit} open />);
+
+    fireEvent.change(screen.getByLabelText("직원구분"), { target: { value: "CONTRACT" } });
+    fireEvent.change(screen.getByLabelText("재직상태"), { target: { value: "LEAVE" } });
+    fireEvent.change(screen.getByLabelText("퇴사일"), { target: { value: "2026-08-31" } });
+    fireEvent.change(screen.getByLabelText("주민등록번호"), { target: { value: "900310-1234567" } });
+    fireEvent.change(screen.getByLabelText("연차 HR 보정"), { target: { value: "-1.5" } });
+    fireEvent.change(screen.getByLabelText("관리자 변경 사유"), { target: { value: "휴직 전환 및 연차 정산" } });
+    fireEvent.click(screen.getByRole("button", { name: "변경 저장" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "휴직 전환 및 연차 정산",
+      update: expect.objectContaining({
+        employmentType: "CONTRACT",
+        employmentStatus: "LEAVE",
+        terminationDate: "2026-08-31",
+        residentRegistrationNumber: "900310-1234567",
+        annualLeaveAdjustmentDays: -1.5
+      })
+    }));
+  });
+
+  it("keeps the employee number immutable after account creation", () => {
+    render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={vi.fn()} open />);
+
+    expect(screen.getByLabelText("사번")).toHaveValue("P-001");
+    expect(screen.getByLabelText("사번")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("사번")).toBeRequired();
+  });
+
   it("lets an administrator assign a workplace and requires a reason", () => {
     const onSubmit = vi.fn();
     render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={onSubmit} open workplaces={workplaces} />);

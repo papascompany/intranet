@@ -28,6 +28,7 @@ type AuthAccountRow = Record<string, unknown> & {
   password_hash: string;
   password_change_required: boolean;
   role: AuthSession["role"];
+  employment_status?: "ACTIVE" | "LEAVE" | "TERMINATED";
   disabled_at?: string | null;
   locked_until?: string | null;
 };
@@ -170,7 +171,8 @@ export async function findAccountByLoginId(query: AuthAccountQuery, loginId: str
        auth_accounts.password_change_required,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
-       employees.role
+       employees.role,
+       employees.employment_status
      from auth_accounts
      join employees on employees.id = auth_accounts.employee_id
      where auth_accounts.login_id = $1
@@ -191,7 +193,8 @@ export async function findAccountBySignedSession(query: AuthAccountQuery, token:
        auth_accounts.password_change_required,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
-       employees.role
+       employees.role,
+       employees.employment_status
      from auth_accounts
      join employees on employees.id = auth_accounts.employee_id
      where auth_accounts.id = $1
@@ -218,7 +221,9 @@ export function toAuthenticatedSession(account: AuthAccountRow, rememberLogin: b
 }
 
 export function isAccountActive(account: AuthAccountRow, now: Date) {
-  return !account.disabled_at && (!account.locked_until || new Date(account.locked_until).getTime() <= now.getTime());
+  return account.employment_status !== "TERMINATED"
+    && !account.disabled_at
+    && (!account.locked_until || new Date(account.locked_until).getTime() <= now.getTime());
 }
 
 async function recordFailedSignIn(query: AuthAccountQuery, accountId: string) {

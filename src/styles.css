@@ -1,8 +1,9 @@
 :root {
   --color-ink: #101010;
   --color-action-blue: #0099ff;
+  --color-brand-yellow: #facc15;
   --color-white: #ffffff;
-  --color-paper: #f4f4f4;
+  --color-paper: #f7f7f6;
   --color-graphite: #242424;
   --color-slate: #6b7280;
   --color-stone: #898989;
@@ -71,6 +72,18 @@ button {
   display: grid;
   gap: 16px;
 }
+
+.people-workspace__detail { display: grid; gap: 16px; }
+.employee-leave-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.employee-leave-summary > div { display: grid; gap: 5px; border-radius: 8px; padding: 12px; background: var(--color-paper); }
+.employee-leave-summary span { color: var(--color-slate); font: 11px var(--font-inter); }
+.employee-leave-summary strong { font: 600 17px var(--font-inter); }
+.employee-leave-summary .is-primary { background: #fff7c2; }
+.employee-balance-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.employee-balance-strip > div { display: grid; gap: 5px; min-width: 0; border-radius: 8px; padding: 14px; background: var(--color-white); box-shadow: var(--shadow-card); }
+.employee-balance-strip > div.is-primary { background: #fff7c2; }
+.employee-balance-strip span { color: var(--color-slate); font: 11px var(--font-inter); }
+.employee-balance-strip strong { overflow-wrap: anywhere; font: 600 14px/1.4 var(--font-inter); }
 
 .my-day__hero {
   display: grid;
@@ -1080,6 +1093,8 @@ select {
 }
 
 @media (max-width: 520px) {
+  .employee-leave-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .employee-balance-strip { grid-template-columns: 1fr; }
   .my-day__hero {
     padding: 18px;
   }

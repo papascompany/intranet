@@ -121,7 +121,7 @@ export async function updateEmployeeCard(input: UpdateEmployeeCardInput) {
 }
 
 export async function revealEmployeeSensitiveData(input: Omit<RevealEmployeeSensitiveDataInput, "actorId" | "session">) {
-  return await post<{ auditLog: AuditLog }>("revealEmployeeSensitiveData", input);
+  return await post<{ employee: Employee; auditLog: AuditLog }>("revealEmployeeSensitiveData", input);
 }
 
 export async function createEmployeeAccount(input: Omit<CreateEmployeeAccountInput, "actorId" | "session">) {

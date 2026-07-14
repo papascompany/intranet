@@ -31,6 +31,7 @@ export type EmployeeAccountPasswordResult = {
 export interface EmployeeAccountManagerProps {
   accountStates: readonly EmployeeAccountState[];
   busy?: boolean;
+  canManageAdminRoles?: boolean;
   employees: readonly EmployeeAccountEmployee[];
   onCreate: (input: EmployeeAccountCreateInput) => EmployeeAccountPasswordResult | Promise<EmployeeAccountPasswordResult>;
   onResetPassword: (employeeId: string, temporaryPassword: string) => void | EmployeeAccountPasswordResult | Promise<void | EmployeeAccountPasswordResult>;
@@ -53,7 +54,7 @@ function roleLabel(role: Role) {
   return roles.find((option) => option.value === role)?.label ?? role;
 }
 
-export function EmployeeAccountManager({ accountStates, busy = false, employees, onCreate, onResetPassword, onSetEnabled, workplaces }: EmployeeAccountManagerProps) {
+export function EmployeeAccountManager({ accountStates, busy = false, canManageAdminRoles = false, employees, onCreate, onResetPassword, onSetEnabled, workplaces }: EmployeeAccountManagerProps) {
   const [draft, setDraft] = useState(() => newDraft(workplaces));
   const [createOpen, setCreateOpen] = useState(false);
   const [resetEmployee, setResetEmployee] = useState<EmployeeAccountEmployee | null>(null);
@@ -63,6 +64,7 @@ export function EmployeeAccountManager({ accountStates, busy = false, employees,
   const [error, setError] = useState<string | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
   const isBusy = busy || isSubmitting;
+  const availableRoles = canManageAdminRoles ? roles : roles.filter((role) => role.value === "EMPLOYEE" || role.value === "APPROVER");
 
   const stateByEmployeeId = useMemo(() => new Map(accountStates.map((state) => [state.employeeId, state])), [accountStates]);
 
@@ -178,7 +180,7 @@ export function EmployeeAccountManager({ accountStates, busy = false, employees,
           <label><span>이름</span><input autoComplete="name" onChange={(event) => setDraft({ ...draft, name: event.target.value })} required value={draft.name} /></label>
           <label><span>로그인 아이디</span><input autoCapitalize="none" autoComplete="username" onChange={(event) => setDraft({ ...draft, loginId: event.target.value })} required value={draft.loginId} /></label>
           <label><span>사번</span><input autoComplete="off" onChange={(event) => setDraft({ ...draft, employeeNumber: event.target.value })} required value={draft.employeeNumber} /></label>
-          <label><span>권한</span><select onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })} value={draft.role}>{roles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
+          <label><span>권한</span><select onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })} value={draft.role}>{availableRoles.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
           <label><span>부서</span><select onChange={(event) => setDraft({ ...draft, department: event.target.value as Employee["department"] })} value={draft.department}><option value="운영팀">운영팀</option><option value="제작팀">제작팀</option></select></label>
           <label><span>입사일</span><input onChange={(event) => setDraft({ ...draft, hireDate: event.target.value })} required type="date" value={draft.hireDate} /></label>
           <label><span>근무지</span><select onChange={(event) => setDraft({ ...draft, workplaceId: event.target.value })} required value={draft.workplaceId}><option disabled value="">근무지를 선택하세요</option>{workplaces.map((workplace) => <option key={workplace.id} value={workplace.id}>{workplace.name}</option>)}</select></label>

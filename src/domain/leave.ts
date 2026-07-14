@@ -37,21 +37,24 @@ export function getLeaveBalance(params: {
   employee: Employee;
   asOf: string;
   approvedRequests: LeaveRequest[];
+  policy?: { annualLeaveAutoAccrual: boolean };
 }): LeaveBalance {
   const usedDays = params.approvedRequests
     .filter((request) => request.employeeId === params.employee.id && request.status === "APPROVED")
     .reduce((sum, request) => sum + request.days, 0);
 
-  const statutoryDays = statutoryAnnualLeaveDays(params.employee.hireDate, params.asOf);
-  const advanceGrantedDays = advanceLeaveGrantedDays(params.employee.hireDate, params.asOf, 15);
+  const autoAccrual = params.policy?.annualLeaveAutoAccrual ?? true;
+  const statutoryDays = autoAccrual ? statutoryAnnualLeaveDays(params.employee.hireDate, params.asOf) : 0;
+  const advanceGrantedDays = autoAccrual ? advanceLeaveGrantedDays(params.employee.hireDate, params.asOf, 15) : 0;
   const statutoryUsedDays = Math.min(statutoryDays, usedDays);
   const advanceUsedDays = Math.max(usedDays - statutoryDays, 0);
+  const adjustmentDays = params.employee.annualLeaveAdjustmentDays ?? 0;
 
   return {
     statutoryDays,
     advanceGrantedDays,
     advanceUsedDays,
-    availableDays: Math.max(statutoryDays + advanceGrantedDays - statutoryUsedDays - advanceUsedDays, 0),
+    availableDays: Math.max(statutoryDays + advanceGrantedDays + adjustmentDays - statutoryUsedDays - advanceUsedDays, 0),
     pendingOffsetDays: advanceUsedDays
   };
 }

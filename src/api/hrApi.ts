@@ -71,8 +71,11 @@ export class HrApi {
 
   async getEmployeeDirectory(input: { session?: AuthSession } = {}) {
     const employees = await this.db.listEmployees();
-    if (!input.session || isAdminSession(input.session)) {
+    if (!input.session) {
       return employees;
+    }
+    if (isAdminSession(input.session)) {
+      return employees.map(redactSensitiveEmployee);
     }
 
     return employees.filter((employee) => employee.id === input.session?.employeeId);
@@ -140,6 +143,8 @@ export class HrApi {
     const actorId = this.resolveActorId(input, input.actorId);
     await this.assertAdmin(actorId, input.session);
 
+    const current = await this.db.getSettings();
+    assertSystemPolicy({ ...current, ...input.settings });
     const settings = await this.db.updateSettings(input.settings);
     const auditLog = await this.addAuditLog({
       actorId,
@@ -155,6 +160,9 @@ export class HrApi {
   async createEmployeeAccount(input: CreateEmployeeAccountInput) {
     const actorId = this.resolveActorId(input, input.actorId);
     await this.assertAdmin(actorId, input.session);
+    if (input.employee.role === "HR_ADMIN" || input.employee.role === "SYSTEM_ADMIN") {
+      await this.assertSystemAdmin(actorId, input.session);
+    }
     const employee = { ...this.buildNewEmployee(input.employee), id: await this.db.nextId("emp") };
     await this.assertEmployeeNumberAvailable(employee.employeeNumber!);
     const loginId = await this.assertLoginIdAvailable(input.loginId);
@@ -253,7 +261,8 @@ export class HrApi {
       correctionRows,
       payrollStatementRows,
       dailyWorkTaskRows,
-      auditLogs
+      auditLogs,
+      settings
     ] = await Promise.all([
       this.db.listEmployees(),
       this.db.listAttendanceRecords(),
@@ -264,7 +273,8 @@ export class HrApi {
       this.db.listCorrections(),
       this.db.listPayrollStatements(false),
       this.db.listDailyWorkTasks(),
-      this.db.listAuditLogs()
+      this.db.listAuditLogs(),
+      this.db.getSettings()
     ]);
     const employee = employees.find((item) => item.id === employeeId);
     if (!employee) {
@@ -280,14 +290,15 @@ export class HrApi {
 
     return {
       asOf,
-      employee,
+      employee: session && isAdminSession(session) ? redactSensitiveEmployee(employee) : employee,
       workplaceOptions,
       todayAttendance: attendanceRecords.find((record) => record.date === asOf.slice(0, 10)),
       attendanceRecords,
       leaveBalance: getLeaveBalance({
         employee,
         asOf,
-        approvedRequests: leaveRequests
+        approvedRequests: leaveRequests,
+        policy: settings
       }),
       leaveRequests,
       earlyLeaveLedger,
@@ -320,7 +331,8 @@ export class HrApi {
   async updateDailyWorkTaskStatus(input: UpdateDailyWorkTaskStatusInput) {
     const task = await this.findDailyWorkTask(input.taskId);
     const actorId = this.resolveActorId(input, task.employeeId);
-    await this.assertEmployee(actorId);
+    const employee = await this.findEmployee(actorId);
+    assertActiveEmployment(employee, "update daily work");
     if (actorId !== task.employeeId) {
       throw new Error(`Daily work task access denied: ${actorId} -> ${task.id}`);
     }
@@ -420,6 +432,16 @@ export class HrApi {
       throw new Error(`Employee not found: ${input.employeeId}`);
     }
 
+    if (input.patch.employeeNumber !== undefined && input.patch.employeeNumber !== employee.employeeNumber) {
+      throw new Error("Employee number cannot be changed after account creation");
+    }
+    if (input.patch.role !== undefined && input.patch.role !== employee.role) {
+      if (input.employeeId === actorId) {
+        throw new Error("Administrators cannot change their own role");
+      }
+      await this.assertSystemAdmin(actorId, input.session);
+    }
+
     if (input.patch.workplaceId !== undefined && input.patch.workplaceId !== null) {
       const workplaceExists = (await this.db.listWorkplaces()).some((workplace) => workplace.id === input.patch.workplaceId);
       if (!workplaceExists) {
@@ -442,7 +464,7 @@ export class HrApi {
   async revealEmployeeSensitiveData(input: RevealEmployeeSensitiveDataInput) {
     const actorId = this.resolveActorId(input, input.actorId);
     await this.assertAdmin(actorId, input.session);
-    await this.findEmployee(input.employeeId);
+    const employee = await this.findEmployee(input.employeeId);
 
     const auditLog = await this.addAuditLog({
       actorId,
@@ -452,14 +474,19 @@ export class HrApi {
       detail: "residentRegistrationNumber,payrollAccount"
     });
 
-    return { auditLog };
+    return { employee, auditLog };
   }
 
   async clockAttendance(input: ClockAttendanceInput) {
     const employee = await this.findEmployee(input.employeeId);
     await this.assertCanReadEmployee(input.employeeId, input.session);
+    assertActiveEmployment(employee, "clock attendance");
 
     const now = input.now ?? this.clock();
+    const settings = await this.db.getSettings();
+    const scheduledEndHour = settings.workDays.includes(workDayCode(now))
+      ? Number(settings.workEndTime.slice(0, 2))
+      : 0;
     const verification = evaluateVerification({
       employeeId: input.employeeId,
       workplaces: await this.workplacesWithPolicyRadius(employee.workplaceId),
@@ -478,7 +505,7 @@ export class HrApi {
         verification,
         existing,
         now,
-        scheduledEndHour: input.scheduledEndHour
+        scheduledEndHour: input.scheduledEndHour ?? scheduledEndHour
       })
     );
     const earlyLeaveEntry = await this.syncEarlyLeaveLedger(attendance);
@@ -501,9 +528,13 @@ export class HrApi {
   }
 
   async submitLeaveRequest(input: SubmitLeaveRequestInput) {
-    await this.assertEmployee(input.employeeId);
+    const employee = await this.findEmployee(input.employeeId);
     await this.assertCanReadEmployee(input.employeeId, input.session);
+    assertActiveEmployment(employee, "submit leave");
     const actorId = this.resolveActorId(input, input.employeeId);
+    const settings = await this.db.getSettings();
+    const leaveRequests = await this.db.listLeaveRequests();
+    this.assertLeaveRequest(input, employee, leaveRequests, settings);
 
     const request: LeaveRequest = {
       id: await this.db.nextId("leave"),
@@ -528,8 +559,9 @@ export class HrApi {
   }
 
   async submitOvertimeRequest(input: SubmitOvertimeRequestInput) {
-    await this.assertEmployee(input.employeeId);
+    const employee = await this.findEmployee(input.employeeId);
     await this.assertCanReadEmployee(input.employeeId, input.session);
+    assertActiveEmployment(employee, "submit overtime");
     const actorId = this.resolveActorId(input, input.employeeId);
     await this.assertEmployee(actorId);
 
@@ -822,6 +854,25 @@ export class HrApi {
     }
   }
 
+  private async assertSystemAdmin(employeeId: string, session?: AuthSession) {
+    const employee = (await this.db.listEmployees()).find((item) => item.id === employeeId);
+    if (!employee) {
+      throw new Error(`Employee not found: ${employeeId}`);
+    }
+
+    if (session) {
+      this.assertSessionActor(session, employeeId);
+      if (session.role !== "SYSTEM_ADMIN") {
+        throw new Error(`System administrator permission required: ${employeeId}`);
+      }
+      return;
+    }
+
+    if (employee.role !== "SYSTEM_ADMIN") {
+      throw new Error(`System administrator permission required: ${employeeId}`);
+    }
+  }
+
   private async assertCanApprove(employeeId: string, session?: AuthSession) {
     const employee = (await this.db.listEmployees()).find((item) => item.id === employeeId);
     if (!employee) {
@@ -1028,6 +1079,86 @@ export class HrApi {
       throw new Error("Daily work task display order must be a non-negative integer");
     }
   }
+
+  private assertLeaveRequest(input: SubmitLeaveRequestInput, employee: Employee, requests: LeaveRequest[], settings: import("./types.js").SystemPolicy) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startsOn) || !/^\d{4}-\d{2}-\d{2}$/.test(input.endsOn) || input.endsOn < input.startsOn) {
+      throw new Error("Leave period is invalid");
+    }
+    if (!Number.isFinite(input.days) || input.days <= 0) {
+      throw new Error("Leave days must be greater than zero");
+    }
+    if (input.type === "HALF_DAY" && (!settings.partialLeaveAllowed || input.days !== 0.5)) {
+      throw new Error("Half-day leave is not allowed by the current policy");
+    }
+    if ((input.type === "ANNUAL" || input.type === "HALF_DAY") && Math.abs(input.days / settings.annualLeaveUnit - Math.round(input.days / settings.annualLeaveUnit)) > 0.0001) {
+      throw new Error(`Leave must be requested in ${settings.annualLeaveUnit}-day units`);
+    }
+    if ((input.type !== "ANNUAL" && input.type !== "HALF_DAY") || settings.annualLeaveOveruseAllowed) return;
+
+    const balance = getLeaveBalance({ employee, asOf: this.clock(), approvedRequests: requests, policy: settings });
+    const pendingDays = requests
+      .filter((request) => request.employeeId === employee.id && request.status === "PENDING" && (request.type === "ANNUAL" || request.type === "HALF_DAY"))
+      .reduce((sum, request) => sum + request.days, 0);
+    if (input.days > balance.availableDays - pendingDays) {
+      throw new Error("Requested leave exceeds the available balance");
+    }
+  }
+}
+
+function assertSystemPolicy(settings: import("./types.js").SystemPolicy) {
+  const validTime = (value: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  const validWorkDays = new Set(["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]);
+
+  if (!Number.isInteger(settings.gpsAllowedRadiusMeters) || settings.gpsAllowedRadiusMeters < 50 || settings.gpsAllowedRadiusMeters > 5_000) {
+    throw new Error("GPS allowed radius must be an integer between 50 and 5000 meters");
+  }
+  if (settings.timezone !== "Asia/Seoul") {
+    throw new Error("Unsupported work timezone");
+  }
+  if (![settings.workStartTime, settings.workEndTime, settings.breakStartTime, settings.breakEndTime].every(validTime)
+    || settings.workStartTime >= settings.workEndTime
+    || settings.breakStartTime < settings.workStartTime
+    || settings.breakStartTime >= settings.breakEndTime
+    || settings.breakEndTime > settings.workEndTime) {
+    throw new Error("Work and break times must form a valid schedule");
+  }
+  if (settings.workDays.length === 0
+    || new Set(settings.workDays).size !== settings.workDays.length
+    || settings.workDays.some((day) => !validWorkDays.has(day))) {
+    throw new Error("At least one valid, unique work day is required");
+  }
+  if (settings.annualLeaveUnit !== 0.5 && settings.annualLeaveUnit !== 1) {
+    throw new Error("Annual leave unit must be 0.5 or 1 day");
+  }
+}
+
+function redactSensitiveEmployee(employee: Employee): Employee {
+  return {
+    ...employee,
+    residentRegistrationNumber: undefined,
+    birthday: undefined,
+    address: undefined,
+    mobile: undefined,
+    emergencyContact: undefined,
+    familyRelations: undefined,
+    payrollBank: undefined,
+    payrollAccount: undefined,
+    annualSalary: undefined,
+    severancePay: undefined,
+    incomeDeductionDependents: undefined,
+    customAdminFields: undefined
+  };
+}
+
+function assertActiveEmployment(employee: Employee, action: string) {
+  if ((employee.employmentStatus ?? "ACTIVE") !== "ACTIVE") {
+    throw new Error(`Active employment required to ${action}`);
+  }
+}
+
+function workDayCode(timestamp: string): import("./types.js").SystemPolicy["workDays"][number] {
+  const date = new Date(`${timestamp.slice(0, 10)}T00:00:00Z`);
+  return ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][date.getUTCDay()] as import("./types.js").SystemPolicy["workDays"][number];
 }
 
 function assertSelfServiceEmployeeCardPatch(patch: UpdateEmployeeCardInput["patch"]) {

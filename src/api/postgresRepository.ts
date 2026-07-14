@@ -270,6 +270,9 @@ export class PostgresHrRepository implements HrRepository {
       hireDate: stringValue(row.hire_date),
       employeeNumber: optionalString(row.employee_number),
       position: optionalString(row.position),
+      employmentStatus: optionalString(row.employment_status) as Employee["employmentStatus"],
+      employmentType: optionalString(row.employment_type) as Employee["employmentType"],
+      terminationDate: optionalString(row.termination_date),
       residentRegistrationNumber: this.config.decodeSensitiveText?.("resident_registration_number_enc", row.resident_registration_number_enc),
       birthday: optionalString(row.birthday),
       address: this.config.decodeSensitiveText?.("address_enc", row.address_enc),
@@ -281,6 +284,7 @@ export class PostgresHrRepository implements HrRepository {
       annualSalary: optionalNumber(row.annual_salary),
       severancePay: optionalNumber(row.severance_pay),
       incomeDeductionDependents: optionalNumber(row.income_deduction_dependents),
+      annualLeaveAdjustmentDays: optionalNumber(row.annual_leave_adjustment_days),
       customAdminFields: row.custom_admin_fields as EmployeeCustomAdminFields | undefined,
       approverId: optionalString(row.approver_id),
       workplaceId: optionalString(row.workplace_id),
@@ -310,6 +314,7 @@ type SystemPolicyRow = DbRow & {
   payroll_delete_mode: SystemPolicy["payrollDeleteMode"];
   overtime_pay_approver_role: SystemPolicy["overtimePayApproverRole"];
   advance_leave_exception_handling: SystemPolicy["advanceLeaveExceptionHandling"];
+  work_days: SystemPolicy["workDays"];
 };
 type AuditLogRow = DbRow;
 
@@ -322,19 +327,23 @@ function employeeToRow(employee: Employee, config: PostgresRepositoryConfig): Db
     hire_date: employee.hireDate,
     employee_number: employee.employeeNumber,
     position: employee.position,
-    resident_registration_number_enc: config.encodeSensitiveText?.("resident_registration_number_enc", employee.residentRegistrationNumber),
-    birthday: employee.birthday,
-    address_enc: config.encodeSensitiveText?.("address_enc", employee.address),
-    mobile_enc: config.encodeSensitiveText?.("mobile_enc", employee.mobile),
-    emergency_contact_enc: config.encodeSensitiveText?.("emergency_contact_enc", employee.emergencyContact),
-    family_relations_enc: config.encodeSensitiveText?.("family_relations_enc", employee.familyRelations),
-    payroll_bank: employee.payrollBank,
-    payroll_account_enc: config.encodeSensitiveText?.("payroll_account_enc", employee.payrollAccount),
-    annual_salary: employee.annualSalary,
-    severance_pay: employee.severancePay,
-    income_deduction_dependents: employee.incomeDeductionDependents,
-    custom_admin_fields: employee.customAdminFields,
-    approver_id: employee.approverId,
+    employment_status: employee.employmentStatus ?? "ACTIVE",
+    employment_type: employee.employmentType ?? "REGULAR",
+    termination_date: employee.terminationDate ?? null,
+    resident_registration_number_enc: config.encodeSensitiveText?.("resident_registration_number_enc", employee.residentRegistrationNumber) ?? null,
+    birthday: employee.birthday ?? null,
+    address_enc: config.encodeSensitiveText?.("address_enc", employee.address) ?? null,
+    mobile_enc: config.encodeSensitiveText?.("mobile_enc", employee.mobile) ?? null,
+    emergency_contact_enc: config.encodeSensitiveText?.("emergency_contact_enc", employee.emergencyContact) ?? null,
+    family_relations_enc: config.encodeSensitiveText?.("family_relations_enc", employee.familyRelations) ?? null,
+    payroll_bank: employee.payrollBank ?? null,
+    payroll_account_enc: config.encodeSensitiveText?.("payroll_account_enc", employee.payrollAccount) ?? null,
+    annual_salary: employee.annualSalary ?? null,
+    severance_pay: employee.severancePay ?? null,
+    income_deduction_dependents: employee.incomeDeductionDependents ?? null,
+    annual_leave_adjustment_days: employee.annualLeaveAdjustmentDays ?? 0,
+    custom_admin_fields: employee.customAdminFields ?? null,
+    approver_id: employee.approverId ?? null,
     workplace_id: employee.workplaceId ?? null,
     pilot: employee.pilot
   };
@@ -604,6 +613,16 @@ function dailyWorkTaskToRow(task: DailyWorkTask): DbRow {
 function policyFromRow(row: SystemPolicyRow): SystemPolicy {
   return {
     gpsAllowedRadiusMeters: Number(row.gps_allowed_radius_meters),
+    timezone: "Asia/Seoul",
+    workStartTime: normalizeTimeValue(row.work_start_time, defaultSystemPolicy.workStartTime),
+    workEndTime: normalizeTimeValue(row.work_end_time, defaultSystemPolicy.workEndTime),
+    breakStartTime: normalizeTimeValue(row.break_start_time, defaultSystemPolicy.breakStartTime),
+    breakEndTime: normalizeTimeValue(row.break_end_time, defaultSystemPolicy.breakEndTime),
+    workDays: Array.isArray(row.work_days) ? row.work_days : defaultSystemPolicy.workDays,
+    annualLeaveAutoAccrual: row.annual_leave_auto_accrual === undefined ? defaultSystemPolicy.annualLeaveAutoAccrual : Boolean(row.annual_leave_auto_accrual),
+    annualLeaveUnit: Number(row.annual_leave_unit) === 1 ? 1 : 0.5,
+    partialLeaveAllowed: row.partial_leave_allowed === undefined ? defaultSystemPolicy.partialLeaveAllowed : Boolean(row.partial_leave_allowed),
+    annualLeaveOveruseAllowed: Boolean(row.annual_leave_overuse_allowed),
     gpsFailureFallback: row.gps_failure_fallback,
     payrollEmployeeAccess: row.payroll_employee_access,
     payrollDeleteMode: row.payroll_delete_mode,
@@ -615,12 +634,27 @@ function policyFromRow(row: SystemPolicyRow): SystemPolicy {
 function policyToRow(settings: Partial<SystemPolicy>): DbRow {
   return {
     gps_allowed_radius_meters: settings.gpsAllowedRadiusMeters,
+    timezone: settings.timezone,
+    work_start_time: settings.workStartTime,
+    work_end_time: settings.workEndTime,
+    break_start_time: settings.breakStartTime,
+    break_end_time: settings.breakEndTime,
+    work_days: settings.workDays,
+    annual_leave_auto_accrual: settings.annualLeaveAutoAccrual,
+    annual_leave_unit: settings.annualLeaveUnit,
+    partial_leave_allowed: settings.partialLeaveAllowed,
+    annual_leave_overuse_allowed: settings.annualLeaveOveruseAllowed,
     gps_failure_fallback: settings.gpsFailureFallback,
     payroll_employee_access: settings.payrollEmployeeAccess,
     payroll_delete_mode: settings.payrollDeleteMode,
     overtime_pay_approver_role: settings.overtimePayApproverRole,
     advance_leave_exception_handling: settings.advanceLeaveExceptionHandling
   };
+}
+
+function normalizeTimeValue(value: unknown, fallback: string) {
+  const text = optionalString(value);
+  return text ? text.slice(0, 5) : fallback;
 }
 
 function auditLogFromRow(row: AuditLogRow): AuditLog {

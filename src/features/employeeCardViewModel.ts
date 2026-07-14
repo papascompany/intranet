@@ -18,14 +18,22 @@ const defaultCustomAdminFields: EmployeeCustomAdminFields = [
   { id: "custom-admin-field-5", label: "관리자 항목 5", value: "-" }
 ];
 
-export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCardMode, options: { revealSensitive?: boolean } = {}): EmployeeCardRow[] {
+export function buildEmployeeCardViewModel(
+  employee: Employee,
+  mode: EmployeeCardMode,
+  options: { revealSensitive?: boolean; workplaceName?: string } = {}
+): EmployeeCardRow[] {
   const revealSensitive = mode === "ADMIN" && options.revealSensitive === true;
   const baseRows: EmployeeCardRow[] = [
     row("employeeNumber", "사번", employee.employeeNumber),
     row("name", "이름", employee.name),
     row("position", "직위", employee.position),
+    row("department", "부서", employee.department),
+    row("employmentStatus", "재직상태", employmentStatusLabel(employee.employmentStatus)),
+    row("employmentType", "직원구분", employmentTypeLabel(employee.employmentType)),
     row("hireDate", "입사일", employee.hireDate),
-    row("workplaceAssignment", "근무지 배정", workplaceAssignment(employee)),
+    row("terminationDate", "퇴사일", employee.terminationDate),
+    row("workplaceAssignment", "근무지 배정", workplaceAssignment(employee, options.workplaceName)),
     row("residentRegistrationNumber", "주민등록번호", revealSensitive ? employee.residentRegistrationNumber : maskResidentRegistrationNumber(employee.residentRegistrationNumber), {
       sensitive: true
     }),
@@ -50,6 +58,7 @@ export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCar
       adminOnly: true,
       sensitive: true
     }),
+    row("annualLeaveAdjustmentDays", "연차 HR 보정", formatDays(employee.annualLeaveAdjustmentDays), { adminOnly: true }),
     ...(employee.customAdminFields ?? defaultCustomAdminFields).map((field) =>
       row(field.id, field.label, field.value, {
         adminOnly: true,
@@ -59,10 +68,9 @@ export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCar
   ];
 }
 
-function workplaceAssignment(employee: Employee): string {
-  // The employee card intentionally does not resolve workplace IDs to names or location details.
+function workplaceAssignment(employee: Employee, workplaceName?: string): string {
   const workplaceId = (employee as Employee & { workplaceId?: string }).workplaceId;
-  return workplaceId ? "지정됨" : "미지정";
+  return workplaceId ? workplaceName ?? "지정됨" : "미지정";
 }
 
 function row(
@@ -113,4 +121,16 @@ function formatWon(value: number | undefined) {
 
 function formatPeople(value: number | undefined) {
   return value === undefined ? "-" : `${value}명`;
+}
+
+function formatDays(value: number | undefined) {
+  return value === undefined ? "-" : `${value.toLocaleString("ko-KR")}일`;
+}
+
+function employmentStatusLabel(value: Employee["employmentStatus"]) {
+  return { ACTIVE: "재직", LEAVE: "휴직", TERMINATED: "퇴사" }[value ?? "ACTIVE"];
+}
+
+function employmentTypeLabel(value: Employee["employmentType"]) {
+  return { REGULAR: "정규직", CONTRACT: "계약직", PART_TIME: "시간제" }[value ?? "REGULAR"];
 }

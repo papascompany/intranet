@@ -72,7 +72,7 @@ import { ApprovalQueue, type ApprovalQueueItem } from "./components/approvalQueu
 import { AuditLogExplorer } from "./components/auditLogExplorer";
 import { PayrollStatementManager } from "./components/payrollStatementManager";
 import { SystemPolicyEditor } from "./components/systemPolicyEditor";
-import type { AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveType, PayrollStatement, VerificationMethod } from "./domain/types";
+import type { AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod } from "./domain/types";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
 import { uploadPayrollPdfDirect } from "./api/payrollClientUpload";
@@ -201,6 +201,7 @@ function App() {
   const [employeeCardError, setEmployeeCardError] = useState<string | null>(null);
   const [isRevealingEmployeeSensitiveData, setIsRevealingEmployeeSensitiveData] = useState(false);
   const [isEmployeeSensitiveDataRevealed, setIsEmployeeSensitiveDataRevealed] = useState(false);
+  const [revealedEmployee, setRevealedEmployee] = useState<Employee | null>(null);
   const [isPayrollUploadOpen, setIsPayrollUploadOpen] = useState(false);
   const [isUploadingPayroll, setIsUploadingPayroll] = useState(false);
   const [payrollUploadError, setPayrollUploadError] = useState<string | null>(null);
@@ -230,6 +231,7 @@ function App() {
         setEmployeeSnapshot(nextSnapshot);
         setEmployeeAccountStates(nextAccountStates);
         setIsEmployeeSensitiveDataRevealed(false);
+        setRevealedEmployee(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : "데이터를 불러오지 못했습니다.";
         setLoadError(message);
@@ -267,7 +269,8 @@ function App() {
     };
   }, []);
 
-  const selectedEmployee = employeeSnapshot?.employee ?? employees.find((employee) => employee.id === selectedEmployeeId);
+  const baseSelectedEmployee = employeeSnapshot?.employee ?? employees.find((employee) => employee.id === selectedEmployeeId);
+  const selectedEmployee = revealedEmployee?.id === baseSelectedEmployee?.id ? revealedEmployee : baseSelectedEmployee;
   const isAdminAccount = isAdminSession(authSession ?? undefined);
   const effectiveMode: UserMode = userMode === "ADMIN" && isAdminAccount ? "ADMIN" : "EMPLOYEE";
   const allowedSections = effectiveMode === "ADMIN" ? adminSections : employeeSections;
@@ -283,8 +286,13 @@ function App() {
     [dashboard, employeeSnapshot, employees, activeSection]
   );
   const employeeCardRows = useMemo(
-    () => (selectedEmployee ? buildEmployeeCardViewModel(selectedEmployee, effectiveMode, { revealSensitive: isEmployeeSensitiveDataRevealed }) : []),
-    [effectiveMode, isEmployeeSensitiveDataRevealed, selectedEmployee]
+    () => {
+      const workplaceName = employeeSnapshot?.workplaceOptions.find((workplace) => workplace.id === selectedEmployee?.workplaceId)?.name;
+      return selectedEmployee
+        ? buildEmployeeCardViewModel(selectedEmployee, effectiveMode, { revealSensitive: isEmployeeSensitiveDataRevealed, workplaceName })
+        : [];
+    },
+    [effectiveMode, employeeSnapshot?.workplaceOptions, isEmployeeSensitiveDataRevealed, selectedEmployee]
   );
   const visibleNavItems = useMemo(
     () =>
@@ -553,7 +561,7 @@ function App() {
       setOvertimeDraft((current) => ({
         ...current,
         date: current.date || workDate,
-        startsAt: current.startsAt || "18:00"
+        startsAt: current.startsAt || dashboard?.settings?.workEndTime || "18:00"
       }));
     }
     setRequestDialog(nextDialog);
@@ -746,9 +754,33 @@ function App() {
     }
   }
 
+  async function openEmployeeCardEditor() {
+    if (!selectedEmployee) return;
+    setEmployeeCardError(null);
+
+    if (effectiveMode !== "ADMIN" || isEmployeeSensitiveDataRevealed) {
+      setIsEmployeeCardEditorOpen(true);
+      return;
+    }
+
+    setIsRevealingEmployeeSensitiveData(true);
+    try {
+      const result = await revealEmployeeSensitiveData({ employeeId: selectedEmployee.id });
+      setRevealedEmployee(result.employee);
+      setIsEmployeeSensitiveDataRevealed(true);
+      setIsEmployeeCardEditorOpen(true);
+      setNotice(`${selectedEmployee.name} 인사카드 열람 · 감사로그 ${result.auditLog.id}`);
+    } catch (error) {
+      setEmployeeCardError(error instanceof Error ? error.message : "인사카드를 열지 못했습니다.");
+    } finally {
+      setIsRevealingEmployeeSensitiveData(false);
+    }
+  }
+
   async function toggleEmployeeSensitiveData() {
     if (isEmployeeSensitiveDataRevealed) {
       setIsEmployeeSensitiveDataRevealed(false);
+      setRevealedEmployee(null);
       return;
     }
     if (!selectedEmployee) return;
@@ -757,6 +789,7 @@ function App() {
     setEmployeeCardError(null);
     try {
       const result = await revealEmployeeSensitiveData({ employeeId: selectedEmployee.id });
+      setRevealedEmployee(result.employee);
       setIsEmployeeSensitiveDataRevealed(true);
       setNotice(`${selectedEmployee.name} 민감정보 열람 · 감사로그 ${result.auditLog.id}`);
     } catch (error) {
@@ -926,10 +959,7 @@ function App() {
               onCreateCorrection: openCorrectionDialog,
               onDownloadPayroll: downloadPayroll,
               onDeletePayroll: deletePayroll,
-              onUpdateEmployeeCard: () => {
-                setEmployeeCardError(null);
-                setIsEmployeeCardEditorOpen(true);
-              },
+              onUpdateEmployeeCard: () => void openEmployeeCardEditor(),
               onToggleEmployeeSensitiveData: toggleEmployeeSensitiveData,
               onCreateEmployeeAccount: createManagedEmployeeAccount,
               onResetEmployeePassword: resetManagedEmployeePassword,
@@ -939,6 +969,7 @@ function App() {
               onSubmitOvertime: () => openRequestDialog("overtime"),
               onUploadPayroll: openPayrollUpload,
               canAdmin: effectiveMode === "ADMIN",
+              canManageRoles: authSession?.role === "SYSTEM_ADMIN",
               clockError,
               clockingType,
               employeeAccountStates,
@@ -948,6 +979,7 @@ function App() {
               onSelectEmployee: handleEmployeeChange,
               dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
               leaveRequests: dashboard?.leaveRequests ?? [],
+              leaveBalance: employeeSnapshot?.leaveBalance,
               overtimeRequests: dashboard?.overtimeRequests ?? [],
               payrollStatements: employeeSnapshot?.payrollStatements ?? [],
               systemPolicy: dashboard?.settings ?? defaultSystemPolicy,
@@ -982,7 +1014,7 @@ function App() {
             return { ...current, type, days: type === "HALF_DAY" ? "0.5" : current.days === "0.5" ? "1" : current.days, endsOn: type === "HALF_DAY" ? current.startsOn : current.endsOn };
           })}>
             <option value="ANNUAL">연차</option>
-            <option value="HALF_DAY">반차</option>
+            <option disabled={!dashboard?.settings?.partialLeaveAllowed} value="HALF_DAY">반차</option>
             <option value="SPECIAL">특별휴가</option>
             <option value="UNPAID">무급휴가</option>
           </select>
@@ -991,7 +1023,7 @@ function App() {
           <RequestField label="시작일"><input required type="date" value={leaveDraft.startsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, startsOn: event.target.value, endsOn: !current.endsOn || current.endsOn < event.target.value || current.type === "HALF_DAY" ? event.target.value : current.endsOn }))} /></RequestField>
           <RequestField label="종료일"><input required min={leaveDraft.startsOn || undefined} type="date" value={leaveDraft.endsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, endsOn: event.target.value }))} /></RequestField>
         </div>
-        <RequestField label="사용 일수"><input disabled={leaveDraft.type === "HALF_DAY"} required min="0.5" step="0.5" type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
+        <RequestField label="사용 일수"><input disabled={leaveDraft.type === "HALF_DAY"} required min={dashboard?.settings?.annualLeaveUnit ?? 0.5} step={dashboard?.settings?.annualLeaveUnit ?? 0.5} type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
         <div aria-live="polite" className="request-summary">
           <span>신청 요약</span>
           <strong>{leaveTypeLabel(leaveDraft.type)} · {leaveDraft.startsOn || "시작일"}{leaveDraft.endsOn && leaveDraft.endsOn !== leaveDraft.startsOn ? ` ~ ${leaveDraft.endsOn}` : ""} · {leaveDraft.days || "0"}일</strong>
@@ -1002,6 +1034,7 @@ function App() {
         <EmployeeCardEditor
           busy={isSavingEmployeeCard}
           canAdmin={effectiveMode === "ADMIN"}
+          canManageRoles={authSession?.role === "SYSTEM_ADMIN" && authSession.employeeId !== selectedEmployee.id}
           employee={selectedEmployee}
           error={employeeCardError}
           onClose={() => setIsEmployeeCardEditorOpen(false)}
@@ -1121,6 +1154,7 @@ function getBrowserCoordinate(): Promise<{ accuracyMeters?: number; latitude: nu
 function renderSection(props: {
   activeSection: ErpActiveSection;
   canAdmin: boolean;
+  canManageRoles: boolean;
   clockError: string | null;
   clockingType: ClockType | null;
   dailyWorkTasks: DailyWorkTask[];
@@ -1154,6 +1188,7 @@ function renderSection(props: {
   isRevealingEmployeeSensitiveData: boolean;
   isEmployeeSensitiveDataRevealed: boolean;
   leaveRequests: import("./domain/types").LeaveRequest[];
+  leaveBalance?: LeaveBalance;
   overtimeRequests: import("./domain/types").OvertimeRequest[];
   payrollStatements: PayrollStatement[];
   systemPolicy: SystemPolicy;
@@ -1239,6 +1274,7 @@ function SelfServiceSection(props: {
   onUpdateDailyTask: (task: DailyWorkTask) => void;
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
+  systemPolicy: SystemPolicy;
 }) {
   const employee = props.erpViewModel.employeeSummary;
   const attendance = props.employeeViewModel;
@@ -1258,7 +1294,7 @@ function SelfServiceSection(props: {
         <div className="my-day__intro">
           <p className="eyebrow">{formatToday(today)} · {employee.department}</p>
           <h2>{employee.name}님, 오늘도 반갑습니다.</h2>
-          <p>{nextClockAction?.time ?? "오늘 출퇴근 기록이 모두 완료되었습니다."}</p>
+          <p>{nextClockAction?.time ?? "오늘 출퇴근 기록이 모두 완료되었습니다."} · 기본 근무 {props.systemPolicy.workStartTime}~{props.systemPolicy.workEndTime}</p>
         </div>
         <div className="attendance-check-area">
           {nextClockAction ? (
@@ -1355,6 +1391,7 @@ function EmployeeCardSection(props: {
   employeeCardRows: EmployeeCardRow[];
   employees: Employee[];
   erpViewModel: ErpViewModel;
+  leaveBalance?: LeaveBalance;
   isLoading: boolean;
   onSelectEmployee: (employeeId: string) => void | Promise<void>;
   onUpdateEmployeeCard: () => void;
@@ -1390,6 +1427,15 @@ function EmployeeCardSection(props: {
           }
         >
           <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
+        </DetailPanel>
+        <DetailPanel title="연차 현황" description="선택 직원의 발생·보정·사용 가능 일수와 최근 신청을 확인합니다.">
+          <div className="employee-leave-summary">
+            <div><span>법정 발생</span><strong>{formatLeaveDays(props.leaveBalance?.statutoryDays)}</strong></div>
+            <div><span>선사용 부여</span><strong>{formatLeaveDays(props.leaveBalance?.advanceGrantedDays)}</strong></div>
+            <div><span>HR 보정</span><strong>{formatLeaveDays(props.employees.find((employee) => employee.id === props.selectedEmployeeId)?.annualLeaveAdjustmentDays ?? 0)}</strong></div>
+            <div className="is-primary"><span>사용 가능</span><strong>{formatLeaveDays(props.leaveBalance?.availableDays)}</strong></div>
+          </div>
+          <DataTable columns={rowColumns} rows={props.erpViewModel.leaveRows.filter((row) => row.label === props.erpViewModel.employeeSummary.name).slice(0, 8)} emptyState={<EmptyState title="휴가 신청 이력 없음" />} />
         </DetailPanel>
       </div>
     </div>
@@ -1467,6 +1513,7 @@ function ApprovalsSection(props: {
 
 function LeaveSection(props: {
   canAdmin: boolean;
+  employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onSubmitLeave: () => void;
@@ -1476,9 +1523,17 @@ function LeaveSection(props: {
   const firstPendingId = leaveRows.find((row) => row.status === "PENDING")?.id;
 
   return (
-    <DetailPanel
+    <div className="admin-operations-stack">
+      {!props.canAdmin ? (
+        <div className="employee-balance-strip">
+          <div className="is-primary"><span>현재 잔여</span><strong>{props.employeeViewModel?.leaveAvailableLabel ?? "연차 확인 중"}</strong></div>
+          <div><span>선사용</span><strong>{props.employeeViewModel?.advanceLeaveLabel ?? "-"}</strong></div>
+          <div><span>승인 대기</span><strong>{props.employeeViewModel?.pendingLeaveSummary ?? "-"}</strong></div>
+        </div>
+      ) : null}
+      <DetailPanel
       title="휴가 장부"
-      description="휴직/장기결근 예외는 자동 중단 없이 HR 보정으로 처리합니다."
+      description={props.canAdmin ? "전체 직원의 신청 현황을 확인하고 승인 메뉴에서 처리합니다." : "내 휴가 신청과 처리 상태를 확인합니다."}
       actions={
         <InlineActions>
           <button disabled={props.isLoading} onClick={props.onSubmitLeave}>
@@ -1498,12 +1553,14 @@ function LeaveSection(props: {
       }
     >
       <DataTable columns={rowColumns} rows={leaveRows} emptyState={<EmptyState title="휴가 신청 없음" />} />
-    </DetailPanel>
+      </DetailPanel>
+    </div>
   );
 }
 
 function OvertimeSection(props: {
   canAdmin: boolean;
+  employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onSubmitOvertime: () => void;
@@ -1513,7 +1570,15 @@ function OvertimeSection(props: {
   const firstPendingId = overtimeRows.find((row) => row.status === "PENDING")?.id;
 
   return (
-    <DetailPanel
+    <div className="admin-operations-stack">
+      {!props.canAdmin ? (
+        <div className="employee-balance-strip">
+          <div className="is-primary"><span>신청 현황</span><strong>{props.employeeViewModel?.pendingOvertimeSummary ?? "야근 확인 중"}</strong></div>
+          <div><span>상계 결과</span><strong>{props.employeeViewModel?.offsetLabel ?? "-"}</strong></div>
+          <div><span>수당 대상</span><strong>{props.employeeViewModel?.overtimeSummary ?? "-"}</strong></div>
+        </div>
+      ) : null}
+      <DetailPanel
       title="야근·상계"
       description="평달 야근은 조기퇴근 누적분과 상계하고, 관리자 인정분만 수당 집계 대상으로 표시합니다."
       actions={
@@ -1535,7 +1600,8 @@ function OvertimeSection(props: {
       }
     >
       <DataTable columns={rowColumns} rows={overtimeRows} emptyState={<EmptyState title="야근 신청 없음" />} />
-    </DetailPanel>
+      </DetailPanel>
+    </div>
   );
 }
 
@@ -1571,6 +1637,7 @@ function PayrollSection(props: {
 
 function SettingsSection(props: {
   canAdmin: boolean;
+  canManageRoles: boolean;
   employeeAccountStates: EmployeeAccountState[];
   employees: Employee[];
   isLoading: boolean;
@@ -1586,6 +1653,7 @@ function SettingsSection(props: {
       <EmployeeAccountManager
         accountStates={props.employeeAccountStates}
         busy={props.isLoading}
+        canManageAdminRoles={props.canManageRoles}
         employees={props.employees}
         onCreate={props.onCreateEmployeeAccount}
         onResetPassword={props.onResetEmployeePassword}
@@ -1645,6 +1713,10 @@ function sectionTitle(section: ErpActiveSection) {
 
 function formatToday(value: string) {
   return new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Seoul" }).format(new Date(value));
+}
+
+function formatLeaveDays(value: number | undefined) {
+  return value === undefined ? "-" : `${value.toLocaleString("ko-KR")}일`;
 }
 
 function leaveTypeLabel(type: LeaveType) {

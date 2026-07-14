@@ -189,6 +189,16 @@ export type SoftDeletePayrollStatementInput = AuthenticatedInput & {
 
 export type SystemPolicy = {
   gpsAllowedRadiusMeters: number;
+  timezone: "Asia/Seoul";
+  workStartTime: string;
+  workEndTime: string;
+  breakStartTime: string;
+  breakEndTime: string;
+  workDays: Array<"MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN">;
+  annualLeaveAutoAccrual: boolean;
+  annualLeaveUnit: 0.5 | 1;
+  partialLeaveAllowed: boolean;
+  annualLeaveOveruseAllowed: boolean;
   gpsFailureFallback: "QR_OR_MANUAL_EQUAL";
   payrollEmployeeAccess: "VIEW_ONLY";
   payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE";
@@ -198,6 +208,16 @@ export type SystemPolicy = {
 
 export const defaultSystemPolicy: SystemPolicy = {
   gpsAllowedRadiusMeters: 300,
+  timezone: "Asia/Seoul",
+  workStartTime: "08:00",
+  workEndTime: "17:00",
+  breakStartTime: "12:00",
+  breakEndTime: "13:00",
+  workDays: ["MON", "TUE", "WED", "THU", "FRI"],
+  annualLeaveAutoAccrual: true,
+  annualLeaveUnit: 0.5,
+  partialLeaveAllowed: true,
+  annualLeaveOveruseAllowed: false,
   gpsFailureFallback: "QR_OR_MANUAL_EQUAL",
   payrollEmployeeAccess: "VIEW_ONLY",
   payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE",
