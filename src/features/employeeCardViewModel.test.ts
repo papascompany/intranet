@@ -86,6 +86,15 @@ describe("buildEmployeeCardViewModel", () => {
     expect(customRows.every((row) => row.adminOnly)).toBe(true);
   });
 
+  it("restores five safe defaults when persisted custom fields are incomplete", () => {
+    const rows = buildEmployeeCardViewModel({ ...employee, customAdminFields: [] as never }, "ADMIN");
+    const customRows = rows.filter((row) => row.id.startsWith("custom-admin-field-"));
+
+    expect(customRows).toHaveLength(5);
+    expect(customRows[0]).toMatchObject({ label: "관리자 항목 1", value: "-" });
+    expect(customRows[4]).toMatchObject({ label: "관리자 항목 5", value: "-" });
+  });
+
   it("reveals resident registration and payroll account only after an administrator records the access", () => {
     const masked = buildEmployeeCardViewModel(employee, "ADMIN");
     const revealed = buildEmployeeCardViewModel(employee, "ADMIN", { revealSensitive: true });

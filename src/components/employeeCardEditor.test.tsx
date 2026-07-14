@@ -152,6 +152,16 @@ describe("EmployeeCardEditor", () => {
     expect(screen.getByRole("button", { name: "변경 저장" })).toBeEnabled();
   });
 
+  it("fills missing administrator custom fields without crashing", () => {
+    const incompleteEmployee = { ...employee, customAdminFields: [] as never };
+    render(<EmployeeCardEditor canAdmin employee={incompleteEmployee} onClose={vi.fn()} onSubmit={vi.fn()} open workplaces={workplaces} />);
+
+    expect(screen.getByLabelText("항목명 1")).toHaveValue("관리자 항목 1");
+    expect(screen.getByLabelText("항목명 5")).toHaveValue("관리자 항목 5");
+    fireEvent.change(screen.getByLabelText("직위"), { target: { value: "과장" } });
+    expect(screen.getByRole("button", { name: "변경 저장" })).toBeEnabled();
+  });
+
   it("submits a null workplace when an administrator clears an existing assignment", () => {
     const onSubmit = vi.fn();
     const assignedEmployee = { ...employee, workplaceId: "samsong" };

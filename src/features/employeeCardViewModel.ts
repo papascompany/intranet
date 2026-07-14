@@ -18,6 +18,15 @@ const defaultCustomAdminFields: EmployeeCustomAdminFields = [
   { id: "custom-admin-field-5", label: "관리자 항목 5", value: "-" }
 ];
 
+function normalizedCustomAdminFields(fields: Employee["customAdminFields"]): EmployeeCustomAdminFields {
+  const existingById = new Map((fields ?? []).filter(Boolean).map((field) => [field.id, field]));
+  return defaultCustomAdminFields.map((fallback) => ({
+    ...fallback,
+    ...existingById.get(fallback.id),
+    id: fallback.id
+  })) as EmployeeCustomAdminFields;
+}
+
 export function buildEmployeeCardViewModel(
   employee: Employee,
   mode: EmployeeCardMode,
@@ -59,7 +68,7 @@ export function buildEmployeeCardViewModel(
       sensitive: true
     }),
     row("annualLeaveAdjustmentDays", "연차 HR 보정", formatDays(employee.annualLeaveAdjustmentDays), { adminOnly: true }),
-    ...(employee.customAdminFields ?? defaultCustomAdminFields).map((field) =>
+    ...normalizedCustomAdminFields(employee.customAdminFields).map((field) =>
       row(field.id, field.label, field.value, {
         adminOnly: true,
         sensitive: field.sensitive

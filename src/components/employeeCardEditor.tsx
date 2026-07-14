@@ -67,6 +67,15 @@ function defaultCustomFields(): EmployeeCustomAdminFields {
   })) as EmployeeCustomAdminFields;
 }
 
+function normalizedCustomFields(fields: Employee["customAdminFields"]): EmployeeCustomAdminFields {
+  const existingById = new Map((fields ?? []).filter(Boolean).map((field) => [field.id, field]));
+  return defaultCustomFields().map((fallback) => ({
+    ...fallback,
+    ...existingById.get(fallback.id),
+    id: fallback.id
+  })) as EmployeeCustomAdminFields;
+}
+
 function basicDraftFrom(employee: Employee): BasicDraft {
   return {
     birthday: dateInputValue(employee.birthday),
@@ -95,7 +104,7 @@ function adminDraftFrom(employee: Employee): AdminDraft {
     severancePay: employee.severancePay === undefined ? "" : String(employee.severancePay),
     incomeDeductionDependents: employee.incomeDeductionDependents === undefined ? "" : String(employee.incomeDeductionDependents),
     annualLeaveAdjustmentDays: employee.annualLeaveAdjustmentDays === undefined ? "0" : String(employee.annualLeaveAdjustmentDays),
-    customAdminFields: (employee.customAdminFields ?? defaultCustomFields()).map((field) => ({ ...field })) as EmployeeCustomAdminFields
+    customAdminFields: normalizedCustomFields(employee.customAdminFields)
   };
 }
 
@@ -123,7 +132,7 @@ function adminFieldsChanged(employee: Employee, draft: AdminDraft) {
     || initial.severancePay !== draft.severancePay
     || initial.incomeDeductionDependents !== draft.incomeDeductionDependents
     || initial.annualLeaveAdjustmentDays !== draft.annualLeaveAdjustmentDays
-    || initial.customAdminFields.some((field, index) => field.label !== draft.customAdminFields[index].label || field.value !== draft.customAdminFields[index].value);
+    || initial.customAdminFields.some((field, index) => field.label !== draft.customAdminFields[index]?.label || field.value !== draft.customAdminFields[index]?.value);
 }
 
 function basicFieldsChanged(employee: Employee, draft: BasicDraft) {
@@ -143,7 +152,7 @@ function sensitiveAdminFieldsChanged(employee: Employee, draft: AdminDraft) {
     || initial.severancePay !== draft.severancePay
     || initial.incomeDeductionDependents !== draft.incomeDeductionDependents
     || initial.annualLeaveAdjustmentDays !== draft.annualLeaveAdjustmentDays
-    || initial.customAdminFields.some((field, index) => field.label !== draft.customAdminFields[index].label || field.value !== draft.customAdminFields[index].value);
+    || initial.customAdminFields.some((field, index) => field.label !== draft.customAdminFields[index]?.label || field.value !== draft.customAdminFields[index]?.value);
 }
 
 function adminUpdateFrom(draft: AdminDraft): EmployeeCardUpdateInput {
