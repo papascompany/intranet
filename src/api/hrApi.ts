@@ -348,6 +348,8 @@ export class HrApi {
       now,
       gpsError: input.gpsError
     });
+    // Attendance records reference the verification row in Postgres.
+    await this.db.addVerificationAttempt(verification);
     const existing = await this.db.findAttendanceByEmployeeDate(input.employeeId, now.slice(0, 10));
     const attendance = await this.db.upsertAttendanceRecord(
       buildAttendanceRecord({
@@ -361,7 +363,6 @@ export class HrApi {
     );
     const earlyLeaveEntry = await this.syncEarlyLeaveLedger(attendance);
 
-    await this.db.addVerificationAttempt(verification);
     const actorId = this.resolveActorId(input, input.employeeId);
     const auditLog = await this.addAuditLog({
       actorId,

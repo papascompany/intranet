@@ -73,7 +73,7 @@ import {
   type ErpViewModelRow
 } from "./features/erpViewModel";
 
-const today = "2026-07-12T08:02:00+09:00";
+const today = koreaTimestamp();
 
 const navIcons: Record<ErpActiveSection, React.ReactNode> = {
   "self-service": <Fingerprint size={16} />,
@@ -347,24 +347,29 @@ function App() {
   async function clock(type: ClockType, method: VerificationMethod, gpsError = false) {
     if (!selectedEmployee) return;
 
-    const workDate = today.slice(0, 10);
-    const now =
-      type === "CLOCK_IN"
-        ? `${workDate}T08:02:00+09:00`
-        : method === "GPS"
-          ? `${workDate}T16:42:00+09:00`
-          : `${workDate}T16:48:00+09:00`;
+    const now = koreaTimestamp();
+    let coordinate: { accuracyMeters?: number; latitude: number; longitude: number } | undefined;
+    let verificationFailed = gpsError;
+
+    if (method === "GPS" && !gpsError) {
+      try {
+        coordinate = await getBrowserCoordinate();
+      } catch {
+        verificationFailed = true;
+      }
+    }
     const result = await clockAttendance({
       employeeId: selectedEmployee.id,
       type,
       method,
       session: authSession ?? undefined,
       now,
-      gpsError,
-      coordinate: gpsError ? undefined : { latitude: 37.5667, longitude: 126.9782, accuracyMeters: 18 }
+      gpsError: verificationFailed,
+      coordinate
     });
 
-    setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}`);
+    const fallbackNotice = method === "GPS" && verificationFailed ? " · 위치 확인 실패로 대체 인증 처리" : "";
+    setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}${fallbackNotice}`);
     await refresh(selectedEmployee.id);
   }
 
@@ -975,6 +980,41 @@ async function fileToBase64(file: File) {
     binary += String.fromCharCode(bytes[index]);
   }
   return btoa(binary);
+}
+
+function koreaTimestamp(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date).reduce<Record<string, string>>((values, part) => {
+    values[part.type] = part.value;
+    return values;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}+09:00`;
+}
+
+function getBrowserCoordinate(): Promise<{ accuracyMeters?: number; latitude: number; longitude: number }> {
+  if (!("geolocation" in navigator)) {
+    return Promise.reject(new Error("Geolocation is not supported."));
+  }
+
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracyMeters: position.coords.accuracy
+      }),
+      reject,
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 10_000 }
+    );
+  });
 }
 
 function renderSection(props: {

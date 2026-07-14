@@ -88,6 +88,30 @@ describe("hr api", () => {
     await expect(hrApi.getAuditLogs({ action: "ATTENDANCE_CLOCKED_OUT" })).resolves.toHaveLength(1);
   });
 
+  it("persists verification before the attendance record required by Postgres foreign keys", async () => {
+    const db = new InMemoryDatabase();
+    let verificationPersisted = false;
+    const addVerificationAttempt = db.addVerificationAttempt.bind(db);
+    const upsertAttendanceRecord = db.upsertAttendanceRecord.bind(db);
+    db.addVerificationAttempt = (attempt) => {
+      verificationPersisted = true;
+      return addVerificationAttempt(attempt);
+    };
+    db.upsertAttendanceRecord = (record) => {
+      if (!verificationPersisted) throw new Error("verification must be stored first");
+      return upsertAttendanceRecord(record);
+    };
+    const hrApi = createHrApi(db, () => fixedNow);
+
+    await expect(hrApi.clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      method: "GPS",
+      now: "2026-07-10T08:00:00+09:00",
+      coordinate: { latitude: 37.5666, longitude: 126.9781 }
+    })).resolves.toMatchObject({ verification: { status: "GPS_PASSED" } });
+  });
+
   it("allows QR attendance when GPS fails", async () => {
     const hrApi = api();
 
