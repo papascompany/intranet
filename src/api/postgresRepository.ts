@@ -455,7 +455,9 @@ function leaveRequestFromRow(row: LeaveRequestRow): LeaveRequest {
     endsOn: dateValue(row.ends_on),
     days: Number(row.days),
     reason: stringValue(row.reason),
-    status: row.status
+    status: row.status,
+    decidedBy: optionalString(row.decided_by),
+    decidedAt: optionalString(row.decided_at)
   };
 }
 
@@ -468,7 +470,9 @@ function leaveRequestToRow(request: LeaveRequest): DbRow {
     ends_on: request.endsOn,
     days: request.days,
     reason: request.reason,
-    status: request.status
+    status: request.status,
+    decided_by: request.decidedBy,
+    decided_at: request.decidedAt
   };
 }
 
@@ -504,7 +508,9 @@ function overtimeFromRow(row: OvertimeRow): OvertimeRequest {
     minutes: Number(row.minutes),
     reason: stringValue(row.reason),
     status: row.status,
-    payApproved: Boolean(row.pay_approved)
+    payApproved: Boolean(row.pay_approved),
+    decidedBy: optionalString(row.decided_by),
+    decidedAt: optionalString(row.decided_at)
   };
 }
 
@@ -518,7 +524,9 @@ function overtimeToRow(request: OvertimeRequest): DbRow {
     minutes: request.minutes,
     reason: request.reason,
     status: request.status,
-    pay_approved: request.payApproved
+    pay_approved: request.payApproved,
+    decided_by: request.decidedBy,
+    decided_at: request.decidedAt
   };
 }
 

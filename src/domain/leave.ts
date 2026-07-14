@@ -40,7 +40,11 @@ export function getLeaveBalance(params: {
   policy?: { annualLeaveAutoAccrual: boolean };
 }): LeaveBalance {
   const usedDays = params.approvedRequests
-    .filter((request) => request.employeeId === params.employee.id && request.status === "APPROVED")
+    .filter((request) =>
+      request.employeeId === params.employee.id
+      && request.status === "APPROVED"
+      && (request.type === "ANNUAL" || request.type === "HALF_DAY")
+    )
     .reduce((sum, request) => sum + request.days, 0);
 
   const autoAccrual = params.policy?.annualLeaveAutoAccrual ?? true;

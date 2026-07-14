@@ -13,6 +13,7 @@ export type HrServerEnv = {
   HR_REPOSITORY_MODE?: "memory" | "postgres";
   BLOB_READ_WRITE_TOKEN?: string;
   EMPLOYEE_DATA_ENCRYPTION_KEY?: string;
+  NODE_ENV?: string;
 };
 
 export type HrRepositoryFactoryOptions = {
@@ -69,6 +70,9 @@ export function createHrRepositoryFromEnv(
   }
 
   if (env.DATABASE_URL) {
+    if (env.NODE_ENV === "production" && !env.EMPLOYEE_DATA_ENCRYPTION_KEY) {
+      throw new Error("EMPLOYEE_DATA_ENCRYPTION_KEY is required when persistent HR data is enabled.");
+    }
     const sensitiveDataCrypto = env.EMPLOYEE_DATA_ENCRYPTION_KEY
       ? createSensitiveDataCrypto(env.EMPLOYEE_DATA_ENCRYPTION_KEY)
       : undefined;

@@ -58,7 +58,8 @@ const requestStatusLabels = {
   PENDING: "대기",
   APPROVED: "승인",
   REJECTED: "반려",
-  DRAFT: "초안"
+  DRAFT: "초안",
+  CANCELLED: "취소"
 } satisfies Record<LeaveRequest["status"], string>;
 
 export function buildAdminViewModel(

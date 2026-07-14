@@ -92,7 +92,8 @@ const requestStatusLabels = {
   DRAFT: "초안",
   PENDING: "대기",
   APPROVED: "승인",
-  REJECTED: "반려"
+  REJECTED: "반려",
+  CANCELLED: "취소"
 } satisfies Record<RequestStatus, string>;
 
 const correctionLabels = {

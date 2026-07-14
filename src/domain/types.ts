@@ -107,7 +107,7 @@ export type AttendanceCorrection = {
 };
 
 export type LeaveType = "ANNUAL" | "HALF_DAY" | "SPECIAL" | "UNPAID";
-export type RequestStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED";
+export type RequestStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
 
 export type LeaveRequest = {
   id: string;
@@ -118,6 +118,8 @@ export type LeaveRequest = {
   days: number;
   reason: string;
   status: RequestStatus;
+  decidedBy?: string;
+  decidedAt?: string;
 };
 
 export type LeaveBalance = {
@@ -154,6 +156,8 @@ export type OvertimeRequest = {
   reason: string;
   status: RequestStatus;
   payApproved: boolean;
+  decidedBy?: string;
+  decidedAt?: string;
 };
 
 export type OvertimeOffsetResult = {

@@ -203,6 +203,18 @@ describe("hr api", () => {
       () => fixedNow
     );
 
+    await hrApi.clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      method: "GPS",
+      now: "2026-07-09T08:00:00+09:00",
+      coordinate: {
+        latitude: 37.5666,
+        longitude: 126.9781,
+        accuracyMeters: 14
+      }
+    });
+
     const result = await hrApi.clockAttendance({
       employeeId: "emp-ops-1",
       type: "CLOCK_OUT",
@@ -221,6 +233,33 @@ describe("hr api", () => {
     expect(result.earlyLeaveLedger?.minutes).toBe(30);
     expect(result.auditLog.action).toBe("ATTENDANCE_CLOCKED_OUT");
     await expect(hrApi.getAuditLogs({ action: "ATTENDANCE_CLOCKED_OUT" })).resolves.toHaveLength(1);
+  });
+
+  it("enforces the attendance state machine for out-of-order and duplicate clicks", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_OUT",
+      method: "MANUAL_CLICK",
+      now: "2026-07-10T17:00:00+09:00",
+      gpsError: true
+    })).rejects.toThrow("출근 기록 후 퇴근 처리할 수 있습니다");
+
+    await hrApi.clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      method: "MANUAL_CLICK",
+      now: "2026-07-10T08:00:00+09:00",
+      gpsError: true
+    });
+    await expect(hrApi.clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      method: "MANUAL_CLICK",
+      now: "2026-07-10T08:01:00+09:00",
+      gpsError: true
+    })).rejects.toThrow("이미 출근 처리된 날짜입니다");
   });
 
   it("persists verification before the attendance record required by Postgres foreign keys", async () => {
@@ -284,6 +323,31 @@ describe("hr api", () => {
     await expect(hrApi.getAuditLogs({ targetType: "LeaveRequest", targetId: result.request.id })).resolves.toHaveLength(
       1
     );
+  });
+
+  it("allows employees to cancel only their own pending leave request", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitLeaveRequest({
+      employeeId: employeeSession.employeeId,
+      type: "ANNUAL",
+      startsOn: "2026-07-25",
+      endsOn: "2026-07-25",
+      days: 1,
+      reason: "일정 변경",
+      session: employeeSession
+    });
+
+    const cancelled = await hrApi.cancelRequest({
+      targetType: "LeaveRequest",
+      requestId: submitted.request.id,
+      session: employeeSession
+    });
+    expect(cancelled.request).toMatchObject({ status: "CANCELLED", decidedBy: employeeSession.employeeId });
+    await expect(hrApi.cancelRequest({
+      targetType: "LeaveRequest",
+      requestId: submitted.request.id,
+      session: employeeSession
+    })).rejects.toThrow("Only pending requests can be decided");
   });
 
   it("enforces annual leave policy units and applies HR balance corrections", async () => {
@@ -393,6 +457,22 @@ describe("hr api", () => {
     ).resolves.toHaveLength(1);
   });
 
+  it("forces authenticated overtime submissions into the pending queue", async () => {
+    const hrApi = api();
+    const result = await hrApi.submitOvertimeRequest({
+      employeeId: employeeSession.employeeId,
+      date: "2026-07-14",
+      startsAt: "2026-07-14T17:30:00+09:00",
+      endsAt: "2026-07-14T19:00:00+09:00",
+      minutes: 90,
+      reason: "직접 승인 우회 시도",
+      status: "APPROVED",
+      session: employeeSession
+    });
+
+    expect(result.request.status).toBe("PENDING");
+  });
+
   it("updates overtime approval status and writes audit history", async () => {
     const hrApi = api();
     const submitted = await hrApi.submitOvertimeRequest({
@@ -423,7 +503,7 @@ describe("hr api", () => {
   it("allows approver sessions to change request status", async () => {
     const hrApi = api();
     const submitted = await hrApi.submitLeaveRequest({
-      employeeId: "emp-ops-1",
+      employeeId: "emp-prod-1",
       type: "ANNUAL",
       startsOn: "2026-07-22",
       endsOn: "2026-07-22",
@@ -562,6 +642,17 @@ describe("hr api", () => {
     await expect(hrApi.getEmployeeDirectory({ session: employeeSession })).resolves.toEqual([
       expect.objectContaining({ id: "emp-ops-1" })
     ]);
+  });
+
+  it("limits approver directory and dashboard visibility to assigned employees", async () => {
+    const hrApi = api();
+    const directory = await hrApi.getEmployeeDirectory({ session: approverSession });
+    const ids = directory.map((employee) => employee.id);
+    expect(ids).toEqual(expect.arrayContaining(["emp-ops-2", "emp-prod-1"]));
+    expect(ids).not.toContain("emp-ops-1");
+
+    const dashboard = await hrApi.getDashboard({ asOf: fixedNow, session: approverSession });
+    expect(dashboard.leaveRequests.every((request) => request.employeeId === "emp-prod-1" || request.employeeId === "emp-ops-2")).toBe(true);
   });
 
   it("lists only the employee's daily work tasks and records self completion", async () => {

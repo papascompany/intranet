@@ -25,11 +25,13 @@ import {
 } from "lucide-react";
 import {
   clockAttendance,
+  cancelRequest,
   createAttendanceCorrection,
   createEmployeeAccount,
   createDailyWorkTaskPlan,
   getAppBootstrap,
   downloadPayrollStatement,
+  getEmployeeSnapshot,
   resetEmployeeAccountPassword,
   revealEmployeeSensitiveData,
   setOvertimePayApproval,
@@ -125,6 +127,7 @@ type ClockFeedback = {
 };
 
 const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll"];
+const approverSections: ErpActiveSection[] = [...employeeSections, "approvals"];
 const adminSections: ErpActiveSection[] = ["employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
 const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
   "self-service": "나의 하루",
@@ -287,8 +290,9 @@ function App() {
     && Number.isFinite(requestedLeaveDays)
     && requestedLeaveDays > requestableLeaveDays;
   const isAdminAccount = isAdminSession(authSession ?? undefined);
+  const isApproverAccount = authSession?.role === "APPROVER";
   const effectiveMode: UserMode = userMode === "ADMIN" && isAdminAccount ? "ADMIN" : "EMPLOYEE";
-  const allowedSections = effectiveMode === "ADMIN" ? adminSections : employeeSections;
+  const allowedSections = effectiveMode === "ADMIN" ? adminSections : isApproverAccount ? approverSections : employeeSections;
   const employeeViewModel = useMemo(
     () => (employeeSnapshot ? buildEmployeeViewModel(toEmployeeViewModelSnapshot(employeeSnapshot)) : null),
     [employeeSnapshot]
@@ -332,7 +336,7 @@ function App() {
   }, [isAdminAccount, selectedEmployee, userMode]);
 
   function handleEmployeeChange(employeeId: string) {
-    if (authSession && !isAdminSession(authSession) && employeeId !== authSession.employeeId) {
+    if (authSession && !isAdminSession(authSession) && authSession.role !== "APPROVER" && employeeId !== authSession.employeeId) {
       setNotice("직원 계정은 본인 데이터만 조회할 수 있습니다.");
       return;
     }
@@ -350,6 +354,13 @@ function App() {
     setRevealedEmployee(null);
     setClockFeedback(null);
     setLoadError(null);
+    void getEmployeeSnapshot(employeeId, dashboard.asOf, authSession ?? undefined)
+      .then((snapshot) => {
+        setEmployeeSnapshot((current) => current?.employee.id === employeeId ? snapshot : current);
+      })
+      .catch(() => {
+        // The instant summary remains usable when the background detail refresh is unavailable.
+      });
     if (rememberLogin) {
       localStorage.setItem("intranet:employee-id", employeeId);
     }
@@ -678,6 +689,23 @@ function App() {
     await refresh(selectedEmployeeId);
   }
 
+  async function cancelEmployeeRequest(targetType: "LeaveRequest" | "OvertimeRequest", requestId?: string) {
+    if (!requestId || !selectedEmployee) {
+      setNotice("취소할 신청이 없습니다.");
+      return;
+    }
+
+    const result = await cancelRequest({
+      targetType,
+      requestId,
+      actorId: authActorId(authSession, selectedEmployee.id),
+      session: authSession ?? undefined
+    });
+    setNotice(`${targetType === "LeaveRequest" ? "휴가" : "야근"} 신청을 취소했습니다.`);
+    await refresh(selectedEmployee.id);
+    return result;
+  }
+
   async function createCorrection() {
     if (!selectedEmployee || !employeeSnapshot?.todayAttendance) {
       setCorrectionError("보정할 오늘 출퇴근 기록이 없습니다.");
@@ -747,7 +775,6 @@ function App() {
       });
       setNotice(`${selectedEmployee.name} 급여명세서 업로드 완료 · 명세서 등록 중`);
       setIsPayrollUploadOpen(false);
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
       await refresh(selectedEmployee.id);
     } catch (error) {
       setPayrollUploadError(error instanceof Error ? error.message : "급여명세서를 업로드하지 못했습니다.");
@@ -1015,6 +1042,8 @@ function App() {
               isLoading,
               onApproveLeave: approveLeave,
               onApproveOvertime: approveOvertime,
+              onCancelLeave: (requestId) => void cancelEmployeeRequest("LeaveRequest", requestId),
+              onCancelOvertime: (requestId) => void cancelEmployeeRequest("OvertimeRequest", requestId),
               onCreateDailyTaskPlan: createDailyTaskPlan,
               onClock: clock,
               onUpdateDailyTask: updateDailyTask,
@@ -1309,6 +1338,8 @@ function renderSection(props: {
   isLoading: boolean;
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
+  onCancelLeave: (requestId?: string) => void | Promise<void>;
+  onCancelOvertime: (requestId?: string) => void | Promise<void>;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
   onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
   onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
@@ -1622,6 +1653,7 @@ function AttendanceSection(props: { canAdmin: boolean; erpViewModel: ErpViewMode
 }
 
 function ApprovalsSection(props: {
+  canAdmin: boolean;
   dailyWorkTasks: DailyWorkTask[];
   employees: Employee[];
   erpViewModel: ErpViewModel;
@@ -1649,14 +1681,16 @@ function ApprovalsSection(props: {
           ? props.onApproveLeave(item.request.id, "REJECTED", reason)
           : props.onApproveOvertime(item.request.id, "REJECTED", reason)}
       />
-      <DailyWorkPlanManager
-        busy={props.isSavingTaskPlan}
-        employees={props.employees}
-        error={props.taskPlanError}
-        onCreate={props.onCreateDailyTaskPlan}
-        onUpdate={props.onUpdateDailyTaskPlan}
-        tasks={props.dailyWorkTasks}
-      />
+      {props.canAdmin ? (
+        <DailyWorkPlanManager
+          busy={props.isSavingTaskPlan}
+          employees={props.employees}
+          error={props.taskPlanError}
+          onCreate={props.onCreateDailyTaskPlan}
+          onUpdate={props.onUpdateDailyTaskPlan}
+          tasks={props.dailyWorkTasks}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1667,6 +1701,7 @@ function LeaveSection(props: {
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onSubmitLeave: () => void;
+  onCancelLeave: (requestId?: string) => void | Promise<void>;
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
 }) {
   const leaveRows = filterRowsForMode(props.erpViewModel.leaveRows, props.erpViewModel.employeeSummary.name, props.canAdmin);
@@ -1683,21 +1718,16 @@ function LeaveSection(props: {
       ) : null}
       <DetailPanel
       title="휴가 장부"
-      description={props.canAdmin ? "전체 직원의 신청 현황을 확인하고 승인 메뉴에서 처리합니다." : "내 휴가 신청과 처리 상태를 확인합니다."}
+      description={props.canAdmin ? "전체 직원의 신청 현황을 확인합니다. 처리는 승인함에서 일괄 관리합니다." : "내 휴가 신청과 처리 상태를 확인합니다."}
       actions={
         <InlineActions>
           <button disabled={props.isLoading} onClick={props.onSubmitLeave}>
             휴가 신청
           </button>
-          {props.canAdmin ? (
-            <>
-              <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onApproveLeave(firstPendingId)}>
-                승인
-              </button>
-              <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onApproveLeave(firstPendingId, "REJECTED")}>
-                반려
-              </button>
-            </>
+          {!props.canAdmin ? (
+            <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onCancelLeave(firstPendingId)}>
+              신청 취소
+            </button>
           ) : null}
         </InlineActions>
       }
@@ -1714,6 +1744,7 @@ function OvertimeSection(props: {
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   onSubmitOvertime: () => void;
+  onCancelOvertime: (requestId?: string) => void | Promise<void>;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
 }) {
   const overtimeRows = filterRowsForMode(props.erpViewModel.overtimeRows, props.erpViewModel.employeeSummary.name, props.canAdmin);
@@ -1730,21 +1761,16 @@ function OvertimeSection(props: {
       ) : null}
       <DetailPanel
       title="야근·상계"
-      description="평달 야근은 조기퇴근 누적분과 상계하고, 관리자 인정분만 수당 집계 대상으로 표시합니다."
+      description={props.canAdmin ? "평달 야근은 조기퇴근 누적분과 상계합니다. 승인과 수당 인정은 승인함에서 처리합니다." : "평달 야근은 조기퇴근 누적분과 상계하고, 관리자 인정분만 수당 집계 대상으로 표시합니다."}
       actions={
         <InlineActions>
           <button disabled={props.isLoading} onClick={props.onSubmitOvertime}>
             야근 신청
           </button>
-          {props.canAdmin ? (
-            <>
-              <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onApproveOvertime(firstPendingId)}>
-                승인+수당인정
-              </button>
-              <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onApproveOvertime(firstPendingId, "REJECTED")}>
-                반려
-              </button>
-            </>
+          {!props.canAdmin ? (
+            <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onCancelOvertime(firstPendingId)}>
+              신청 취소
+            </button>
           ) : null}
         </InlineActions>
       }

@@ -52,10 +52,15 @@ export async function handleHrHttpRequest(
     };
   } catch (error) {
     return {
-      status: 400,
+      status: isClientApiError(error) ? 400 : 500,
       body: { error: error instanceof Error ? error.message : "Unknown API error" }
     };
   }
+}
+
+function isClientApiError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return /required|permission|denied|not found|already|invalid|must|exceeds|only pending|cannot|not allowed|active employment|unsupported/i.test(error.message);
 }
 
 async function handleGet(request: HrHttpRequest, api: HrApi, persistenceStatus: PersistenceStatus) {
@@ -123,6 +128,8 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.submitOvertimeRequest(payload as never);
     case "updateRequestStatus":
       return await api.updateRequestStatus(payload as never);
+    case "cancelRequest":
+      return await api.cancelRequest(payload as never);
     case "setOvertimePayApproval":
       return await api.setOvertimePayApproval(payload as never);
     case "createAttendanceCorrection":

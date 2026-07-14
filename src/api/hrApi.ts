@@ -25,6 +25,7 @@ import {
 import type { HrRepository } from "./hrRepository.js";
 import type {
   AuditLogFilter,
+  CancelRequestInput,
   ClockAttendanceInput,
   CreateEmployeeAccountInput,
   CreateDailyWorkTaskPlanInput,
@@ -77,6 +78,12 @@ export class HrApi {
     }
     if (isAdminSession(input.session)) {
       return employees.map(redactSensitiveEmployee);
+    }
+
+    if (input.session.role === "APPROVER") {
+      return employees
+        .filter((employee) => employee.id === input.session?.employeeId || employee.approverId === input.session?.employeeId)
+        .map(redactSensitiveEmployee);
     }
 
     return employees.filter((employee) => employee.id === input.session?.employeeId);
@@ -305,7 +312,7 @@ export class HrApi {
 
     return {
       asOf,
-      employee: session && isAdminSession(session) ? redactSensitiveEmployee(employee) : employee,
+      employee: session && session.employeeId !== employeeId ? redactSensitiveEmployee(employee) : employee,
       workplaceOptions,
       todayAttendance: attendanceRecords.find((record) => record.date === asOf.slice(0, 10)),
       attendanceRecords,
@@ -497,7 +504,18 @@ export class HrApi {
     await this.assertCanReadEmployee(input.employeeId, input.session);
     assertActiveEmployment(employee, "clock attendance");
 
-    const now = input.now ?? this.clock();
+    // Authenticated HTTP requests use the server clock; `now` remains injectable for deterministic tests.
+    const now = input.session ? this.clock() : input.now ?? this.clock();
+    const existing = await this.db.findAttendanceByEmployeeDate(input.employeeId, now.slice(0, 10));
+    if (input.type === "CLOCK_IN" && existing?.clockInAt) {
+      throw new Error("이미 출근 처리된 날짜입니다.");
+    }
+    if (input.type === "CLOCK_OUT" && !existing?.clockInAt) {
+      throw new Error("출근 기록 후 퇴근 처리할 수 있습니다.");
+    }
+    if (input.type === "CLOCK_OUT" && existing?.clockOutAt) {
+      throw new Error("이미 퇴근 처리된 날짜입니다.");
+    }
     const settings = await this.db.getSettings();
     const scheduledEndHour = settings.workDays.includes(workDayCode(now))
       ? Number(settings.workEndTime.slice(0, 2))
@@ -512,7 +530,6 @@ export class HrApi {
     });
     // Attendance records reference the verification row in Postgres.
     await this.db.addVerificationAttempt(verification);
-    const existing = await this.db.findAttendanceByEmployeeDate(input.employeeId, now.slice(0, 10));
     const attendance = await this.db.upsertAttendanceRecord(
       buildAttendanceRecord({
         employeeId: input.employeeId,
@@ -520,7 +537,7 @@ export class HrApi {
         verification,
         existing,
         now,
-        scheduledEndHour: input.scheduledEndHour ?? scheduledEndHour
+        scheduledEndHour: input.session ? scheduledEndHour : input.scheduledEndHour ?? scheduledEndHour
       })
     );
     const earlyLeaveEntry = await this.syncEarlyLeaveLedger(attendance);
@@ -559,7 +576,7 @@ export class HrApi {
       endsOn: input.endsOn,
       days: input.days,
       reason: input.reason,
-      status: input.status ?? "PENDING"
+      status: "PENDING"
     };
     const saved = await this.db.addLeaveRequest(request);
     const auditLog = await this.addAuditLog({
@@ -588,7 +605,7 @@ export class HrApi {
       endsAt: input.endsAt,
       minutes: input.minutes,
       reason: input.reason,
-      status: input.status ?? "PENDING",
+      status: "PENDING",
       payApproved: false
     };
     const saved = await this.db.addOvertimeRequest(request);
@@ -605,19 +622,65 @@ export class HrApi {
 
   async updateRequestStatus(input: UpdateRequestStatusInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    await this.assertCanApprove(actorId, input.session);
 
     if (input.targetType === "LeaveRequest") {
       const request = await this.findLeaveRequest(input.requestId);
-      const saved = await this.db.updateLeaveRequest({ ...request, status: input.status });
+      await this.assertCanApprove(actorId, input.session, request.employeeId);
+      assertPendingRequest(request.status);
+      const saved = await this.db.updateLeaveRequest({
+        ...request,
+        status: input.status,
+        decidedBy: actorId,
+        decidedAt: this.clock()
+      });
       const auditLog = await this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
 
       return { request: saved, auditLog };
     }
 
     const request = await this.findOvertimeRequest(input.requestId);
-    const saved = await this.db.updateOvertimeRequest({ ...request, status: input.status });
+    await this.assertCanApprove(actorId, input.session, request.employeeId);
+    assertPendingRequest(request.status);
+    const saved = await this.db.updateOvertimeRequest({
+      ...request,
+      status: input.status,
+      decidedBy: actorId,
+      decidedAt: this.clock()
+    });
     const auditLog = await this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
+
+    return { request: saved, auditLog };
+  }
+
+  async cancelRequest(input: CancelRequestInput) {
+    if (input.targetType === "LeaveRequest") {
+      const request = await this.findLeaveRequest(input.requestId);
+      await this.assertCanReadEmployee(request.employeeId, input.session);
+      assertPendingRequest(request.status);
+      const resolvedActorId = this.resolveActorId(input, request.employeeId);
+      const saved = await this.db.updateLeaveRequest({ ...request, status: "CANCELLED", decidedBy: resolvedActorId, decidedAt: this.clock() });
+      const auditLog = await this.auditStatusChange(
+        resolvedActorId,
+        input.targetType,
+        saved.id,
+        "CANCELLED",
+        input.detail ?? "신청자가 요청을 취소했습니다."
+      );
+      return { request: saved, auditLog };
+    }
+
+    const request = await this.findOvertimeRequest(input.requestId);
+    await this.assertCanReadEmployee(request.employeeId, input.session);
+    assertPendingRequest(request.status);
+    const resolvedActorId = this.resolveActorId(input, request.employeeId);
+    const saved = await this.db.updateOvertimeRequest({ ...request, status: "CANCELLED", decidedBy: resolvedActorId, decidedAt: this.clock() });
+    const auditLog = await this.auditStatusChange(
+      resolvedActorId,
+      input.targetType,
+      saved.id,
+      "CANCELLED",
+      input.detail ?? "신청자가 요청을 취소했습니다."
+    );
 
     return { request: saved, auditLog };
   }
@@ -673,6 +736,7 @@ export class HrApi {
     await this.assertAdmin(actorId, input.session);
     const filename = validatePayrollFilename(input.filename);
     const month = validatePayrollMonth(input.month);
+    await this.assertPayrollMonthAvailable(input.employeeId, month);
     if (input.file?.contentType !== "application/pdf") {
       throw new Error("Payroll file content type must be application/pdf.");
     }
@@ -712,6 +776,7 @@ export class HrApi {
     const filename = validatePayrollFilename(input.filename);
     const month = validatePayrollMonth(input.month);
     const storagePath = this.validateRegisteredPayrollStoragePath(input.employeeId, month, filename, input.storagePath);
+    await this.assertPayrollMonthAvailable(input.employeeId, month);
     const statement: PayrollStatement = {
       id: await this.db.nextId("pay"),
       employeeId: input.employeeId,
@@ -888,10 +953,21 @@ export class HrApi {
     }
   }
 
-  private async assertCanApprove(employeeId: string, session?: AuthSession) {
+  private async assertCanApprove(employeeId: string, session?: AuthSession, targetEmployeeId?: string) {
     const employee = (await this.db.listEmployees()).find((item) => item.id === employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
+    }
+
+    if (employee.role !== "APPROVER" && employee.role !== "HR_ADMIN" && employee.role !== "SYSTEM_ADMIN") {
+      throw new Error(`Approval permission required: ${employeeId}`);
+    }
+
+    if (employee.role === "APPROVER" && targetEmployeeId) {
+      const target = await this.findEmployee(targetEmployeeId);
+      if (target.approverId !== employeeId) {
+        throw new Error(`Approval scope denied: ${employeeId} -> ${targetEmployeeId}`);
+      }
     }
 
     if (session) {
@@ -901,15 +977,15 @@ export class HrApi {
       }
       return;
     }
-
-    if (employee.role !== "APPROVER" && employee.role !== "HR_ADMIN" && employee.role !== "SYSTEM_ADMIN") {
-      throw new Error(`Approval permission required: ${employeeId}`);
-    }
   }
 
   private async assertCanReadEmployee(employeeId: string, session?: AuthSession) {
-    await this.assertEmployee(employeeId);
+    const employee = await this.findEmployee(employeeId);
     if (!session || isAdminSession(session) || session.employeeId === employeeId) {
+      return;
+    }
+
+    if (session.role === "APPROVER" && employee.approverId === session.employeeId) {
       return;
     }
 
@@ -978,6 +1054,14 @@ export class HrApi {
       return new Set(employees.map((employee) => employee.id));
     }
 
+    if (session.role === "APPROVER") {
+      return new Set(
+        employees
+          .filter((employee) => employee.id === session.employeeId || employee.approverId === session.employeeId)
+          .map((employee) => employee.id)
+      );
+    }
+
     return new Set([session.employeeId]);
   }
 
@@ -1008,6 +1092,13 @@ export class HrApi {
     }
 
     return request;
+  }
+
+  private async assertPayrollMonthAvailable(employeeId: string, month: string) {
+    const activeStatements = await this.db.listPayrollStatements(false);
+    if (activeStatements.some((statement) => statement.employeeId === employeeId && statement.month === month)) {
+      throw new Error(`Payroll statement already exists for ${employeeId} ${month}. Delete the active statement before replacing it.`);
+    }
   }
 
   private async findOvertimeRequest(requestId: string) {
@@ -1171,6 +1262,12 @@ function assertActiveEmployment(employee: Employee, action: string) {
   }
 }
 
+function assertPendingRequest(status: RequestStatus) {
+  if (status !== "PENDING") {
+    throw new Error(`Only pending requests can be decided. Current status: ${status}`);
+  }
+}
+
 function workDayCode(timestamp: string): import("./types.js").SystemPolicy["workDays"][number] {
   const date = new Date(`${timestamp.slice(0, 10)}T00:00:00Z`);
   return ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][date.getUTCDay()] as import("./types.js").SystemPolicy["workDays"][number];
@@ -1285,6 +1382,7 @@ export const clockAttendance = defaultHrApi.clockAttendance.bind(defaultHrApi);
 export const submitLeaveRequest = defaultHrApi.submitLeaveRequest.bind(defaultHrApi);
 export const submitOvertimeRequest = defaultHrApi.submitOvertimeRequest.bind(defaultHrApi);
 export const updateRequestStatus = defaultHrApi.updateRequestStatus.bind(defaultHrApi);
+export const cancelRequest = defaultHrApi.cancelRequest.bind(defaultHrApi);
 export const setOvertimePayApproval = defaultHrApi.setOvertimePayApproval.bind(defaultHrApi);
 export const createAttendanceCorrection = defaultHrApi.createAttendanceCorrection.bind(defaultHrApi);
 export const uploadPayrollStatement = defaultHrApi.uploadPayrollStatement.bind(defaultHrApi);

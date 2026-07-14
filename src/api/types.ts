@@ -78,6 +78,13 @@ export type UpdateRequestStatusInput = AuthenticatedInput & {
   detail?: string;
 };
 
+export type CancelRequestInput = AuthenticatedInput & {
+  targetType: "LeaveRequest" | "OvertimeRequest";
+  requestId: string;
+  actorId?: string;
+  detail?: string;
+};
+
 export type SetOvertimePayApprovalInput = AuthenticatedInput & {
   requestId: string;
   payApproved: boolean;

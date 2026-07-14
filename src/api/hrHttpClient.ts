@@ -1,6 +1,7 @@
 import type { AuthSession } from "./auth";
 import type {
   AuditLogFilter,
+  CancelRequestInput,
   ClockAttendanceInput,
   ClockAttendanceResult,
   CreateEmployeeAccountInput,
@@ -113,6 +114,10 @@ export async function updateRequestStatus(input: UpdateRequestStatusInput) {
   return await post<{ request: LeaveRequest | OvertimeRequest; auditLog: AuditLog }>("updateRequestStatus", input);
 }
 
+export async function cancelRequest(input: CancelRequestInput) {
+  return await post<{ request: LeaveRequest | OvertimeRequest; auditLog: AuditLog }>("cancelRequest", input);
+}
+
 export async function setOvertimePayApproval(input: SetOvertimePayApprovalInput) {
   return await post<{ request: OvertimeRequest; auditLog: AuditLog }>("setOvertimePayApproval", input);
 }
@@ -173,7 +178,8 @@ async function post<T>(action: string, payload?: unknown) {
     },
     body: JSON.stringify({ action, payload })
   });
-  if (response.status === 404) {
+  const viteEnv = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env;
+  if (response.status === 404 && viteEnv?.DEV) {
     return await postToLocalDemoApi<T>(action, payload);
   }
 
@@ -243,6 +249,8 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.submitOvertimeRequest(payload as never)) as T;
     case "updateRequestStatus":
       return (await api.updateRequestStatus(payload as never)) as T;
+    case "cancelRequest":
+      return (await api.cancelRequest(payload as never)) as T;
     case "setOvertimePayApproval":
       return (await api.setOvertimePayApproval(payload as never)) as T;
     case "createAttendanceCorrection":
