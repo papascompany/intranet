@@ -20,6 +20,67 @@ function repositoryWithRows(rows: Record<string, unknown>[][]) {
 }
 
 describe("PostgresHrRepository", () => {
+  it("maps and persists the employee workplace assignment", async () => {
+    const employeeRow = {
+      id: "emp-ops-1",
+      name: "김운영",
+      role: "EMPLOYEE",
+      department: "운영팀",
+      hire_date: "2026-01-10",
+      employee_number: "EMP-0002",
+      workplace_id: "samsong-techno-valley",
+      custom_admin_fields: [],
+      pilot: true
+    };
+    const { calls, repository } = repositoryWithRows([[employeeRow]]);
+
+    const employee = await repository.updateEmployee({
+      id: "emp-ops-1",
+      name: "김운영",
+      role: "EMPLOYEE",
+      department: "운영팀",
+      hireDate: "2026-01-10",
+      employeeNumber: "EMP-0002",
+      workplaceId: "samsong-techno-valley",
+      pilot: true
+    });
+
+    expect(calls[0].sql).toContain("workplace_id");
+    expect(calls[0].params).toContain("samsong-techno-valley");
+    expect(employee.workplaceId).toBe("samsong-techno-valley");
+  });
+
+  it("persists an unassigned employee workplace as null", async () => {
+    const { calls, repository } = repositoryWithRows([
+      [
+        {
+          id: "emp-ops-1",
+          name: "김운영",
+          role: "EMPLOYEE",
+          department: "운영팀",
+          hire_date: "2026-01-10",
+          employee_number: "EMP-0002",
+          workplace_id: null,
+          custom_admin_fields: [],
+          pilot: true
+        }
+      ]
+    ]);
+
+    const employee = await repository.updateEmployee({
+      id: "emp-ops-1",
+      name: "김운영",
+      role: "EMPLOYEE",
+      department: "운영팀",
+      hireDate: "2026-01-10",
+      employeeNumber: "EMP-0002",
+      pilot: true
+    });
+
+    expect(calls[0].params).toContain(null);
+    expect(employee.workplaceId).toBeUndefined();
+  });
+
   it("maps active payroll statements and excludes soft deleted rows by default", async () => {
     const { calls, repository } = repositoryWithRows([
       [

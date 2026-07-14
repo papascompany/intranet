@@ -40,7 +40,8 @@
 }
 
 .employee-card-editor input,
-.employee-card-editor textarea {
+.employee-card-editor textarea,
+.employee-card-editor select {
   width: 100%;
   min-height: 40px;
   border: 1px solid var(--color-silver);
@@ -58,7 +59,8 @@
 }
 
 .employee-card-editor input:focus,
-.employee-card-editor textarea:focus {
+.employee-card-editor textarea:focus,
+.employee-card-editor select:focus {
   outline: 2px solid #bfdbfe;
   outline-offset: 1px;
 }

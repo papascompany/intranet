@@ -3,6 +3,7 @@ import { InMemoryDatabase } from "./inMemoryDatabase";
 import { createHrApi } from "./hrApi";
 import type { AuthSession } from "./auth";
 import type { HrRepository } from "./hrRepository";
+import { employees } from "../domain/seed";
 
 const fixedNow = "2026-07-08T09:00:00+09:00";
 const payrollFile = { contentBase64: "JVBERi0xLjQK", contentType: "application/pdf" as const, sizeBytes: 9 };
@@ -66,7 +67,14 @@ describe("hr api", () => {
   });
 
   it("clocks attendance with GPS, calculates early leave, and writes an audit log", async () => {
-    const hrApi = api();
+    const hrApi = createHrApi(
+      new InMemoryDatabase({
+        employees: employees.map((employee) =>
+          employee.id === "emp-ops-1" ? { ...employee, workplaceId: "office-main" } : employee
+        )
+      }),
+      () => fixedNow
+    );
 
     const result = await hrApi.clockAttendance({
       employeeId: "emp-ops-1",
@@ -89,7 +97,11 @@ describe("hr api", () => {
   });
 
   it("persists verification before the attendance record required by Postgres foreign keys", async () => {
-    const db = new InMemoryDatabase();
+    const db = new InMemoryDatabase({
+      employees: employees.map((employee) =>
+        employee.id === "emp-ops-1" ? { ...employee, workplaceId: "office-main" } : employee
+      )
+    });
     let verificationPersisted = false;
     const addVerificationAttempt = db.addVerificationAttempt.bind(db);
     const upsertAttendanceRecord = db.upsertAttendanceRecord.bind(db);
@@ -481,6 +493,7 @@ describe("hr api", () => {
       session: adminSession,
       patch: {
         position: "운영 리드",
+        workplaceId: "office-studio",
         annualSalary: 56000000,
         incomeDeductionDependents: 2
       },
@@ -489,6 +502,7 @@ describe("hr api", () => {
     const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow, adminSession);
 
     expect(result.employee.position).toBe("운영 리드");
+    expect(result.employee.workplaceId).toBe("office-studio");
     expect(result.employee.annualSalary).toBe(56000000);
     expect(result.auditLog).toMatchObject({
       action: "EMPLOYEE_CARD_UPDATED",
@@ -497,6 +511,40 @@ describe("hr api", () => {
       detail: "직원카드 정기 갱신"
     });
     expect(snapshot.employee.position).toBe("운영 리드");
+  });
+
+  it("rejects unknown workplace assignments before updating an employee card", async () => {
+    const hrApi = api();
+
+    await expect(
+      hrApi.updateEmployeeCard({
+        employeeId: "emp-ops-1",
+        actorId: adminSession.employeeId,
+        session: adminSession,
+        patch: { workplaceId: "unknown-workplace" }
+      })
+    ).rejects.toThrow("Workplace not found: unknown-workplace");
+  });
+
+  it("allows an admin to clear an employee workplace assignment", async () => {
+    const hrApi = createHrApi(
+      new InMemoryDatabase({
+        employees: employees.map((employee) =>
+          employee.id === "emp-ops-1" ? { ...employee, workplaceId: "office-main" } : employee
+        )
+      }),
+      () => fixedNow
+    );
+
+    const result = await hrApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { workplaceId: null },
+      reason: "근무지 해제"
+    });
+
+    expect(result.employee.workplaceId).toBeUndefined();
   });
 
   it("rejects employee sessions from updating employee cards", async () => {
@@ -508,10 +556,31 @@ describe("hr api", () => {
         actorId: employeeSession.employeeId,
         session: employeeSession,
         patch: {
-          position: "직원 직접 수정"
+          workplaceId: "office-main"
         }
       })
     ).rejects.toThrow("Admin permission required");
+  });
+
+  it("evaluates GPS against only the employee's assigned workplace", async () => {
+    const hrApi = createHrApi(
+      new InMemoryDatabase({
+        employees: employees.map((employee) =>
+          employee.id === "emp-ops-1" ? { ...employee, workplaceId: "office-studio" } : employee
+        )
+      }),
+      () => fixedNow
+    );
+
+    const result = await hrApi.clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      method: "GPS",
+      now: "2026-07-10T08:00:00+09:00",
+      coordinate: { latitude: 37.5665, longitude: 126.978 }
+    });
+
+    expect(result.verification).toMatchObject({ workplaceId: "office-studio", status: "OUT_OF_RANGE" });
   });
 
   it("allows admins to update settings", async () => {

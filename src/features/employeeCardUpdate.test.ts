@@ -19,6 +19,7 @@ describe("applyEmployeeCardUpdate", () => {
     const updated = applyEmployeeCardUpdate(employee, {
       name: "김운영",
       position: "운영 리드",
+      workplaceId: "samsong-techno-valley",
       annualSalary: 56000000,
       incomeDeductionDependents: 2
     });
@@ -27,6 +28,7 @@ describe("applyEmployeeCardUpdate", () => {
       id: employee.id,
       name: "김운영",
       position: "운영 리드",
+      workplaceId: "samsong-techno-valley",
       annualSalary: 56000000,
       incomeDeductionDependents: 2
     });
@@ -35,6 +37,12 @@ describe("applyEmployeeCardUpdate", () => {
   it("rejects blank required identity fields", () => {
     expect(() => applyEmployeeCardUpdate(employee, { name: " " })).toThrow("Employee name is required");
     expect(() => applyEmployeeCardUpdate(employee, { employeeNumber: "" })).toThrow("Employee number is required");
+  });
+
+  it("normalizes an admin workplace clear to an unassigned employee", () => {
+    const updated = applyEmployeeCardUpdate({ ...employee, workplaceId: "samsong-techno-valley" }, { workplaceId: null });
+
+    expect(updated.workplaceId).toBeUndefined();
   });
 
   it("rejects negative admin compensation fields", () => {

@@ -242,6 +242,7 @@ export class PostgresHrRepository implements HrRepository {
       incomeDeductionDependents: optionalNumber(row.income_deduction_dependents),
       customAdminFields: row.custom_admin_fields as EmployeeCustomAdminFields | undefined,
       approverId: optionalString(row.approver_id),
+      workplaceId: optionalString(row.workplace_id),
       pilot: Boolean(row.pilot)
     };
   }
@@ -292,6 +293,7 @@ function employeeToRow(employee: Employee, config: PostgresRepositoryConfig): Db
     income_deduction_dependents: employee.incomeDeductionDependents,
     custom_admin_fields: employee.customAdminFields,
     approver_id: employee.approverId,
+    workplace_id: employee.workplaceId ?? null,
     pilot: employee.pilot
   };
 }

@@ -38,6 +38,7 @@ export type Employee = {
   incomeDeductionDependents?: number;
   customAdminFields?: EmployeeCustomAdminFields;
   approverId?: string;
+  workplaceId?: string;
   pilot: boolean;
 };
 

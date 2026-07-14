@@ -42,6 +42,25 @@ describe("buildEmployeeCardViewModel", () => {
     expect(rows.some((row) => row.id.startsWith("custom-admin-field-"))).toBe(false);
   });
 
+  it("shows a neutral assigned workplace state without exposing workplace details", () => {
+    const rows = buildEmployeeCardViewModel(
+      { ...employee, workplaceId: "workplace-samsong" } as Employee & { workplaceId?: string },
+      "EMPLOYEE"
+    );
+
+    expect(rows.find((row) => row.id === "workplaceAssignment")).toMatchObject({
+      label: "근무지 배정",
+      value: "지정됨"
+    });
+    expect(JSON.stringify(rows)).not.toContain("workplace-samsong");
+  });
+
+  it("shows an unassigned workplace state when no workplace ID is present", () => {
+    const rows = buildEmployeeCardViewModel(employee, "EMPLOYEE");
+
+    expect(rowValue(rows, "workplaceAssignment")).toBe("미지정");
+  });
+
   it("shows admin-only salary and severance rows in admin mode", () => {
     const rows = buildEmployeeCardViewModel(employee, "ADMIN");
 

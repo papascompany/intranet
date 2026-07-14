@@ -16,6 +16,7 @@ export type EmployeeCardBasicUpdate = {
 };
 
 export type EmployeeCardAdminUpdate = {
+  workplaceId?: string | null;
   annualSalary?: number;
   severancePay?: number;
   incomeDeductionDependents?: number;
@@ -34,10 +35,12 @@ const customFieldIds = [
 
 export function applyEmployeeCardUpdate(employee: Employee, input: EmployeeCardUpdateInput): Employee {
   validateEmployeeCardUpdate(input);
+  const { workplaceId, ...otherUpdates } = input;
 
   return {
     ...employee,
-    ...input
+    ...otherUpdates,
+    ...(workplaceId === undefined ? {} : { workplaceId: workplaceId ?? undefined })
   };
 }
 

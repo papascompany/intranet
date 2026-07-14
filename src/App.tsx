@@ -901,6 +901,7 @@ function App() {
           onClose={() => setIsEmployeeCardEditorOpen(false)}
           onSubmit={updateSelectedEmployeeCard}
           open={isEmployeeCardEditorOpen}
+          workplaces={employeeSnapshot?.workplaceOptions ?? []}
         />
       ) : null}
       <FormDialog

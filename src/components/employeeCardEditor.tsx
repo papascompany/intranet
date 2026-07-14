@@ -8,8 +8,13 @@ type EditableBasicField = "birthday" | "address" | "mobile" | "emergencyContact"
 
 export type EmployeeCardEditorSubmit = {
   employeeId: string;
-  update: EmployeeCardUpdateInput;
+  update: EmployeeCardUpdateInput & { workplaceId?: string | null };
   reason?: string;
+};
+
+export type EmployeeCardEditorWorkplace = {
+  id: string;
+  name: string;
 };
 
 export interface EmployeeCardEditorProps {
@@ -20,6 +25,7 @@ export interface EmployeeCardEditorProps {
   onClose: () => void;
   onSubmit: (input: EmployeeCardEditorSubmit) => void | Promise<void>;
   open: boolean;
+  workplaces?: EmployeeCardEditorWorkplace[];
 }
 
 type BasicDraft = Record<EditableBasicField, string>;
@@ -91,6 +97,10 @@ function adminUpdateFrom(draft: AdminDraft): EmployeeCardAdminUpdate {
   };
 }
 
+function workplaceIdFrom(employee: Employee) {
+  return (employee as Employee & { workplaceId?: string }).workplaceId ?? "";
+}
+
 export function EmployeeCardEditor({
   busy = false,
   canAdmin = false,
@@ -98,20 +108,26 @@ export function EmployeeCardEditor({
   error,
   onClose,
   onSubmit,
-  open
+  open,
+  workplaces = []
 }: EmployeeCardEditorProps) {
   const [basicDraft, setBasicDraft] = useState(() => basicDraftFrom(employee));
   const [adminDraft, setAdminDraft] = useState(() => adminDraftFrom(employee));
+  const [workplaceId, setWorkplaceId] = useState(() => workplaceIdFrom(employee));
   const [reason, setReason] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setBasicDraft(basicDraftFrom(employee));
     setAdminDraft(adminDraftFrom(employee));
+    setWorkplaceId(workplaceIdFrom(employee));
     setReason("");
   }, [employee, open]);
 
-  const hasAdminChanges = useMemo(() => canAdmin && adminFieldsChanged(employee, adminDraft), [adminDraft, canAdmin, employee]);
+  const hasAdminChanges = useMemo(
+    () => canAdmin && (adminFieldsChanged(employee, adminDraft) || workplaceId !== workplaceIdFrom(employee)),
+    [adminDraft, canAdmin, employee, workplaceId]
+  );
   const hasInvalidAdminNumbers = canAdmin && [adminDraft.annualSalary, adminDraft.severancePay, adminDraft.incomeDeductionDependents]
     .some((value) => value.trim() !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0));
   const hasUnnamedCustomField = canAdmin && adminDraft.customAdminFields.some((field) => !field.label.trim());
@@ -132,7 +148,12 @@ export function EmployeeCardEditor({
     if (busy || hasInvalidAdminNumbers || hasUnnamedCustomField || (hasAdminChanges && !reason.trim())) return;
 
     const update: EmployeeCardBasicUpdate & Partial<EmployeeCardAdminUpdate> = { ...basicDraft };
-    if (canAdmin) Object.assign(update, adminUpdateFrom(adminDraft));
+    if (canAdmin) {
+      Object.assign(update, adminUpdateFrom(adminDraft));
+      if (workplaceId !== workplaceIdFrom(employee)) {
+        Object.assign(update, { workplaceId: workplaceId || null });
+      }
+    }
     await onSubmit({ employeeId: employee.id, update, reason: hasAdminChanges ? reason.trim() : undefined });
   };
 
@@ -174,6 +195,13 @@ export function EmployeeCardEditor({
               <NumericField label="연봉" onChange={(value) => updateAdmin("annualSalary", value)} value={adminDraft.annualSalary} />
               <NumericField label="퇴직금" onChange={(value) => updateAdmin("severancePay", value)} value={adminDraft.severancePay} />
               <NumericField label="소득공제 부양가족 수" onChange={(value) => updateAdmin("incomeDeductionDependents", value)} value={adminDraft.incomeDeductionDependents} />
+              <label>
+                <span>배정 근무지</span>
+                <select aria-label="배정 근무지" onChange={(event) => setWorkplaceId(event.target.value)} value={workplaceId}>
+                  <option value="">미지정</option>
+                  {workplaces.map((workplace) => <option key={workplace.id} value={workplace.id}>{workplace.name}</option>)}
+                </select>
+              </label>
             </div>
             <div className="employee-card-editor__custom-fields">
               <h4>사용자 항목</h4>
@@ -193,7 +221,7 @@ export function EmployeeCardEditor({
             {hasAdminChanges ? (
               <label className="employee-card-editor__reason">
                 <span>관리자 변경 사유</span>
-                <textarea onChange={(event) => setReason(event.target.value)} placeholder="급여 또는 관리자 항목 변경 사유를 입력하세요." required value={reason} />
+                <textarea onChange={(event) => setReason(event.target.value)} placeholder="급여, 관리자 항목 또는 근무지 변경 사유를 입력하세요." required value={reason} />
               </label>
             ) : null}
           </section>

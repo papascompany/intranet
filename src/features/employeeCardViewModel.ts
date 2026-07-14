@@ -24,6 +24,7 @@ export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCar
     row("name", "이름", employee.name),
     row("position", "직위", employee.position),
     row("hireDate", "입사일", employee.hireDate),
+    row("workplaceAssignment", "근무지 배정", workplaceAssignment(employee)),
     row("residentRegistrationNumber", "주민등록번호", maskResidentRegistrationNumber(employee.residentRegistrationNumber), {
       sensitive: true
     }),
@@ -55,6 +56,12 @@ export function buildEmployeeCardViewModel(employee: Employee, mode: EmployeeCar
       })
     )
   ];
+}
+
+function workplaceAssignment(employee: Employee): string {
+  // The employee card intentionally does not resolve workplace IDs to names or location details.
+  const workplaceId = (employee as Employee & { workplaceId?: string }).workplaceId;
+  return workplaceId ? "지정됨" : "미지정";
 }
 
 function row(

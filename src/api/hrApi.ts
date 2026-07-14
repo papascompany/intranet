@@ -323,6 +323,13 @@ export class HrApi {
       throw new Error(`Employee not found: ${input.employeeId}`);
     }
 
+    if (input.patch.workplaceId !== undefined && input.patch.workplaceId !== null) {
+      const workplaceExists = (await this.db.listWorkplaces()).some((workplace) => workplace.id === input.patch.workplaceId);
+      if (!workplaceExists) {
+        throw new Error(`Workplace not found: ${input.patch.workplaceId}`);
+      }
+    }
+
     const saved = await this.db.updateEmployee(applyEmployeeCardUpdate(employee, input.patch));
     const auditLog = await this.addAuditLog({
       actorId,
@@ -336,13 +343,13 @@ export class HrApi {
   }
 
   async clockAttendance(input: ClockAttendanceInput) {
-    await this.assertEmployee(input.employeeId);
+    const employee = await this.findEmployee(input.employeeId);
     await this.assertCanReadEmployee(input.employeeId, input.session);
 
     const now = input.now ?? this.clock();
     const verification = evaluateVerification({
       employeeId: input.employeeId,
-      workplaces: await this.workplacesWithPolicyRadius(),
+      workplaces: await this.workplacesWithPolicyRadius(employee.workplaceId),
       coordinate: input.coordinate,
       method: input.method,
       now,
@@ -775,9 +782,13 @@ export class HrApi {
     return logs.filter((log) => log.actorId === session.employeeId || Boolean(visibleTargetIds?.has(log.targetId)));
   }
 
-  private async workplacesWithPolicyRadius() {
+  private async workplacesWithPolicyRadius(workplaceId?: string) {
     const [{ gpsAllowedRadiusMeters }, workplaces] = await Promise.all([this.db.getSettings(), this.db.listWorkplaces()]);
-    return workplaces.map((workplace) => ({
+    if (!workplaceId) {
+      return [];
+    }
+
+    return workplaces.filter((workplace) => workplace.id === workplaceId).map((workplace) => ({
       ...workplace,
       allowedRadiusMeters: gpsAllowedRadiusMeters
     }));
