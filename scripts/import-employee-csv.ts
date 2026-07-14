@@ -127,17 +127,12 @@ export async function importEmployees(options: { csvPath?: string; apply?: boole
        returning id
      )
      insert into auth_accounts (
-       id, employee_id, employee_number, login_id, password_hash, password_change_required
+       id, employee_id, employee_number, login_id, password_hash, password_change_required, disabled_at
      )
-     select $11, id, $8, $12, $13, true from upserted_employee
+     select $11, id, $8, $12, $13, true, now() from upserted_employee
      on conflict (employee_id) do update set
        employee_number = excluded.employee_number,
        login_id = excluded.login_id,
-       password_hash = excluded.password_hash,
-       password_change_required = true,
-       failed_sign_in_count = 0,
-       locked_until = null,
-       disabled_at = null,
        updated_at = now()`,
     [
       employeeId,
