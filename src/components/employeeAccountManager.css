@@ -1,6 +1,7 @@
 .employee-account-manager { display: grid; gap: 16px; color: var(--color-graphite); font-family: var(--font-inter); }
 .employee-account-manager__header, .employee-account-row, .employee-account-row__actions, .employee-account-manager__eyebrow, .employee-account-manager__summary { display: flex; align-items: center; }
 .employee-account-manager__header { justify-content: space-between; gap: 16px; }
+.employee-account-manager__header-actions { display: flex; align-items: center; gap: 8px; }
 .employee-account-manager__header h2, .employee-account-manager__header p { margin: 0; }
 .employee-account-manager__header h2 { font-family: var(--font-cal-sans); font-size: 20px; font-weight: 600; }
 .employee-account-manager__header > div > p:not(.employee-account-manager__eyebrow) { margin-top: 4px; color: var(--color-slate); font-size: 13px; }
@@ -8,6 +9,8 @@
 .employee-account-manager__eyebrow svg, .employee-account-manager__summary svg { width: 15px; height: 15px; }
 .employee-account-manager__create, .employee-account-row__actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; border-radius: 6px; padding: 0 12px; font: inherit; font-size: 13px; font-weight: 600; }
 .employee-account-manager__create { border: 1px solid var(--color-ink); color: var(--color-white); background: var(--color-ink); }
+.employee-account-manager__import { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 0 12px; color: var(--color-graphite); background: var(--color-white); font-size: 13px; font-weight: 600; cursor: pointer; }
+.employee-account-manager__import input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .employee-account-manager__create svg, .employee-account-row__actions svg { width: 16px; height: 16px; }
 .employee-account-manager button:disabled { cursor: not-allowed; opacity: .55; }
 .employee-account-manager__password { display: inline-block; margin-right: 4px; border: 1px solid #bbf7d0; border-radius: 4px; padding: 2px 6px; color: #166534; background: #f0fdf4; font-family: ui-monospace, monospace; font-weight: 700; }
@@ -30,5 +33,13 @@
 .employee-account-manager__form input, .employee-account-manager__form select { width: 100%; min-height: 40px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 8px 10px; color: var(--color-graphite); background: var(--color-white); font: inherit; font-weight: 400; }
 .employee-account-manager__form input:focus, .employee-account-manager__form select:focus { outline: 2px solid #bfdbfe; outline-offset: 1px; }
 .employee-account-manager__password-help { grid-column: 1 / -1; margin: -4px 0 0; color: #b91c1c; font-size: 12px; }
+.employee-account-manager__import-result { display: grid; gap: 8px; overflow-x: auto; }
+.employee-account-manager__import-result p { margin: 0; }
+.employee-account-manager__import-result table, .employee-account-manager__import-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.employee-account-manager__import-result th, .employee-account-manager__import-result td, .employee-account-manager__import-preview th, .employee-account-manager__import-preview td { border-bottom: 1px solid var(--color-silver); padding: 8px; text-align: left; white-space: nowrap; }
+.employee-account-manager__import-result th, .employee-account-manager__import-preview th { color: var(--color-slate); font-weight: 700; }
+.employee-account-manager__import-result code { color: #166534; font-family: ui-monospace, monospace; font-weight: 700; }
+.employee-account-manager__import-preview { display: grid; gap: 10px; }
+.employee-account-manager__import-table-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--color-silver); border-radius: 6px; }
 @media (max-width: 720px) { .employee-account-manager__header { align-items: stretch; flex-direction: column; } .employee-account-row { grid-template-columns: minmax(0, 1fr) auto; } .employee-account-row__actions { grid-column: 1 / -1; justify-content: flex-start; } }
-@media (max-width: 480px) { .employee-account-manager__create, .employee-account-row__actions button { width: 100%; } .employee-account-row__actions { display: grid; grid-template-columns: 1fr; } .employee-account-manager__form { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { .employee-account-manager__header-actions { display: grid; } .employee-account-manager__import, .employee-account-manager__create, .employee-account-row__actions button { width: 100%; } .employee-account-row__actions { display: grid; grid-template-columns: 1fr; } .employee-account-manager__form { grid-template-columns: 1fr; } }

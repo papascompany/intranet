@@ -102,6 +102,34 @@ describe("PostgresHrRepository", () => {
     expect(employee.workplaceId).toBeUndefined();
   });
 
+  it("persists workplace create, update, and delete operations", async () => {
+    const workplaceRow = {
+      id: "workplace-1",
+      name: "삼송테크노밸리",
+      latitude: 37.64907,
+      longitude: 126.901901,
+      allowed_radius_meters: 300,
+      qr_path: "/qr/samsong-techno-valley"
+    };
+    const { calls, repository } = repositoryWithRows([[workplaceRow], [{ ...workplaceRow, allowed_radius_meters: 450 }], [workplaceRow]]);
+    const workplace = {
+      id: "workplace-1",
+      name: "삼송테크노밸리",
+      latitude: 37.64907,
+      longitude: 126.901901,
+      allowedRadiusMeters: 300,
+      qrPath: "/qr/samsong-techno-valley"
+    };
+
+    await repository.addWorkplace(workplace);
+    await repository.updateWorkplace({ ...workplace, allowedRadiusMeters: 450 });
+    await repository.deleteWorkplace(workplace.id);
+
+    expect(calls[0].sql).toContain("insert into workplaces");
+    expect(calls[1].sql).toContain("update workplaces");
+    expect(calls[2].sql).toContain("delete from workplaces");
+  });
+
   it("maps active payroll statements and excludes soft deleted rows by default", async () => {
     const { calls, repository } = repositoryWithRows([
       [
@@ -150,6 +178,23 @@ describe("PostgresHrRepository", () => {
     expect(calls[0].sql).toContain("update system_policies set gps_allowed_radius_meters = $2 where id = $1 returning *");
     expect(calls[0].params).toEqual(["system-policy", 500]);
     expect(settings.gpsAllowedRadiusMeters).toBe(500);
+  });
+
+  it("maps payroll holiday dates from the system policy row", async () => {
+    const { repository } = repositoryWithRows([[
+      {
+        id: "system-policy",
+        gps_allowed_radius_meters: 300,
+        payroll_holiday_dates: ["2026-09-24", "2026-09-25"],
+        gps_failure_fallback: "QR_OR_MANUAL_EQUAL",
+        payroll_employee_access: "VIEW_ONLY",
+        payroll_delete_mode: "ADMIN_ONLY_SOFT_DELETE",
+        overtime_pay_approver_role: "ADMIN_ONLY",
+        advance_leave_exception_handling: "HR_CORRECTION"
+      }
+    ]]);
+
+    await expect(repository.getSettings()).resolves.toMatchObject({ payrollHolidayDates: ["2026-09-24", "2026-09-25"] });
   });
 
   it("writes audit logs with database column names", async () => {

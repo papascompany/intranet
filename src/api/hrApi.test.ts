@@ -86,6 +86,36 @@ describe("hr api", () => {
     ).rejects.toThrow("Employee number already exists");
   });
 
+  it("imports employee accounts after validating duplicate IDs, workplaces, and sensitive fields", async () => {
+    const hrApi = api();
+    const result = await hrApi.importEmployeeAccounts({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      rows: [{
+        loginId: "bulk-staff",
+        employee: {
+          name: "CSV 직원",
+          role: "EMPLOYEE",
+          department: "제작팀",
+          hireDate: "2026-07-15",
+          employeeNumber: "EMP-0098",
+          workplaceId: "office-studio",
+          residentRegistrationNumber: "900101-1234567",
+          payrollAccount: "123-456-789",
+          pilot: false
+        }
+      }]
+    });
+
+    expect(result.created[0]).toMatchObject({ employee: { name: "CSV 직원", workplaceId: "office-studio", residentRegistrationNumber: "900101-1234567" }, loginId: "bulk-staff" });
+    expect(result.created[0].temporaryPassword).toHaveLength(20);
+    await expect(hrApi.importEmployeeAccounts({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      rows: [{ loginId: "bulk-staff", employee: { name: "중복 직원", role: "EMPLOYEE", department: "운영팀", hireDate: "2026-07-15", employeeNumber: "EMP-0099", workplaceId: "office-main", pilot: false } }]
+    })).rejects.toThrow("로그인 아이디가 중복됩니다");
+  });
+
   it("prevents HR administrators from creating another administrator account", async () => {
     const hrApi = api();
 
@@ -209,8 +239,8 @@ describe("hr api", () => {
       method: "GPS",
       now: "2026-07-09T08:00:00+09:00",
       coordinate: {
-        latitude: 37.5666,
-        longitude: 126.9781,
+        latitude: 37.6491,
+        longitude: 126.9019,
         accuracyMeters: 14
       }
     });
@@ -221,8 +251,8 @@ describe("hr api", () => {
       method: "GPS",
       now: "2026-07-09T16:30:00+09:00",
       coordinate: {
-        latitude: 37.5666,
-        longitude: 126.9781,
+        latitude: 37.6491,
+        longitude: 126.9019,
         accuracyMeters: 14
       }
     });
@@ -286,7 +316,7 @@ describe("hr api", () => {
       type: "CLOCK_IN",
       method: "GPS",
       now: "2026-07-10T08:00:00+09:00",
-      coordinate: { latitude: 37.5666, longitude: 126.9781 }
+      coordinate: { latitude: 37.6491, longitude: 126.9019 }
     })).resolves.toMatchObject({ verification: { status: "GPS_PASSED" } });
   });
 
@@ -348,6 +378,58 @@ describe("hr api", () => {
       requestId: submitted.request.id,
       session: employeeSession
     })).rejects.toThrow("Only pending requests can be decided");
+  });
+
+  it("allows employees to cancel their own pending attendance correction request", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitAttendanceCorrectionRequest({
+      employeeId: employeeSession.employeeId,
+      type: "CLOCK_IN_CORRECTION",
+      requestedValue: "2026-07-08T08:00:00+09:00",
+      reason: "출근 시각 정정 신청 취소 확인",
+      session: employeeSession
+    });
+
+    const cancelled = await hrApi.cancelRequest({
+      targetType: "AttendanceCorrectionRequest",
+      requestId: submitted.request.id,
+      session: employeeSession
+    });
+
+    expect(cancelled.request).toMatchObject({ status: "CANCELLED", decidedBy: employeeSession.employeeId });
+    expect(cancelled.auditLog.action).toBe("ATTENDANCE_CORRECTION_REQUEST_CANCELLED");
+  });
+
+  it("allows admins to manage workplaces and blocks deletion while assigned employees remain", async () => {
+    const db = new InMemoryDatabase({ employees: employees.map((employee) => ({ ...employee, workplaceId: undefined })) });
+    const hrApi = createHrApi(db, () => fixedNow);
+    const created = await hrApi.createWorkplace({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      workplace: {
+        name: "신규 테스트 근무지",
+        latitude: 37.643093,
+        longitude: 126.883733,
+        allowedRadiusMeters: 300,
+        qrPath: "/qr/ace-highend-jichuk"
+      }
+    });
+
+    await expect(hrApi.updateWorkplace({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      workplaceId: created.workplace.id,
+      patch: { allowedRadiusMeters: 450 }
+    })).resolves.toMatchObject({ workplace: { allowedRadiusMeters: 450 } });
+
+    await db.updateEmployee({ ...employees[1], workplaceId: created.workplace.id });
+    await expect(hrApi.deleteWorkplace({ actorId: adminSession.employeeId, session: adminSession, workplaceId: created.workplace.id }))
+      .rejects.toThrow("Employees are still assigned");
+    await expect(hrApi.createWorkplace({
+      actorId: employeeSession.employeeId,
+      session: employeeSession,
+      workplace: { name: "권한 없음", latitude: 37, longitude: 127, allowedRadiusMeters: 300, qrPath: "/qr/denied" }
+    })).rejects.toThrow("Admin permission required");
   });
 
   it("enforces annual leave policy units and applies HR balance corrections", async () => {
@@ -634,12 +716,101 @@ describe("hr api", () => {
 
     const dashboard = await hrApi.getDashboard(fixedNow);
 
+    expect(dashboard.attendanceRecords?.length).toBeGreaterThanOrEqual(dashboard.todayAttendance.length);
+    expect(dashboard.attendanceRecords?.map((record) => record.id)).toEqual(
+      expect.arrayContaining(dashboard.todayAttendance.map((record) => record.id))
+    );
     expect(dashboard.leaveRequests.map((request) => request.id)).toEqual(
       expect.arrayContaining(["leave-1", "leave-2"])
     );
     expect(dashboard.pendingLeaveRequests.map((request) => request.id)).toContain("leave-1");
     expect(dashboard.overtimeRequests.map((request) => request.id)).toContain("ot-1");
     expect(dashboard.corrections.map((correction) => correction.id)).toContain("corr-1");
+  });
+
+  it("keeps attendance correction requests through employee submission and admin decision", async () => {
+    const hrApi = api();
+    const attendanceId = "att-2026-07-08-emp-ops-1";
+    const submitted = await hrApi.submitAttendanceCorrectionRequest({
+      employeeId: employeeSession.employeeId,
+      attendanceId,
+      type: "CLOCK_OUT_CORRECTION",
+      beforeValue: "2026-07-08T16:35:00+09:00",
+      requestedValue: "2026-07-08T17:00:00+09:00",
+      reason: "거래처 미팅으로 실제 퇴근 시각을 정정합니다.",
+      session: employeeSession
+    });
+
+    expect(submitted.request).toMatchObject({ employeeId: employeeSession.employeeId, status: "PENDING" });
+    await expect(hrApi.updateAttendanceCorrectionRequestStatus({
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: employeeSession.employeeId,
+      session: employeeSession
+    })).rejects.toThrow("Approval permission required");
+
+    const pendingDashboard = await hrApi.getDashboard({ asOf: fixedNow, session: adminSession });
+    expect(pendingDashboard.correctionRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: submitted.request.id, status: "PENDING" })
+    ]));
+
+    const decided = await hrApi.updateAttendanceCorrectionRequestStatus({
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      detail: "출퇴근 기록 확인 후 승인"
+    });
+    expect(decided).toMatchObject({ request: { status: "APPROVED", decidedBy: adminSession.employeeId }, correction: { attendanceId } });
+
+    const employeeSnapshot = await hrApi.getEmployeeSnapshot(employeeSession.employeeId, fixedNow, employeeSession);
+    expect(employeeSnapshot.attendanceCorrectionRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: submitted.request.id, status: "APPROVED" })
+    ]));
+    await expect(hrApi.getAuditLogs({ targetType: "AttendanceCorrectionRequest", targetId: submitted.request.id })).resolves.toHaveLength(2);
+  });
+
+  it("allows an assigned approver to decide attendance correction requests", async () => {
+    const hrApi = api();
+    const employeeSessionForProduction: AuthSession = { ...employeeSession, employeeId: "emp-prod-1" };
+    const submitted = await hrApi.submitAttendanceCorrectionRequest({
+      employeeId: "emp-prod-1",
+      type: "CLOCK_IN_CORRECTION",
+      requestedValue: "2026-07-08T08:00:00+09:00",
+      reason: "제작팀 출근 기록 정정",
+      session: employeeSessionForProduction
+    });
+
+    await expect(hrApi.updateAttendanceCorrectionRequestStatus({
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: approverSession.employeeId,
+      session: approverSession
+    })).resolves.toMatchObject({ request: { status: "APPROVED", decidedBy: approverSession.employeeId } });
+  });
+
+  it("loads bootstrap collections once instead of repeating dashboard and snapshot reads", async () => {
+    const db = new InMemoryDatabase();
+    const calls = new Map<string, number>();
+    const repository = new Proxy(db as unknown as Record<PropertyKey, unknown>, {
+      get(target, property) {
+        const value = target[property];
+        if (typeof value !== "function") return value;
+        return async (...args: unknown[]) => {
+          const name = String(property);
+          calls.set(name, (calls.get(name) ?? 0) + 1);
+          return (value as (...innerArgs: unknown[]) => unknown).apply(target, args);
+        };
+      }
+    }) as unknown as HrRepository;
+    const hrApi = createHrApi(repository, () => fixedNow);
+
+    await hrApi.getAppBootstrap({ employeeId: "emp-ceo", asOf: fixedNow, session: adminSession });
+
+    expect(calls.get("listEmployees")).toBe(1);
+    expect(calls.get("listAttendanceRecords")).toBe(1);
+    expect(calls.get("listLeaveRequests")).toBe(1);
+    expect(calls.get("listCorrectionRequests")).toBe(1);
   });
 
   it("scopes dashboard lists to the authenticated employee", async () => {
@@ -654,6 +825,7 @@ describe("hr api", () => {
     expect(dashboard.activePayrollStatements.every((statement) => statement.employeeId === employeeSession.employeeId)).toBe(
       true
     );
+    expect(dashboard.attendanceRecords?.every((record) => record.employeeId === employeeSession.employeeId)).toBe(true);
   });
 
   it("rejects employee access to another employee snapshot", async () => {
@@ -842,6 +1014,30 @@ describe("hr api", () => {
     })).rejects.toThrow("Employee number cannot be changed");
   });
 
+  it("records annual leave HR corrections as a separately traceable action", async () => {
+    const hrApi = api();
+    const result = await hrApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { annualLeaveAdjustmentDays: 1.5 },
+      reason: "휴직 기간 HR 보정"
+    });
+
+    expect(result.auditLog.action).toBe("ANNUAL_LEAVE_BALANCE_ADJUSTED");
+    expect(result.leaveBalanceAdjustment).toMatchObject({
+      employeeId: "emp-ops-1",
+      days: 1.5,
+      reason: "휴직 기간 HR 보정",
+      createdBy: adminSession.employeeId
+    });
+    await expect(hrApi.getAuditLogs({ action: "ANNUAL_LEAVE_BALANCE_ADJUSTED", targetId: "emp-ops-1" })).resolves.toHaveLength(1);
+    const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow, adminSession);
+    expect(snapshot.leaveBalanceAdjustments).toEqual([
+      expect.objectContaining({ days: 1.5, reason: "휴직 기간 HR 보정" })
+    ]);
+  });
+
   it("records administrator access to employee resident and payroll identifiers", async () => {
     const hrApi = api();
 
@@ -942,7 +1138,7 @@ describe("hr api", () => {
       type: "CLOCK_IN",
       method: "GPS",
       now: "2026-07-10T08:00:00+09:00",
-      coordinate: { latitude: 37.5665, longitude: 126.978 }
+      coordinate: { latitude: 37.64907, longitude: 126.901901 }
     });
 
     expect(result.verification).toMatchObject({ workplaceId: "office-studio", status: "OUT_OF_RANGE" });
@@ -963,6 +1159,19 @@ describe("hr api", () => {
     expect(settings.gpsAllowedRadiusMeters).toBe(250);
     expect(settings.gpsFailureFallback).toBe("QR_OR_MANUAL_EQUAL");
     expect(result.auditLog.action).toBe("SETTINGS_UPDATED");
+  });
+
+  it("stores additional payroll holidays for notice-day calculation", async () => {
+    const hrApi = api();
+
+    await hrApi.updateSettings({
+      actorId: adminSession.employeeId,
+      settings: { payrollHolidayDates: ["2026-09-24", "2026-09-25"] }
+    });
+
+    await expect(hrApi.getSettings()).resolves.toMatchObject({ payrollHolidayDates: ["2026-09-24", "2026-09-25"] });
+    await expect(hrApi.updateSettings({ actorId: adminSession.employeeId, settings: { payrollHolidayDates: ["2026/09/24"] } }))
+      .rejects.toThrow("YYYY-MM-DD");
   });
 
   it("rejects invalid work policy values at the API boundary", async () => {

@@ -4,14 +4,17 @@ import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
 import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
 import type {
   AttendanceCorrection,
+  AttendanceCorrectionRequest,
   AuditLog,
   DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   LeaveRequest,
+  LeaveBalanceAdjustment,
   OvertimeRequest,
   PayrollStatement,
-  RequestStatus
+  RequestStatus,
+  Workplace
 } from "../domain/types.js";
 import { canApproveRequests, isAdminSession, type AuthSession } from "./auth.js";
 import { InMemoryDatabase } from "./inMemoryDatabase.js";
@@ -30,12 +33,18 @@ import type {
   CreateEmployeeAccountInput,
   CreateDailyWorkTaskPlanInput,
   CreateAttendanceCorrectionInput,
+  CreateWorkplaceInput,
+  DeleteWorkplaceInput,
+  SubmitAttendanceCorrectionRequestInput,
+  UpdateAttendanceCorrectionRequestStatusInput,
   Dashboard,
   DashboardInput,
   DownloadPayrollStatementInput,
   DownloadPayrollStatementResult,
   EmployeeAuthAccount,
   EmployeeAccountState,
+  ImportEmployeeAccountsInput,
+  ImportEmployeeAccountsResult,
   EmployeeSnapshot,
   GetDailyWorkTasksInput,
   GetEmployeeAccountStatesInput,
@@ -48,6 +57,7 @@ import type {
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
   UpdateEmployeeCardInput,
+  UpdateWorkplaceInput,
   UpdateDailyWorkTaskPlanInput,
   UpdateDailyWorkTaskStatusInput,
   UpdateSettingsInput,
@@ -57,6 +67,22 @@ import type {
 import type { AppBootstrap } from "./types.js";
 
 type Clock = () => string;
+
+type HrDataSnapshot = {
+  employees: Employee[];
+  attendanceRecords: import("../domain/types.js").AttendanceRecord[];
+  leaveRequests: LeaveRequest[];
+  leaveBalanceAdjustments: LeaveBalanceAdjustment[];
+  earlyLeaveLedger: EarlyLeaveLedger[];
+  overtimeRequests: OvertimeRequest[];
+  workplaces: import("../domain/types.js").Workplace[];
+  corrections: AttendanceCorrection[];
+  correctionRequests: AttendanceCorrectionRequest[];
+  payrollStatements: PayrollStatement[];
+  dailyWorkTasks: DailyWorkTask[];
+  auditLogs: AuditLog[];
+  settings: import("./types.js").SystemPolicy;
+};
 
 const defaultClock: Clock = () => new Date().toISOString();
 
@@ -91,45 +117,61 @@ export class HrApi {
 
   async getAppBootstrap(input: { employeeId: string; asOf?: string; session?: AuthSession }): Promise<AppBootstrap> {
     const asOf = input.asOf ?? this.clock();
-    const [employees, dashboard, employeeSnapshot, employeeAccountStates] = await Promise.all([
-      this.getEmployeeDirectory({ session: input.session }),
-      this.getDashboard({ asOf, session: input.session }),
-      this.getEmployeeSnapshot(input.employeeId, asOf, input.session),
+    const data = await this.loadDataSnapshot();
+    const targetEmployee = data.employees.find((employee) => employee.id === input.employeeId);
+    this.assertCanReadEmployeeRecord(input.employeeId, input.session, targetEmployee);
+    const [snapshot, employeeAccountStates] = await Promise.all([
+      Promise.resolve(data),
       isAdminSession(input.session)
-        ? this.getEmployeeAccountStates({ actorId: input.session!.employeeId, session: input.session })
+        ? this.getEmployeeAccountStatesFromRows(input.session!, data.employees)
         : Promise.resolve([])
     ]);
+    const employees = this.visibleEmployees(snapshot.employees, input.session);
+    const dashboard = this.buildDashboard(snapshot, asOf, input.session);
+    const employeeSnapshot = this.buildEmployeeSnapshot(snapshot, input.employeeId, asOf, input.session);
 
     return { employees, dashboard, employeeSnapshot, employeeAccountStates };
   }
 
   async getDashboard(input: string | DashboardInput = this.clock()): Promise<Dashboard> {
     const { asOf, session } = parseDashboardInput(input, this.clock);
-    const today = asOf.slice(0, 10);
-    const [
-      employees,
-      attendanceRecords,
-      leaveRequestRecords,
-      overtimeRequestRecords,
-      correctionRecords,
-      payrollStatementRecords,
-      settings,
-      auditLogs
-    ] = await Promise.all([
+    return this.buildDashboard(await this.loadDataSnapshot(), asOf, session);
+  }
+
+  private async loadDataSnapshot(): Promise<HrDataSnapshot> {
+    const [employees, attendanceRecords, leaveRequests, earlyLeaveLedger, leaveBalanceAdjustments, overtimeRequests, workplaces, corrections, correctionRequests, payrollStatements, dailyWorkTasks, auditLogs, settings] = await Promise.all([
       this.db.listEmployees(),
       this.db.listAttendanceRecords(),
       this.db.listLeaveRequests(),
+      this.db.listEarlyLeaveLedger(),
+      this.db.listLeaveBalanceAdjustments(),
       this.db.listOvertimeRequests(),
+      this.db.listWorkplaces(),
       this.db.listCorrections(),
+      this.db.listCorrectionRequests(),
       this.db.listPayrollStatements(false),
-      this.db.getSettings(),
-      this.db.listAuditLogs()
+      this.db.listDailyWorkTasks(),
+      this.db.listAuditLogs(),
+      this.db.getSettings()
     ]);
+
+    return { employees, attendanceRecords, leaveRequests, earlyLeaveLedger, leaveBalanceAdjustments, overtimeRequests, workplaces, corrections, correctionRequests, payrollStatements, dailyWorkTasks, auditLogs, settings };
+  }
+
+  private visibleEmployees(employees: Employee[], session?: AuthSession) {
+    const visibleEmployeeIds = this.visibleEmployeeIds(session, employees);
+    return employees.filter((employee) => visibleEmployeeIds.has(employee.id)).map((employee) => session && isAdminSession(session) ? redactSensitiveEmployee(employee) : employee);
+  }
+
+  private buildDashboard(data: HrDataSnapshot, asOf: string, session?: AuthSession): Dashboard {
+    const today = asOf.slice(0, 10);
+    const { employees, attendanceRecords, leaveRequests: leaveRequestRecords, overtimeRequests: overtimeRequestRecords, corrections: correctionRecords, correctionRequests: correctionRequestRecords, payrollStatements: payrollStatementRecords, settings, auditLogs } = data;
     const visibleEmployeeIds = this.visibleEmployeeIds(session, employees);
     const attendance = attendanceRecords.filter((record) => visibleEmployeeIds.has(record.employeeId));
     const leaveRequests = leaveRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
     const overtimeRequests = overtimeRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
     const corrections = correctionRecords.filter((correction) => visibleEmployeeIds.has(correction.employeeId));
+    const correctionRequests = correctionRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
     const activePayrollStatements = payrollStatementRecords.filter((statement) => visibleEmployeeIds.has(statement.employeeId));
     const visibleEmployees = employees.filter((employee) => visibleEmployeeIds.has(employee.id));
     const visibleTargetIds = new Set([
@@ -138,6 +180,7 @@ export class HrApi {
       ...overtimeRequests.map((request) => request.id),
       ...corrections.map((correction) => correction.id),
       ...corrections.map((correction) => correction.attendanceId),
+      ...correctionRequests.map((request) => request.id),
       ...activePayrollStatements.map((statement) => statement.id)
     ]);
 
@@ -146,10 +189,12 @@ export class HrApi {
       employeesTotal: visibleEmployees.length,
       pilotEmployees: visibleEmployees.filter((employee) => employee.pilot).length,
       todayAttendance: attendance.filter((record) => record.date === today),
+      attendanceRecords: attendance,
       leaveRequests,
       pendingLeaveRequests: leaveRequests.filter((request) => request.status === "PENDING"),
       overtimeRequests,
       corrections,
+      correctionRequests,
       gpsFailedAttendance: attendance.filter((record) => record.status.includes("GPS_FAILED")),
       activePayrollStatements,
       settings,
@@ -177,6 +222,64 @@ export class HrApi {
     });
 
     return { settings, auditLog };
+  }
+
+  async createWorkplace(input: CreateWorkplaceInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    const workplace = normalizeWorkplace({ ...input.workplace, id: await this.db.nextId("workplace") });
+    if ((await this.db.listWorkplaces()).some((item) => item.name === workplace.name)) {
+      throw new Error(`Workplace already exists: ${workplace.name}`);
+    }
+    const saved = await this.db.addWorkplace(workplace);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "WORKPLACE_CREATED",
+      targetType: "Workplace",
+      targetId: saved.id,
+      detail: `${saved.name} (${saved.latitude},${saved.longitude})`
+    });
+    return { workplace: saved, auditLog };
+  }
+
+  async updateWorkplace(input: UpdateWorkplaceInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    const current = (await this.db.listWorkplaces()).find((item) => item.id === input.workplaceId);
+    if (!current) {
+      throw new Error(`Workplace not found: ${input.workplaceId}`);
+    }
+    const next = normalizeWorkplace({ ...current, ...input.patch, id: current.id });
+    if ((await this.db.listWorkplaces()).some((item) => item.id !== current.id && item.name === next.name)) {
+      throw new Error(`Workplace already exists: ${next.name}`);
+    }
+    const saved = await this.db.updateWorkplace(next);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "WORKPLACE_UPDATED",
+      targetType: "Workplace",
+      targetId: saved.id,
+      detail: Object.keys(input.patch).sort().join(", ")
+    });
+    return { workplace: saved, auditLog };
+  }
+
+  async deleteWorkplace(input: DeleteWorkplaceInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    const employees = await this.db.listEmployees();
+    if (employees.some((employee) => employee.workplaceId === input.workplaceId)) {
+      throw new Error("Employees are still assigned to this workplace. Reassign them before deleting it.");
+    }
+    const deleted = await this.db.deleteWorkplace(input.workplaceId);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "WORKPLACE_DELETED",
+      targetType: "Workplace",
+      targetId: deleted.id,
+      detail: deleted.name
+    });
+    return { workplace: deleted, auditLog };
   }
 
   async createEmployeeAccount(input: CreateEmployeeAccountInput) {
@@ -210,6 +313,55 @@ export class HrApi {
     });
 
     return { employee: saved.employee, temporaryPassword: credential.password, auditLog };
+  }
+
+  async importEmployeeAccounts(input: ImportEmployeeAccountsInput): Promise<ImportEmployeeAccountsResult> {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    if (input.rows.length === 0) throw new Error("가져올 직원 데이터가 없습니다.");
+    if (input.rows.length > 200) throw new Error("한 번에 최대 200명까지 가져올 수 있습니다.");
+    if (input.rows.some((row) => row.employee.role === "HR_ADMIN" || row.employee.role === "SYSTEM_ADMIN")) {
+      await this.assertSystemAdmin(actorId, input.session);
+    }
+
+    const [employees, accounts, workplaces] = await Promise.all([
+      this.db.listEmployees(),
+      this.db.listEmployeeAccounts(),
+      this.db.listWorkplaces()
+    ]);
+    const employeeNumbers = new Set(employees.map((employee) => employee.employeeNumber?.trim().toUpperCase()).filter(Boolean));
+    const loginIds = new Set(accounts.map((account) => account.loginId.trim().toLowerCase()));
+    const incomingNumbers = new Set<string>();
+    const incomingLogins = new Set<string>();
+
+    for (const [index, row] of input.rows.entries()) {
+      const employee = this.buildNewEmployee(row.employee);
+      const loginId = row.loginId.trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9._-]{2,63}$/.test(loginId)) {
+        throw new Error(`${index + 1}번째 직원의 로그인 아이디가 올바르지 않습니다.`);
+      }
+      if (employeeNumbers.has(employee.employeeNumber!.toUpperCase()) || incomingNumbers.has(employee.employeeNumber!.toUpperCase())) {
+        throw new Error(`사번이 중복됩니다: ${employee.employeeNumber}`);
+      }
+      if (loginIds.has(loginId) || incomingLogins.has(loginId)) {
+        throw new Error(`로그인 아이디가 중복됩니다: ${loginId}`);
+      }
+      if (!employee.workplaceId || !workplaces.some((workplace) => workplace.id === employee.workplaceId)) {
+        throw new Error(`${index + 1}번째 직원의 근무지를 찾을 수 없습니다.`);
+      }
+      incomingNumbers.add(employee.employeeNumber!.toUpperCase());
+      incomingLogins.add(loginId);
+    }
+
+    const created: ImportEmployeeAccountsResult["created"] = [];
+    const auditLogs: ImportEmployeeAccountsResult["auditLogs"] = [];
+    for (const row of input.rows) {
+      const result = await this.createEmployeeAccount({ actorId, session: input.session, loginId: row.loginId, employee: row.employee });
+      created.push({ employee: result.employee, loginId: row.loginId.trim().toLowerCase(), temporaryPassword: result.temporaryPassword });
+      auditLogs.push(result.auditLog);
+    }
+
+    return { created, auditLogs };
   }
 
   async resetEmployeeAccountPassword(input: ResetEmployeeAccountPasswordInput) {
@@ -273,31 +425,11 @@ export class HrApi {
 
   async getEmployeeSnapshot(employeeId: string, asOf = this.clock(), session?: AuthSession): Promise<EmployeeSnapshot> {
     await this.assertCanReadEmployee(employeeId, session);
-    const [
-      employees,
-      attendanceRecordRows,
-      leaveRequestRows,
-      earlyLeaveLedgerRows,
-      overtimeRequestRows,
-      workplaceOptions,
-      correctionRows,
-      payrollStatementRows,
-      dailyWorkTaskRows,
-      auditLogs,
-      settings
-    ] = await Promise.all([
-      this.db.listEmployees(),
-      this.db.listAttendanceRecords(),
-      this.db.listLeaveRequests(),
-      this.db.listEarlyLeaveLedger(),
-      this.db.listOvertimeRequests(),
-      this.db.listWorkplaces(),
-      this.db.listCorrections(),
-      this.db.listPayrollStatements(false),
-      this.db.listDailyWorkTasks(),
-      this.db.listAuditLogs(),
-      this.db.getSettings()
-    ]);
+    return this.buildEmployeeSnapshot(await this.loadDataSnapshot(), employeeId, asOf, session);
+  }
+
+  private buildEmployeeSnapshot(data: HrDataSnapshot, employeeId: string, asOf: string, session?: AuthSession): EmployeeSnapshot {
+    const { employees, attendanceRecords: attendanceRecordRows, leaveRequests: leaveRequestRows, earlyLeaveLedger: earlyLeaveLedgerRows, leaveBalanceAdjustments: leaveBalanceAdjustmentRows, overtimeRequests: overtimeRequestRows, workplaces: workplaceOptions, corrections: correctionRows, correctionRequests: correctionRequestRows, payrollStatements: payrollStatementRows, dailyWorkTasks: dailyWorkTaskRows, auditLogs, settings } = data;
     const employee = employees.find((item) => item.id === employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
@@ -334,6 +466,8 @@ export class HrApi {
           })
         : undefined,
       attendanceCorrections: correctionRows.filter((correction) => correction.employeeId === employeeId),
+      attendanceCorrectionRequests: correctionRequestRows.filter((request) => request.employeeId === employeeId),
+      leaveBalanceAdjustments: leaveBalanceAdjustmentRows.filter((adjustment) => adjustment.employeeId === employeeId),
       payrollStatements: payrollStatementRows.filter((statement) => statement.employeeId === employeeId),
       dailyWorkTasks: dailyWorkTaskRows.filter((task) => task.employeeId === employeeId && task.date === asOf.slice(0, 10)),
       recentAuditLogs: auditLogs
@@ -472,15 +606,31 @@ export class HrApi {
     }
 
     const saved = await this.db.updateEmployee(applyEmployeeCardUpdate(employee, input.patch));
+    const isLeaveAdjustment = Object.prototype.hasOwnProperty.call(input.patch, "annualLeaveAdjustmentDays");
+    let leaveBalanceAdjustment: LeaveBalanceAdjustment | undefined;
+    if (isLeaveAdjustment) {
+      const delta = (saved.annualLeaveAdjustmentDays ?? 0) - (employee.annualLeaveAdjustmentDays ?? 0);
+      if (delta !== 0) {
+        leaveBalanceAdjustment = await this.db.addLeaveBalanceAdjustment({
+          id: await this.db.nextId("leave-adjustment"),
+          employeeId: saved.id,
+          days: delta,
+          reason: input.reason?.trim() || "직원카드에서 연차 HR 보정",
+          createdBy: actorId,
+          createdAt: this.clock()
+        });
+      }
+    }
+    const hasLeaveBalanceAdjustment = leaveBalanceAdjustment !== undefined;
     const auditLog = await this.addAuditLog({
       actorId,
-      action: "EMPLOYEE_CARD_UPDATED",
+      action: hasLeaveBalanceAdjustment ? "ANNUAL_LEAVE_BALANCE_ADJUSTED" : "EMPLOYEE_CARD_UPDATED",
       targetType: "Employee",
       targetId: saved.id,
       detail: input.reason ?? Object.keys(input.patch).sort().join(", ")
     });
 
-    return { employee: saved, auditLog };
+    return { employee: saved, leaveBalanceAdjustment, auditLog };
   }
 
   async revealEmployeeSensitiveData(input: RevealEmployeeSensitiveDataInput) {
@@ -669,6 +819,22 @@ export class HrApi {
       return { request: saved, auditLog };
     }
 
+    if (input.targetType === "AttendanceCorrectionRequest") {
+      const request = await this.findCorrectionRequest(input.requestId);
+      await this.assertCanReadEmployee(request.employeeId, input.session);
+      assertPendingRequest(request.status);
+      const resolvedActorId = this.resolveActorId(input, request.employeeId);
+      const saved = await this.db.updateCorrectionRequest({ ...request, status: "CANCELLED", decidedBy: resolvedActorId, decidedAt: this.clock() });
+      const auditLog = await this.addAuditLog({
+        actorId: resolvedActorId,
+        action: "ATTENDANCE_CORRECTION_REQUEST_CANCELLED",
+        targetType: input.targetType,
+        targetId: saved.id,
+        detail: input.detail ?? "신청자가 근태 정정 신청을 취소했습니다."
+      });
+      return { request: saved, auditLog };
+    }
+
     const request = await this.findOvertimeRequest(input.requestId);
     await this.assertCanReadEmployee(request.employeeId, input.session);
     assertPendingRequest(request.status);
@@ -728,6 +894,84 @@ export class HrApi {
     });
 
     return { correction: saved, auditLog };
+  }
+
+  async submitAttendanceCorrectionRequest(input: SubmitAttendanceCorrectionRequestInput) {
+    const employee = await this.findEmployee(input.employeeId);
+    await this.assertCanReadEmployee(input.employeeId, input.session);
+    assertActiveEmployment(employee, "submit attendance correction");
+    const requestedValue = input.requestedValue.trim();
+    const reason = input.reason.trim();
+    if (!requestedValue || !reason) {
+      throw new Error("Requested attendance time and reason are required");
+    }
+    if (input.attendanceId) {
+      const attendance = (await this.db.listAttendanceRecords()).find((record) => record.id === input.attendanceId);
+      if (!attendance || attendance.employeeId !== input.employeeId) {
+        throw new Error("Attendance record not found");
+      }
+    }
+
+    const request: AttendanceCorrectionRequest = {
+      id: await this.db.nextId("correction-request"),
+      attendanceId: input.attendanceId,
+      employeeId: input.employeeId,
+      type: input.type,
+      beforeValue: input.beforeValue,
+      requestedValue,
+      reason,
+      status: "PENDING",
+      createdAt: input.createdAt ?? this.clock()
+    };
+    const saved = await this.db.addCorrectionRequest(request);
+    const auditLog = await this.addAuditLog({
+      actorId: input.employeeId,
+      action: "ATTENDANCE_CORRECTION_REQUESTED",
+      targetType: "AttendanceCorrectionRequest",
+      targetId: saved.id,
+      detail: `${saved.type}: ${saved.reason}`
+    });
+
+    return { request: saved, auditLog };
+  }
+
+  async updateAttendanceCorrectionRequestStatus(input: UpdateAttendanceCorrectionRequestStatusInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    const request = await this.findCorrectionRequest(input.requestId);
+    await this.assertCanApprove(actorId, input.session, request.employeeId);
+    if (request.status !== "PENDING") {
+      throw new Error(`Only pending correction requests can be decided. Current status: ${request.status}`);
+    }
+
+    const saved = await this.db.updateCorrectionRequest({
+      ...request,
+      status: input.status,
+      decidedBy: actorId,
+      decidedAt: this.clock()
+    });
+    let correction: AttendanceCorrection | undefined;
+    if (input.status === "APPROVED" && request.attendanceId) {
+      correction = await this.db.addCorrection({
+        id: await this.db.nextId("corr"),
+        attendanceId: request.attendanceId,
+        employeeId: request.employeeId,
+        correctedById: actorId,
+        type: request.type,
+        beforeValue: request.beforeValue,
+        afterValue: request.requestedValue,
+        reason: request.reason,
+        createdAt: this.clock()
+      });
+    }
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: `ATTENDANCE_CORRECTION_REQUEST_${input.status}`,
+      targetType: "AttendanceCorrectionRequest",
+      targetId: saved.id,
+      detail: input.detail ?? `${saved.type} ${input.status === "APPROVED" ? "승인" : "반려"}`
+    });
+
+    return { request: saved, correction, auditLog };
   }
 
   async uploadPayrollStatement(input: UploadPayrollStatementInput) {
@@ -984,6 +1228,14 @@ export class HrApi {
 
   private async assertCanReadEmployee(employeeId: string, session?: AuthSession) {
     const employee = await this.findEmployee(employeeId);
+    this.assertCanReadEmployeeRecord(employeeId, session, employee);
+  }
+
+  private assertCanReadEmployeeRecord(employeeId: string, session: AuthSession | undefined, employee?: Employee) {
+    if (!employee) {
+      throw new Error(`Employee not found: ${employeeId}`);
+    }
+
     if (!session || isAdminSession(session) || session.employeeId === employeeId) {
       return;
     }
@@ -993,6 +1245,22 @@ export class HrApi {
     }
 
     throw new Error(`Employee access denied: ${session.employeeId} -> ${employeeId}`);
+  }
+
+  private async getEmployeeAccountStatesFromRows(session: AuthSession, employees: Employee[]) {
+    this.assertSessionActor(session, session.employeeId);
+    const actor = employees.find((employee) => employee.id === session.employeeId);
+    if (!actor || !isAdminSession(session) || (actor.role !== "HR_ADMIN" && actor.role !== "SYSTEM_ADMIN")) {
+      throw new Error(`Admin permission required: ${session.employeeId}`);
+    }
+
+    return (await this.db.listEmployeeAccounts()).map((account): EmployeeAccountState => ({
+      employeeId: account.employeeId,
+      loginId: account.loginId,
+      enabled: !account.disabledAt,
+      passwordChangedAt: account.passwordChangedAt,
+      lastSignedInAt: account.lastSignedInAt
+    }));
   }
 
   private async assertCanDownloadPayrollStatement(actorId: string, statement: PayrollStatement, session?: AuthSession) {
@@ -1081,11 +1349,12 @@ export class HrApi {
       return undefined;
     }
 
-    const [attendance, leaveRequests, overtimeRequests, corrections, payrollStatements, dailyWorkTasks] = await Promise.all([
+    const [attendance, leaveRequests, overtimeRequests, corrections, correctionRequests, payrollStatements, dailyWorkTasks] = await Promise.all([
       this.db.listAttendanceRecords(),
       this.db.listLeaveRequests(),
       this.db.listOvertimeRequests(),
       this.db.listCorrections(),
+      this.db.listCorrectionRequests(),
       this.db.listPayrollStatements(true),
       this.db.listDailyWorkTasks()
     ]);
@@ -1097,6 +1366,7 @@ export class HrApi {
       ...visible(leaveRequests).map((request) => request.id),
       ...visible(overtimeRequests).map((request) => request.id),
       ...visible(corrections).flatMap((correction) => [correction.id, correction.attendanceId]),
+      ...visible(correctionRequests).map((request) => request.id),
       ...visible(payrollStatements).map((statement) => statement.id),
       ...visible(dailyWorkTasks).map((task) => task.id)
     ]);
@@ -1134,6 +1404,15 @@ export class HrApi {
     const request = (await this.db.listOvertimeRequests()).find((item) => item.id === requestId);
     if (!request) {
       throw new Error(`Overtime request not found: ${requestId}`);
+    }
+
+    return request;
+  }
+
+  private async findCorrectionRequest(requestId: string) {
+    const request = (await this.db.listCorrectionRequests()).find((item) => item.id === requestId);
+    if (!request) {
+      throw new Error(`Attendance correction request not found: ${requestId}`);
     }
 
     return request;
@@ -1262,9 +1541,35 @@ function assertSystemPolicy(settings: import("./types.js").SystemPolicy) {
     || settings.workDays.some((day) => !validWorkDays.has(day))) {
     throw new Error("At least one valid, unique work day is required");
   }
+  if (settings.payrollHolidayDates.length > 100
+    || new Set(settings.payrollHolidayDates).size !== settings.payrollHolidayDates.length
+    || settings.payrollHolidayDates.some((date) => !/^\d{4}-\d{2}-\d{2}$/.test(date))) {
+    throw new Error("Payroll holiday dates must use unique YYYY-MM-DD values");
+  }
   if (settings.annualLeaveUnit !== 0.5 && settings.annualLeaveUnit !== 1) {
     throw new Error("Annual leave unit must be 0.5 or 1 day");
   }
+}
+
+function normalizeWorkplace(workplace: Workplace): Workplace {
+  const name = workplace.name.trim();
+  const qrPath = workplace.qrPath.trim();
+  if (!name || name.length > 80) {
+    throw new Error("Workplace name is required and must be 80 characters or fewer");
+  }
+  if (!Number.isFinite(workplace.latitude) || workplace.latitude < -90 || workplace.latitude > 90) {
+    throw new Error("Workplace latitude must be between -90 and 90");
+  }
+  if (!Number.isFinite(workplace.longitude) || workplace.longitude < -180 || workplace.longitude > 180) {
+    throw new Error("Workplace longitude must be between -180 and 180");
+  }
+  if (!Number.isInteger(workplace.allowedRadiusMeters) || workplace.allowedRadiusMeters < 50 || workplace.allowedRadiusMeters > 5_000) {
+    throw new Error("Workplace radius must be an integer between 50 and 5000 meters");
+  }
+  if (!qrPath.startsWith("/")) {
+    throw new Error("Workplace QR path must start with /");
+  }
+  return { ...workplace, name, qrPath };
 }
 
 function redactSensitiveEmployee(employee: Employee): Employee {
@@ -1401,12 +1706,16 @@ export const updateDailyWorkTaskPlan = defaultHrApi.updateDailyWorkTaskPlan.bind
 export const updateEmployeeCard = defaultHrApi.updateEmployeeCard.bind(defaultHrApi);
 export const revealEmployeeSensitiveData = defaultHrApi.revealEmployeeSensitiveData.bind(defaultHrApi);
 export const createEmployeeAccount = defaultHrApi.createEmployeeAccount.bind(defaultHrApi);
+export const importEmployeeAccounts = defaultHrApi.importEmployeeAccounts.bind(defaultHrApi);
 export const resetEmployeeAccountPassword = defaultHrApi.resetEmployeeAccountPassword.bind(defaultHrApi);
 export const setEmployeeAccountAccess = defaultHrApi.setEmployeeAccountAccess.bind(defaultHrApi);
 export const getEmployeeAccountStates = defaultHrApi.getEmployeeAccountStates.bind(defaultHrApi);
 export const registerUploadedPayrollStatement = defaultHrApi.registerUploadedPayrollStatement.bind(defaultHrApi);
 export const getSettings = defaultHrApi.getSettings.bind(defaultHrApi);
 export const updateSettings = defaultHrApi.updateSettings.bind(defaultHrApi);
+export const createWorkplace = defaultHrApi.createWorkplace.bind(defaultHrApi);
+export const updateWorkplace = defaultHrApi.updateWorkplace.bind(defaultHrApi);
+export const deleteWorkplace = defaultHrApi.deleteWorkplace.bind(defaultHrApi);
 export const clockAttendance = defaultHrApi.clockAttendance.bind(defaultHrApi);
 export const submitLeaveRequest = defaultHrApi.submitLeaveRequest.bind(defaultHrApi);
 export const submitOvertimeRequest = defaultHrApi.submitOvertimeRequest.bind(defaultHrApi);
@@ -1414,6 +1723,8 @@ export const updateRequestStatus = defaultHrApi.updateRequestStatus.bind(default
 export const cancelRequest = defaultHrApi.cancelRequest.bind(defaultHrApi);
 export const setOvertimePayApproval = defaultHrApi.setOvertimePayApproval.bind(defaultHrApi);
 export const createAttendanceCorrection = defaultHrApi.createAttendanceCorrection.bind(defaultHrApi);
+export const submitAttendanceCorrectionRequest = defaultHrApi.submitAttendanceCorrectionRequest.bind(defaultHrApi);
+export const updateAttendanceCorrectionRequestStatus = defaultHrApi.updateAttendanceCorrectionRequestStatus.bind(defaultHrApi);
 export const uploadPayrollStatement = defaultHrApi.uploadPayrollStatement.bind(defaultHrApi);
 export const downloadPayrollStatement = defaultHrApi.downloadPayrollStatement.bind(defaultHrApi);
 export const softDeletePayrollStatement = defaultHrApi.softDeletePayrollStatement.bind(defaultHrApi);

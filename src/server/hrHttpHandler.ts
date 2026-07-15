@@ -134,12 +134,18 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.setOvertimePayApproval(payload as never);
     case "createAttendanceCorrection":
       return await api.createAttendanceCorrection(payload as never);
+    case "submitAttendanceCorrectionRequest":
+      return await api.submitAttendanceCorrectionRequest(payload as never);
+    case "updateAttendanceCorrectionRequestStatus":
+      return await api.updateAttendanceCorrectionRequestStatus(payload as never);
     case "updateEmployeeCard":
       return await api.updateEmployeeCard(payload as never);
     case "revealEmployeeSensitiveData":
       return await api.revealEmployeeSensitiveData(payload as never);
     case "createEmployeeAccount":
       return await api.createEmployeeAccount(payload as never);
+    case "importEmployeeAccounts":
+      return await api.importEmployeeAccounts(payload as never);
     case "resetEmployeeAccountPassword":
       return await api.resetEmployeeAccountPassword(payload as never);
     case "setEmployeeAccountAccess":
@@ -156,6 +162,12 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.softDeletePayrollStatement(payload as never);
     case "updateSettings":
       return await api.updateSettings(payload as never);
+    case "createWorkplace":
+      return await api.createWorkplace(payload as never);
+    case "updateWorkplace":
+      return await api.updateWorkplace(payload as never);
+    case "deleteWorkplace":
+      return await api.deleteWorkplace(payload as never);
     default:
       throw new Error(`Unsupported POST action: ${body?.action ?? "missing"}`);
   }

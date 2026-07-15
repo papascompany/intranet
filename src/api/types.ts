@@ -1,5 +1,6 @@
 import type {
   AttendanceCorrection,
+  AttendanceCorrectionRequest,
   AttendanceRecord,
   AuditLog,
   ClockType,
@@ -7,6 +8,7 @@ import type {
   EarlyLeaveLedger,
   Employee,
   LeaveBalance,
+  LeaveBalanceAdjustment,
   LeaveRequest,
   LeaveType,
   OvertimeOffsetResult,
@@ -79,10 +81,26 @@ export type UpdateRequestStatusInput = AuthenticatedInput & {
 };
 
 export type CancelRequestInput = AuthenticatedInput & {
-  targetType: "LeaveRequest" | "OvertimeRequest";
+  targetType: "LeaveRequest" | "OvertimeRequest" | "AttendanceCorrectionRequest";
   requestId: string;
   actorId?: string;
   detail?: string;
+};
+
+export type CreateWorkplaceInput = AuthenticatedInput & {
+  actorId: string;
+  workplace: Omit<Workplace, "id">;
+};
+
+export type UpdateWorkplaceInput = AuthenticatedInput & {
+  actorId: string;
+  workplaceId: string;
+  patch: Partial<Omit<Workplace, "id">>;
+};
+
+export type DeleteWorkplaceInput = AuthenticatedInput & {
+  actorId: string;
+  workplaceId: string;
 };
 
 export type SetOvertimePayApprovalInput = AuthenticatedInput & {
@@ -101,6 +119,23 @@ export type CreateAttendanceCorrectionInput = AuthenticatedInput & {
   afterValue: string;
   reason: string;
   createdAt?: string;
+};
+
+export type SubmitAttendanceCorrectionRequestInput = AuthenticatedInput & {
+  employeeId: string;
+  attendanceId?: string;
+  type: CorrectionType;
+  beforeValue?: string;
+  requestedValue: string;
+  reason: string;
+  createdAt?: string;
+};
+
+export type UpdateAttendanceCorrectionRequestStatusInput = AuthenticatedInput & {
+  requestId: string;
+  status: Extract<AttendanceCorrectionRequest["status"], "APPROVED" | "REJECTED">;
+  actorId: string;
+  detail?: string;
 };
 
 export type UploadPayrollStatementInput = AuthenticatedInput & {
@@ -129,6 +164,27 @@ export type CreateEmployeeAccountInput = AuthenticatedInput & {
   actorId: string;
   employee: Omit<Employee, "id">;
   loginId: string;
+};
+
+export type EmployeeAccountImportRow = {
+  loginId: string;
+  employee: Omit<Employee, "id">;
+};
+
+export type ImportEmployeeAccountsInput = AuthenticatedInput & {
+  actorId: string;
+  rows: EmployeeAccountImportRow[];
+};
+
+export type ImportedEmployeeAccount = {
+  employee: Employee;
+  loginId: string;
+  temporaryPassword: string;
+};
+
+export type ImportEmployeeAccountsResult = {
+  created: ImportedEmployeeAccount[];
+  auditLogs: AuditLog[];
 };
 
 export type ResetEmployeeAccountPasswordInput = AuthenticatedInput & {
@@ -202,6 +258,7 @@ export type SystemPolicy = {
   breakStartTime: string;
   breakEndTime: string;
   workDays: Array<"MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN">;
+  payrollHolidayDates: string[];
   annualLeaveAutoAccrual: boolean;
   annualLeaveUnit: 0.5 | 1;
   partialLeaveAllowed: boolean;
@@ -221,6 +278,7 @@ export const defaultSystemPolicy: SystemPolicy = {
   breakStartTime: "12:00",
   breakEndTime: "13:00",
   workDays: ["MON", "TUE", "WED", "THU", "FRI"],
+  payrollHolidayDates: [],
   annualLeaveAutoAccrual: true,
   annualLeaveUnit: 0.5,
   partialLeaveAllowed: true,
@@ -304,10 +362,13 @@ export type Dashboard = {
   employeesTotal: number;
   pilotEmployees: number;
   todayAttendance: AttendanceRecord[];
+  /** Admin sessions receive the full visible attendance set; employee sessions receive only self records. */
+  attendanceRecords?: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
   pendingLeaveRequests: LeaveRequest[];
   overtimeRequests: OvertimeRequest[];
   corrections: AttendanceCorrection[];
+  correctionRequests?: AttendanceCorrectionRequest[];
   gpsFailedAttendance: AttendanceRecord[];
   activePayrollStatements: PayrollStatement[];
   settings?: SystemPolicy;
@@ -326,6 +387,8 @@ export type EmployeeSnapshot = {
   overtimeRequests: OvertimeRequest[];
   overtimeOffset?: OvertimeOffsetResult;
   attendanceCorrections: AttendanceCorrection[];
+  attendanceCorrectionRequests?: AttendanceCorrectionRequest[];
+  leaveBalanceAdjustments?: LeaveBalanceAdjustment[];
   payrollStatements: PayrollStatement[];
   dailyWorkTasks: import("../domain/types.js").DailyWorkTask[];
   recentAuditLogs: AuditLog[];

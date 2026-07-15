@@ -1,10 +1,12 @@
 import type {
   AttendanceCorrection,
+  AttendanceCorrectionRequest,
   AttendanceRecord,
   AuditLog,
   DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
+  LeaveBalanceAdjustment,
   LeaveRequest,
   OvertimeRequest,
   PayrollStatement,
@@ -33,8 +35,10 @@ export type InMemoryDatabaseSeed = {
   verificationAttempts?: VerificationAttempt[];
   leaveRequests?: LeaveRequest[];
   earlyLeaveLedger?: EarlyLeaveLedger[];
+  leaveBalanceAdjustments?: LeaveBalanceAdjustment[];
   overtimeRequests?: OvertimeRequest[];
   corrections?: AttendanceCorrection[];
+  correctionRequests?: AttendanceCorrectionRequest[];
   payrollStatements?: PayrollStatement[];
   auditLogs?: AuditLog[];
   dailyWorkTasks?: DailyWorkTask[];
@@ -49,8 +53,10 @@ export class InMemoryDatabase implements HrRepository {
   private readonly verificationAttempts: VerificationAttempt[];
   private readonly leaveRequests: LeaveRequest[];
   private readonly earlyLeaveLedger: EarlyLeaveLedger[];
+  private readonly leaveBalanceAdjustments: LeaveBalanceAdjustment[];
   private readonly overtimeRequests: OvertimeRequest[];
   private readonly corrections: AttendanceCorrection[];
+  private readonly correctionRequests: AttendanceCorrectionRequest[];
   private readonly payrollStatements: PayrollStatement[];
   private readonly auditLogs: AuditLog[];
   private readonly dailyWorkTasks: DailyWorkTask[];
@@ -64,8 +70,10 @@ export class InMemoryDatabase implements HrRepository {
     this.verificationAttempts = cloneList(seed.verificationAttempts ?? []);
     this.leaveRequests = cloneList(seed.leaveRequests ?? leaveRequests);
     this.earlyLeaveLedger = cloneList(seed.earlyLeaveLedger ?? earlyLeaveLedger);
+    this.leaveBalanceAdjustments = cloneList(seed.leaveBalanceAdjustments ?? []);
     this.overtimeRequests = cloneList(seed.overtimeRequests ?? overtimeRequests);
     this.corrections = cloneList(seed.corrections ?? corrections);
+    this.correctionRequests = cloneList(seed.correctionRequests ?? []);
     this.payrollStatements = cloneList(seed.payrollStatements ?? payrollStatements);
     this.auditLogs = cloneList(seed.auditLogs ?? auditLogs);
     this.dailyWorkTasks = cloneList(seed.dailyWorkTasks ?? dailyWorkTasks);
@@ -133,6 +141,32 @@ export class InMemoryDatabase implements HrRepository {
     return cloneList(this.workplaces);
   }
 
+  addWorkplace(workplace: Workplace) {
+    if (this.workplaces.some((item) => item.id === workplace.id)) {
+      throw new Error(`Workplace already exists: ${workplace.id}`);
+    }
+    this.workplaces.push(cloneItem(workplace));
+    return cloneItem(workplace);
+  }
+
+  updateWorkplace(workplace: Workplace) {
+    const index = this.workplaces.findIndex((item) => item.id === workplace.id);
+    if (index < 0) {
+      throw new Error(`Workplace not found: ${workplace.id}`);
+    }
+    this.workplaces[index] = cloneItem(workplace);
+    return cloneItem(this.workplaces[index]);
+  }
+
+  deleteWorkplace(workplaceId: string) {
+    const index = this.workplaces.findIndex((item) => item.id === workplaceId);
+    if (index < 0) {
+      throw new Error(`Workplace not found: ${workplaceId}`);
+    }
+    const [deleted] = this.workplaces.splice(index, 1);
+    return cloneItem(deleted);
+  }
+
   listAttendanceRecords() {
     return cloneList(this.attendanceRecords);
   }
@@ -177,6 +211,15 @@ export class InMemoryDatabase implements HrRepository {
     return cloneItem(this.leaveRequests[index]);
   }
 
+  listLeaveBalanceAdjustments() {
+    return cloneList(this.leaveBalanceAdjustments);
+  }
+
+  addLeaveBalanceAdjustment(adjustment: LeaveBalanceAdjustment) {
+    this.leaveBalanceAdjustments.unshift(cloneItem(adjustment));
+    return cloneItem(adjustment);
+  }
+
   listEarlyLeaveLedger() {
     return cloneList(this.earlyLeaveLedger);
   }
@@ -219,6 +262,25 @@ export class InMemoryDatabase implements HrRepository {
   addCorrection(correction: AttendanceCorrection) {
     this.corrections.unshift(cloneItem(correction));
     return cloneItem(correction);
+  }
+
+  listCorrectionRequests() {
+    return cloneList(this.correctionRequests);
+  }
+
+  addCorrectionRequest(request: AttendanceCorrectionRequest) {
+    this.correctionRequests.unshift(cloneItem(request));
+    return cloneItem(request);
+  }
+
+  updateCorrectionRequest(request: AttendanceCorrectionRequest) {
+    const index = this.correctionRequests.findIndex((item) => item.id === request.id);
+    if (index < 0) {
+      throw new Error(`Attendance correction request not found: ${request.id}`);
+    }
+
+    this.correctionRequests[index] = cloneItem(request);
+    return cloneItem(this.correctionRequests[index]);
   }
 
   listPayrollStatements(includeDeleted = false) {

@@ -104,6 +104,16 @@ export function SystemPolicyEditor({ busy = false, error, onSave, settings }: Sy
             <PolicyToggle checked={draft.partialLeaveAllowed} label="부분휴가 사용 허용" onChange={(checked) => update("partialLeaveAllowed", checked)} />
             <PolicyToggle checked={draft.annualLeaveOveruseAllowed} label="연차 초과 사용 허용" onChange={(checked) => update("annualLeaveOveruseAllowed", checked)} />
           </div>
+          <label className="system-policy-editor__holiday-field">
+            <span>추가 공휴일</span>
+            <small>음력 명절·임시공휴일 등 급여 알림을 앞당길 날짜를 YYYY-MM-DD로 입력하세요. 여러 날짜는 줄바꿈 또는 쉼표로 구분합니다.</small>
+            <textarea
+              aria-label="추가 공휴일"
+              onChange={(event) => update("payrollHolidayDates", parseHolidayDates(event.target.value))}
+              rows={3}
+              value={draft.payrollHolidayDates.join("\n")}
+            />
+          </label>
         </section>
 
         <section aria-labelledby="gps-policy-title" className="system-policy-editor__setting">
@@ -130,4 +140,8 @@ export function SystemPolicyEditor({ busy = false, error, onSave, settings }: Sy
 
 function PolicyToggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
   return <label className="system-policy-editor__toggle"><input checked={checked} onChange={(event) => onChange(event.target.checked)} type="checkbox" /><span aria-hidden="true" /><strong>{label}</strong></label>;
+}
+
+function parseHolidayDates(value: string) {
+  return [...new Set(value.split(/[\n,]/).map((date) => date.trim()).filter(Boolean))];
 }

@@ -1,11 +1,13 @@
 import type {
   AttendanceCorrection,
+  AttendanceCorrectionRequest,
   AttendanceRecord,
   AuditLog,
   DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   LeaveRequest,
+  LeaveBalanceAdjustment,
   OvertimeRequest,
   PayrollStatement,
   VerificationAttempt,
@@ -24,6 +26,9 @@ export interface HrRepository {
   findEmployeeAccount(employeeId: string): MaybePromise<EmployeeAuthAccount | undefined>;
   updateEmployeeAccount(account: EmployeeAuthAccount): MaybePromise<EmployeeAuthAccount>;
   listWorkplaces(): MaybePromise<Workplace[]>;
+  addWorkplace(workplace: Workplace): MaybePromise<Workplace>;
+  updateWorkplace(workplace: Workplace): MaybePromise<Workplace>;
+  deleteWorkplace(workplaceId: string): MaybePromise<Workplace>;
   listAttendanceRecords(): MaybePromise<AttendanceRecord[]>;
   findAttendanceByEmployeeDate(employeeId: string, date: string): MaybePromise<AttendanceRecord | undefined>;
   upsertAttendanceRecord(record: AttendanceRecord): MaybePromise<AttendanceRecord>;
@@ -31,6 +36,8 @@ export interface HrRepository {
   listLeaveRequests(): MaybePromise<LeaveRequest[]>;
   addLeaveRequest(request: LeaveRequest): MaybePromise<LeaveRequest>;
   updateLeaveRequest(request: LeaveRequest): MaybePromise<LeaveRequest>;
+  listLeaveBalanceAdjustments(): MaybePromise<LeaveBalanceAdjustment[]>;
+  addLeaveBalanceAdjustment(adjustment: LeaveBalanceAdjustment): MaybePromise<LeaveBalanceAdjustment>;
   listEarlyLeaveLedger(): MaybePromise<EarlyLeaveLedger[]>;
   upsertEarlyLeaveLedger(entry: EarlyLeaveLedger): MaybePromise<EarlyLeaveLedger>;
   listOvertimeRequests(): MaybePromise<OvertimeRequest[]>;
@@ -38,6 +45,9 @@ export interface HrRepository {
   updateOvertimeRequest(request: OvertimeRequest): MaybePromise<OvertimeRequest>;
   listCorrections(): MaybePromise<AttendanceCorrection[]>;
   addCorrection(correction: AttendanceCorrection): MaybePromise<AttendanceCorrection>;
+  listCorrectionRequests(): MaybePromise<AttendanceCorrectionRequest[]>;
+  addCorrectionRequest(request: AttendanceCorrectionRequest): MaybePromise<AttendanceCorrectionRequest>;
+  updateCorrectionRequest(request: AttendanceCorrectionRequest): MaybePromise<AttendanceCorrectionRequest>;
   listPayrollStatements(includeDeleted?: boolean): MaybePromise<PayrollStatement[]>;
   addPayrollStatement(statement: PayrollStatement): MaybePromise<PayrollStatement>;
   updatePayrollStatement(statement: PayrollStatement): MaybePromise<PayrollStatement>;

@@ -1,5 +1,6 @@
 import type {
   AttendanceRecord,
+  AttendanceCorrectionRequest,
   Employee,
   LeaveBalance,
   LeaveRequest,
@@ -20,6 +21,7 @@ type LeaveBalanceSnapshot = Pick<
 >;
 type LeaveRequestSnapshot = Pick<LeaveRequest, "days" | "status">;
 type OvertimeRequestSnapshot = Pick<OvertimeRequest, "minutes" | "status">;
+type CorrectionRequestSnapshot = Pick<AttendanceCorrectionRequest, "status">;
 type OvertimeOffsetSnapshot = Pick<
   OvertimeOffsetResult,
   "appliedMinutes" | "payEligibleMinutes" | "remainingEarlyLeaveMinutes" | "remainingOvertimeMinutes" | "status"
@@ -32,6 +34,7 @@ export type EmployeeViewModelSnapshot = {
   leaveBalance: LeaveBalanceSnapshot;
   leaveRequests: LeaveRequestSnapshot[];
   overtimeRequests?: OvertimeRequestSnapshot[];
+  correctionRequests?: CorrectionRequestSnapshot[];
   earlyLeaveTotalMinutes: number;
   overtimeOffset: OvertimeOffsetSnapshot;
   payrollStatements: PayrollStatementSnapshot[];
@@ -47,6 +50,7 @@ export type EmployeeViewModel = {
   offsetLabel: string;
   pendingLeaveSummary: string;
   pendingOvertimeSummary: string;
+  correctionSummary: string;
   overtimeSummary: string;
   payrollSummary: string;
 };
@@ -71,6 +75,8 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
   const pendingLeaveDays = pendingLeaveRequests.reduce((total, request) => total + request.days, 0);
   const pendingOvertimeRequests = (snapshot.overtimeRequests ?? []).filter((request) => request.status === "PENDING");
   const pendingOvertimeMinutes = pendingOvertimeRequests.reduce((total, request) => total + request.minutes, 0);
+  const correctionRequests = snapshot.correctionRequests ?? [];
+  const pendingCorrectionRequests = correctionRequests.filter((request) => request.status === "PENDING");
   const activePayrollStatements = snapshot.payrollStatements.filter((statement) => !statement.deletedAt);
   const latestPayrollStatement = activePayrollStatements.sort(comparePayrollStatementsDesc)[0];
 
@@ -92,6 +98,10 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
       pendingOvertimeRequests.length === 0
         ? "대기 중인 야근 없음"
         : `대기 야근 ${pendingOvertimeRequests.length}건 · ${formatMinutes(pendingOvertimeMinutes)}`,
+    correctionSummary:
+      pendingCorrectionRequests.length === 0
+        ? "대기 중인 근태 정정 없음"
+        : `대기 정정 ${pendingCorrectionRequests.length}건 · 관리자 확인 필요`,
     overtimeSummary: formatOvertimeSummary(snapshot.overtimeOffset),
     payrollSummary: latestPayrollStatement
       ? `${latestPayrollStatement.month} 급여명세서 · ${latestPayrollStatement.filename}`

@@ -1,6 +1,8 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { KeyRound, Plus, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { KeyRound, ShieldCheck, Upload, UserPlus, Users } from "lucide-react";
+import type { ImportEmployeeAccountsResult } from "../api/types";
 import type { Employee, Role, Workplace } from "../domain/types";
+import { parseEmployeeCsv, type EmployeeImportRow } from "../features/employeeCsv";
 import { FormDialog, InlineNotice } from "./operational";
 import "./employeeAccountManager.css";
 
@@ -36,6 +38,7 @@ export interface EmployeeAccountManagerProps {
   onCreate: (input: EmployeeAccountCreateInput) => EmployeeAccountPasswordResult | Promise<EmployeeAccountPasswordResult>;
   onResetPassword: (employeeId: string, temporaryPassword: string) => void | EmployeeAccountPasswordResult | Promise<void | EmployeeAccountPasswordResult>;
   onSetEnabled: (employeeId: string, enabled: boolean) => void | Promise<void>;
+  onImport: (rows: EmployeeImportRow[]) => Promise<ImportEmployeeAccountsResult>;
   workplaces: readonly EmployeeAccountWorkplace[];
 }
 
@@ -54,7 +57,17 @@ function roleLabel(role: Role) {
   return roles.find((option) => option.value === role)?.label ?? role;
 }
 
-export function EmployeeAccountManager({ accountStates, busy = false, canManageAdminRoles = false, employees, onCreate, onResetPassword, onSetEnabled, workplaces }: EmployeeAccountManagerProps) {
+async function readTextFile(file: File) {
+  if (typeof file.text === "function") return await file.text();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("CSV 파일을 읽지 못했습니다."));
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsText(file);
+  });
+}
+
+export function EmployeeAccountManager({ accountStates, busy = false, canManageAdminRoles = false, employees, onCreate, onResetPassword, onSetEnabled, onImport, workplaces }: EmployeeAccountManagerProps) {
   const [draft, setDraft] = useState(() => newDraft(workplaces));
   const [createOpen, setCreateOpen] = useState(false);
   const [resetEmployee, setResetEmployee] = useState<EmployeeAccountEmployee | null>(null);
@@ -63,6 +76,10 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<EmployeeImportRow[]>([]);
+  const [importFileName, setImportFileName] = useState("");
+  const [importedCredentials, setImportedCredentials] = useState<ImportEmployeeAccountsResult["created"]>([]);
   const isBusy = busy || isSubmitting;
   const availableRoles = canManageAdminRoles ? roles : roles.filter((role) => role.value === "EMPLOYEE" || role.value === "APPROVER");
 
@@ -126,6 +143,36 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
 
   const resetPasswordIsValid = resetPassword.length >= 12 && resetPassword === resetPasswordConfirmation;
 
+  const prepareImport = async (file: File | null) => {
+    if (!file) return;
+    setError(null);
+    try {
+      const rows = parseEmployeeCsv(await readTextFile(file), workplaces);
+      setImportRows(rows);
+      setImportFileName(file.name);
+      setImportOpen(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "직원명부 CSV를 읽지 못했습니다.");
+    }
+  };
+
+  const importAccounts = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isBusy || !importRows.length) return;
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const result = await onImport(importRows);
+      setImportedCredentials(result.created);
+      setImportRows([]);
+      setImportOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "직원 계정을 일괄 발급하지 못했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <section aria-labelledby="employee-account-manager-title" className="employee-account-manager">
       <header className="employee-account-manager__header">
@@ -134,15 +181,26 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
           <h2 id="employee-account-manager-title">직원 계정 관리</h2>
           <p>입사자 계정을 발급하고 접근 상태를 관리합니다.</p>
         </div>
-        <button className="employee-account-manager__create" disabled={isBusy || workplaces.length === 0} onClick={() => { setError(null); setCreateOpen(true); }} type="button">
-          <UserPlus aria-hidden="true" /> 직원 계정 발급
-        </button>
+        <div className="employee-account-manager__header-actions">
+          <label className="employee-account-manager__import"><Upload aria-hidden="true" size={15} /> 직원명부 CSV<input accept=".csv,text/csv" aria-label="직원명부 CSV 선택" disabled={isBusy || workplaces.length === 0} onChange={(event) => { void prepareImport(event.target.files?.[0] ?? null); event.target.value = ""; }} type="file" /></label>
+          <button className="employee-account-manager__create" disabled={isBusy || workplaces.length === 0} onClick={() => { setError(null); setCreateOpen(true); }} type="button">
+            <UserPlus aria-hidden="true" /> 직원 계정 발급
+          </button>
+        </div>
       </header>
 
       {temporaryPassword ? (
         <InlineNotice onDismiss={() => setTemporaryPassword(null)} title="임시 비밀번호가 발급되었습니다" tone="success">
           <span className="employee-account-manager__password">{temporaryPassword}</span>
           <span> 직원에게 안전한 방법으로 전달하고, 첫 로그인 후 변경하도록 안내하세요.</span>
+        </InlineNotice>
+      ) : null}
+      {importedCredentials.length ? (
+        <InlineNotice onDismiss={() => setImportedCredentials([])} title="직원 계정이 발급되었습니다" tone="success">
+          <div className="employee-account-manager__import-result">
+            <p>아래 임시 비밀번호는 이번 화면에서만 확인할 수 있습니다. 직원에게 안전한 방법으로 전달하세요.</p>
+            <table><thead><tr><th>이름</th><th>아이디</th><th>1회성 비밀번호</th></tr></thead><tbody>{importedCredentials.map((item) => <tr key={item.employee.id}><td>{item.employee.name}</td><td>{item.loginId}</td><td><code>{item.temporaryPassword}</code></td></tr>)}</tbody></table>
+          </div>
         </InlineNotice>
       ) : null}
       {error && !createOpen ? <InlineNotice title="처리하지 못했습니다" tone="danger">{error}</InlineNotice> : null}
@@ -193,6 +251,13 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
           <label><span>임시 비밀번호 확인</span><input autoComplete="new-password" minLength={12} onChange={(event) => setResetPasswordConfirmation(event.target.value)} required type="password" value={resetPasswordConfirmation} /></label>
           {resetPassword && resetPassword.length < 12 ? <p className="employee-account-manager__password-help">임시 비밀번호는 12자 이상이어야 합니다.</p> : null}
           {resetPasswordConfirmation && resetPassword !== resetPasswordConfirmation ? <p className="employee-account-manager__password-help">임시 비밀번호가 일치하지 않습니다.</p> : null}
+        </div>
+      </FormDialog>
+
+      <FormDialog busy={isBusy} description={`${importFileName} · ${importRows.length}명의 직원 계정을 발급합니다. 아이디·사번·근무지 중복을 서버에서 다시 검증합니다.`} error={error ?? undefined} onClose={() => { if (!isBusy) { setImportOpen(false); setImportRows([]); } }} onSubmit={importAccounts} open={importOpen} submitDisabled={!importRows.length} submitLabel="계정 일괄 발급" title="직원명부 가져오기">
+        <div className="employee-account-manager__import-preview">
+          <strong>가져올 직원 {importRows.length}명</strong>
+          <div className="employee-account-manager__import-table-wrap"><table><thead><tr><th>행</th><th>이름</th><th>아이디</th><th>사번</th><th>근무지</th></tr></thead><tbody>{importRows.map((row) => <tr key={`${row.rowNumber}-${row.loginId}`}><td>{row.rowNumber}</td><td>{row.employee.name}</td><td>{row.loginId}</td><td>{row.employee.employeeNumber}</td><td>{workplaces.find((workplace) => workplace.id === row.employee.workplaceId)?.name ?? row.employee.workplaceId}</td></tr>)}</tbody></table></div>
         </div>
       </FormDialog>
     </section>

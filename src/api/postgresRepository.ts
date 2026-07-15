@@ -1,11 +1,13 @@
 import type {
   AttendanceCorrection,
+  AttendanceCorrectionRequest,
   AttendanceRecord,
   AuditLog,
   DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
   EmployeeCustomAdminFields,
+  LeaveBalanceAdjustment,
   LeaveRequest,
   OvertimeRequest,
   PayrollStatement,
@@ -89,6 +91,21 @@ export class PostgresHrRepository implements HrRepository {
     return rows.map(workplaceFromRow);
   }
 
+  async addWorkplace(workplace: Workplace) {
+    const [row] = await this.insert<WorkplaceRow>("workplaces", workplaceToRow(workplace));
+    return workplaceFromRow(requireRow(row, "workplaces", workplace.id));
+  }
+
+  async updateWorkplace(workplace: Workplace) {
+    const [row] = await this.update<WorkplaceRow>("workplaces", workplaceToRow(workplace), "id", workplace.id);
+    return workplaceFromRow(requireRow(row, "workplaces", workplace.id));
+  }
+
+  async deleteWorkplace(workplaceId: string) {
+    const [row] = await this.query<WorkplaceRow>("delete from workplaces where id = $1 returning *", [workplaceId]);
+    return workplaceFromRow(requireRow(row, "workplaces", workplaceId));
+  }
+
   async listAttendanceRecords() {
     const rows = await this.query<AttendanceRow>("select * from attendance_records order by work_date desc");
     return rows.map(attendanceFromRow);
@@ -127,6 +144,16 @@ export class PostgresHrRepository implements HrRepository {
     return leaveRequestFromRow(requireRow(row, "leave_requests", request.id));
   }
 
+  async listLeaveBalanceAdjustments() {
+    const rows = await this.query<LeaveBalanceAdjustmentRow>("select * from leave_balance_adjustments order by created_at desc");
+    return rows.map(leaveBalanceAdjustmentFromRow);
+  }
+
+  async addLeaveBalanceAdjustment(adjustment: LeaveBalanceAdjustment) {
+    const [row] = await this.insert<LeaveBalanceAdjustmentRow>("leave_balance_adjustments", leaveBalanceAdjustmentToRow(adjustment));
+    return leaveBalanceAdjustmentFromRow(requireRow(row, "leave_balance_adjustments", adjustment.id));
+  }
+
   async listEarlyLeaveLedger() {
     const rows = await this.query<EarlyLeaveRow>("select * from early_leave_ledger order by work_date desc");
     return rows.map(earlyLeaveFromRow);
@@ -160,6 +187,21 @@ export class PostgresHrRepository implements HrRepository {
   async addCorrection(correction: AttendanceCorrection) {
     const [row] = await this.insert<CorrectionRow>("attendance_corrections", correctionToRow(correction));
     return correctionFromRow(requireRow(row, "attendance_corrections", correction.id));
+  }
+
+  async listCorrectionRequests() {
+    const rows = await this.query<CorrectionRequestRow>("select * from attendance_correction_requests order by created_at desc");
+    return rows.map(correctionRequestFromRow);
+  }
+
+  async addCorrectionRequest(request: AttendanceCorrectionRequest) {
+    const [row] = await this.insert<CorrectionRequestRow>("attendance_correction_requests", correctionRequestToRow(request));
+    return correctionRequestFromRow(requireRow(row, "attendance_correction_requests", request.id));
+  }
+
+  async updateCorrectionRequest(request: AttendanceCorrectionRequest) {
+    const [row] = await this.update<CorrectionRequestRow>("attendance_correction_requests", correctionRequestToRow(request), "id", request.id);
+    return correctionRequestFromRow(requireRow(row, "attendance_correction_requests", request.id));
   }
 
   async listPayrollStatements(includeDeleted = false) {
@@ -308,9 +350,11 @@ type WorkplaceRow = DbRow;
 type AttendanceRow = DbRow & { status: AttendanceRecord["status"] };
 type VerificationRow = DbRow & { method: VerificationAttempt["method"]; status: VerificationAttempt["status"] };
 type LeaveRequestRow = DbRow & { type: LeaveRequest["type"]; status: LeaveRequest["status"] };
+type LeaveBalanceAdjustmentRow = DbRow;
 type EarlyLeaveRow = DbRow & { status: EarlyLeaveLedger["status"] };
 type OvertimeRow = DbRow & { status: OvertimeRequest["status"] };
 type CorrectionRow = DbRow & { type: AttendanceCorrection["type"] };
+type CorrectionRequestRow = DbRow & { type: AttendanceCorrectionRequest["type"]; status: AttendanceCorrectionRequest["status"] };
 type PayrollRow = DbRow;
 type DailyWorkTaskRow = DbRow & { status: DailyWorkTask["status"]; department: DailyWorkTask["department"] };
 type SystemPolicyRow = DbRow & {
@@ -320,6 +364,7 @@ type SystemPolicyRow = DbRow & {
   overtime_pay_approver_role: SystemPolicy["overtimePayApproverRole"];
   advance_leave_exception_handling: SystemPolicy["advanceLeaveExceptionHandling"];
   work_days: SystemPolicy["workDays"];
+  payroll_holiday_dates: SystemPolicy["payrollHolidayDates"];
 };
 type AuditLogRow = DbRow;
 
@@ -394,6 +439,17 @@ function workplaceFromRow(row: WorkplaceRow): Workplace {
     longitude: Number(row.longitude),
     allowedRadiusMeters: Number(row.allowed_radius_meters),
     qrPath: stringValue(row.qr_path)
+  };
+}
+
+function workplaceToRow(workplace: Workplace): DbRow {
+  return {
+    id: workplace.id,
+    name: workplace.name,
+    latitude: workplace.latitude,
+    longitude: workplace.longitude,
+    allowed_radius_meters: workplace.allowedRadiusMeters,
+    qr_path: workplace.qrPath
   };
 }
 
@@ -481,6 +537,28 @@ function leaveRequestToRow(request: LeaveRequest): DbRow {
   };
 }
 
+function leaveBalanceAdjustmentFromRow(row: LeaveBalanceAdjustmentRow): LeaveBalanceAdjustment {
+  return {
+    id: stringValue(row.id),
+    employeeId: stringValue(row.employee_id),
+    days: Number(row.days),
+    reason: stringValue(row.reason),
+    createdBy: stringValue(row.created_by),
+    createdAt: stringValue(row.created_at)
+  };
+}
+
+function leaveBalanceAdjustmentToRow(adjustment: LeaveBalanceAdjustment): DbRow {
+  return {
+    id: adjustment.id,
+    employee_id: adjustment.employeeId,
+    days: adjustment.days,
+    reason: adjustment.reason,
+    created_by: adjustment.createdBy,
+    created_at: adjustment.createdAt
+  };
+}
+
 function earlyLeaveFromRow(row: EarlyLeaveRow): EarlyLeaveLedger {
   return {
     id: stringValue(row.id),
@@ -563,6 +641,38 @@ function correctionToRow(correction: AttendanceCorrection): DbRow {
   };
 }
 
+function correctionRequestFromRow(row: CorrectionRequestRow): AttendanceCorrectionRequest {
+  return {
+    id: stringValue(row.id),
+    attendanceId: optionalString(row.attendance_id),
+    employeeId: stringValue(row.employee_id),
+    type: row.type,
+    beforeValue: optionalString(row.before_value),
+    requestedValue: stringValue(row.requested_value),
+    reason: stringValue(row.reason),
+    status: row.status,
+    decidedBy: optionalString(row.decided_by),
+    decidedAt: optionalString(row.decided_at),
+    createdAt: stringValue(row.created_at)
+  };
+}
+
+function correctionRequestToRow(request: AttendanceCorrectionRequest): DbRow {
+  return {
+    id: request.id,
+    attendance_id: request.attendanceId ?? null,
+    employee_id: request.employeeId,
+    type: request.type,
+    before_value: request.beforeValue ?? null,
+    requested_value: request.requestedValue,
+    reason: request.reason,
+    status: request.status,
+    decided_by: request.decidedBy ?? null,
+    decided_at: request.decidedAt ?? null,
+    created_at: request.createdAt
+  };
+}
+
 function payrollFromRow(row: PayrollRow): PayrollStatement {
   return {
     id: stringValue(row.id),
@@ -632,6 +742,9 @@ function policyFromRow(row: SystemPolicyRow): SystemPolicy {
     breakStartTime: normalizeTimeValue(row.break_start_time, defaultSystemPolicy.breakStartTime),
     breakEndTime: normalizeTimeValue(row.break_end_time, defaultSystemPolicy.breakEndTime),
     workDays: Array.isArray(row.work_days) ? row.work_days : defaultSystemPolicy.workDays,
+    payrollHolidayDates: Array.isArray(row.payroll_holiday_dates)
+      ? row.payroll_holiday_dates.filter((value): value is string => typeof value === "string")
+      : defaultSystemPolicy.payrollHolidayDates,
     annualLeaveAutoAccrual: row.annual_leave_auto_accrual === undefined ? defaultSystemPolicy.annualLeaveAutoAccrual : Boolean(row.annual_leave_auto_accrual),
     annualLeaveUnit: Number(row.annual_leave_unit) === 1 ? 1 : 0.5,
     partialLeaveAllowed: row.partial_leave_allowed === undefined ? defaultSystemPolicy.partialLeaveAllowed : Boolean(row.partial_leave_allowed),
@@ -653,6 +766,7 @@ function policyToRow(settings: Partial<SystemPolicy>): DbRow {
     break_start_time: settings.breakStartTime,
     break_end_time: settings.breakEndTime,
     work_days: settings.workDays,
+    payroll_holiday_dates: settings.payrollHolidayDates,
     annual_leave_auto_accrual: settings.annualLeaveAutoAccrual,
     annual_leave_unit: settings.annualLeaveUnit,
     partial_leave_allowed: settings.partialLeaveAllowed,

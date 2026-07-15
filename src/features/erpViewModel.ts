@@ -1,6 +1,7 @@
 import type { Dashboard, EmployeeSnapshot } from "../api/types";
 import type {
   AttendanceCorrection,
+  AttendanceCorrectionRequest,
   AttendanceRecord,
   DailyWorkTask,
   Employee,
@@ -64,6 +65,7 @@ export type ErpViewModel = {
   overtimeRows: ErpViewModelRow[];
   payrollRows: ErpViewModelRow[];
   correctionRows: ErpViewModelRow[];
+  correctionRequestRows: ErpViewModelRow[];
   auditRows: ErpViewModelRow[];
   employeeSummary: ErpEmployeeSummary;
   decisionChecks: ErpViewModelRow[];
@@ -122,7 +124,8 @@ export function buildErpViewModel({
   activeSection
 }: ErpViewModelInput): ErpViewModel {
   const pendingOvertimeRequests = dashboard.overtimeRequests.filter((request) => request.status === "PENDING");
-  const pendingApprovalCount = dashboard.pendingLeaveRequests.length + pendingOvertimeRequests.length;
+  const pendingCorrectionRequests = (dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING");
+  const pendingApprovalCount = dashboard.pendingLeaveRequests.length + pendingOvertimeRequests.length + pendingCorrectionRequests.length;
   const selectedEmployee = employeeSnapshot.employee;
   const employeeDirectory = upsertEmployee(employees, selectedEmployee);
 
@@ -151,7 +154,7 @@ export function buildErpViewModel({
         id: "kpi-pending-approvals",
         label: "승인 대기",
         value: `${pendingApprovalCount}건`,
-        meta: `휴가 ${dashboard.pendingLeaveRequests.length}건 · 야근 ${pendingOvertimeRequests.length}건`
+        meta: `휴가 ${dashboard.pendingLeaveRequests.length}건 · 야근 ${pendingOvertimeRequests.length}건 · 근태 정정 ${pendingCorrectionRequests.length}건`
       },
       {
         id: "kpi-payroll-files",
@@ -161,11 +164,12 @@ export function buildErpViewModel({
       }
     ],
     workQueueRows: buildWorkQueueRows(dashboard, pendingOvertimeRequests, employeeDirectory),
-    attendanceRows: dashboard.todayAttendance.map((record) => attendanceRow(record, employeeDirectory)),
+    attendanceRows: (dashboard.attendanceRecords ?? dashboard.todayAttendance).map((record) => attendanceRow(record, employeeDirectory)),
     leaveRows: dashboard.leaveRequests.map((request) => leaveRow(request, employeeDirectory)),
     overtimeRows: dashboard.overtimeRequests.map((request) => overtimeRow(request, employeeDirectory)),
     payrollRows: dashboard.activePayrollStatements.map((statement) => payrollRow(statement, employeeDirectory)),
     correctionRows: dashboard.corrections.map((correction) => correctionRow(correction, employeeDirectory)),
+    correctionRequestRows: (dashboard.correctionRequests ?? []).map((request) => correctionRequestRow(request, employeeDirectory)),
     dailyWorkTasks: employeeSnapshot.dailyWorkTasks,
     auditRows: dashboard.recentAuditLogs.map((log) => ({
       id: log.id,
@@ -200,7 +204,7 @@ function buildNavItems({
   pendingApprovalCount: number;
 }) {
   const sectionCounts = {
-    overview: dashboard.pendingLeaveRequests.length + dashboard.overtimeRequests.filter((request) => request.status === "PENDING").length + dashboard.gpsFailedAttendance.length + dashboard.corrections.length,
+    overview: dashboard.pendingLeaveRequests.length + dashboard.overtimeRequests.filter((request) => request.status === "PENDING").length + dashboard.gpsFailedAttendance.length + dashboard.corrections.length + (dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING").length,
     "self-service":
       employeeSnapshot.leaveRequests.filter((request) => request.status === "PENDING").length +
       employeeSnapshot.overtimeRequests.filter((request) => request.status === "PENDING").length,
@@ -248,6 +252,11 @@ function buildWorkQueueRows(
       ...correctionRow(correction, employees),
       id: `queue-${correction.id}`,
       meta: "근태 보정 확인"
+    })),
+    ...(dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING").map((request) => ({
+      ...correctionRequestRow(request, employees),
+      id: `queue-${request.id}`,
+      meta: "근태 정정 신청 대기"
     }))
   ];
 }
@@ -299,6 +308,16 @@ function correctionRow(correction: AttendanceCorrection, employees: Employee[]):
     value: correction.reason,
     meta: `${correctionLabels[correction.type]} · ${formatTime(correction.createdAt)}`,
     status: correction.type
+  };
+}
+
+function correctionRequestRow(request: AttendanceCorrectionRequest, employees: Employee[]): ErpViewModelRow {
+  return {
+    id: request.id,
+    label: employeeName(employees, request.employeeId),
+    value: `${correctionLabels[request.type]} · ${request.requestedValue}`,
+    meta: `${request.reason} · ${request.status}`,
+    status: request.status
   };
 }
 

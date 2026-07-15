@@ -12,8 +12,8 @@ describe("attendance verification policy", () => {
       method: "GPS",
       now: "2026-07-08T08:00:00+09:00",
       coordinate: {
-        latitude: 37.5666,
-        longitude: 126.9781,
+        latitude: 37.6491,
+        longitude: 126.9019,
         accuracyMeters: 15
       }
     });

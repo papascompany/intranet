@@ -34,6 +34,7 @@ describe("SystemPolicyEditor", () => {
     expect(screen.getByLabelText("연차/월차 자동 생성")).toBeChecked();
     expect(screen.getByLabelText("부분휴가 사용 허용")).toBeChecked();
     expect(screen.getByLabelText("연차 초과 사용 허용")).not.toBeChecked();
+    expect(screen.getByLabelText("추가 공휴일")).toHaveValue("");
   });
 
   it("validates the GPS radius before invoking save", () => {
@@ -82,6 +83,16 @@ describe("SystemPolicyEditor", () => {
       annualLeaveOveruseAllowed: true,
       partialLeaveAllowed: false
     }));
+  });
+
+  it("saves additional payroll holidays as normalized dates", () => {
+    const onSave = vi.fn();
+    renderEditor({ onSave });
+
+    fireEvent.change(screen.getByLabelText("추가 공휴일"), { target: { value: "2026-09-24, 2026-09-25\n2026-09-24" } });
+    fireEvent.click(screen.getByRole("button", { name: "근무·연차 정책 저장" }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ payrollHolidayDates: ["2026-09-24", "2026-09-25"] }));
   });
 
   it("blocks invalid work schedules and announces the correction needed", () => {

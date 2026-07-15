@@ -17,6 +17,9 @@
 .system-policy-editor__days button { width: 36px; height: 34px; border: 0; border-radius: 8px; color: var(--color-slate); background: var(--color-paper); font: 600 12px var(--font-inter); }
 .system-policy-editor__days button.is-active { color: var(--color-white); background: var(--color-ink); }
 .system-policy-editor__toggles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; }
+.system-policy-editor__holiday-field { display: grid; gap: 6px; max-width: 620px; color: var(--color-graphite); font: 600 12px var(--font-inter); }
+.system-policy-editor__holiday-field small { color: var(--color-slate); font-size: 11px; font-weight: 400; line-height: 1.45; }
+.system-policy-editor__holiday-field textarea { width: 100%; border: 1px solid var(--color-silver); border-radius: 8px; padding: 9px; color: var(--color-graphite); background: var(--color-white); font: 13px/1.45 var(--font-inter); resize: vertical; }
 .system-policy-editor__toggle { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 36px; cursor: pointer; }
 .system-policy-editor__toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .system-policy-editor__toggle > span { position: relative; width: 36px; height: 20px; border-radius: 9999px; background: var(--color-silver); transition: background .15s ease; }

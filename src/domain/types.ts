@@ -106,7 +106,32 @@ export type AttendanceCorrection = {
   createdAt: string;
 };
 
+export type AttendanceCorrectionRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+
+export type AttendanceCorrectionRequest = {
+  id: string;
+  attendanceId?: string;
+  employeeId: string;
+  type: CorrectionType;
+  beforeValue?: string;
+  requestedValue: string;
+  reason: string;
+  status: AttendanceCorrectionRequestStatus;
+  decidedBy?: string;
+  decidedAt?: string;
+  createdAt: string;
+};
+
 export type LeaveType = "ANNUAL" | "HALF_DAY" | "SPECIAL" | "UNPAID";
+
+export type LeaveBalanceAdjustment = {
+  id: string;
+  employeeId: string;
+  days: number;
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+};
 export type RequestStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
 
 export type LeaveRequest = {

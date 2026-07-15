@@ -1,12 +1,13 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { CalendarClock, Check, Clock3, FileText, X } from "lucide-react";
-import type { Employee, LeaveRequest, OvertimeRequest } from "../domain/types";
+import type { AttendanceCorrectionRequest, Employee, LeaveRequest, OvertimeRequest } from "../domain/types";
 import { ConfirmDialog, FormDialog, InlineNotice } from "./operational";
 import "./approvalQueue.css";
 
 export type ApprovalQueueItem =
   | { kind: "leave"; request: LeaveRequest }
-  | { kind: "overtime"; request: OvertimeRequest };
+  | { kind: "overtime"; request: OvertimeRequest }
+  | { kind: "correction"; request: AttendanceCorrectionRequest };
 
 export interface ApprovalQueueProps {
   busy?: boolean;
@@ -16,6 +17,7 @@ export interface ApprovalQueueProps {
   onApprove: (item: ApprovalQueueItem) => void | Promise<void>;
   onReject: (item: ApprovalQueueItem, reason: string) => void | Promise<void>;
   overtimeRequests: readonly OvertimeRequest[];
+  correctionRequests?: readonly AttendanceCorrectionRequest[];
 }
 
 type DialogState = "approve" | "reject" | null;
@@ -37,7 +39,7 @@ function personLabel(item: ApprovalQueueItem, employees: ApprovalQueueProps["emp
 }
 
 function requestTitle(item: ApprovalQueueItem) {
-  return item.kind === "leave" ? "휴가 신청" : "야근 신청";
+  return item.kind === "leave" ? "휴가 신청" : item.kind === "overtime" ? "야근 신청" : "근태 정정 신청";
 }
 
 function requestSummary(item: ApprovalQueueItem) {
@@ -46,7 +48,8 @@ function requestSummary(item: ApprovalQueueItem) {
     return `${startsOn}${startsOn === endsOn ? "" : ` ~ ${endsOn}`} · ${formatDays(days)}`;
   }
 
-  return `${item.request.date} · ${formatMinutes(item.request.minutes)}`;
+  if (item.kind === "overtime") return `${item.request.date} · ${formatMinutes(item.request.minutes)}`;
+  return `${item.request.requestedValue} · ${item.request.createdAt.slice(0, 10)}`;
 }
 
 export function ApprovalQueue({
@@ -56,21 +59,24 @@ export function ApprovalQueue({
   leaveRequests,
   onApprove,
   onReject,
-  overtimeRequests
+  overtimeRequests,
+  correctionRequests = []
 }: ApprovalQueueProps) {
   const items = useMemo<ApprovalQueueItem[]>(
     () => [
       ...leaveRequests.filter((request) => request.status === "PENDING").map((request) => ({ kind: "leave" as const, request })),
-      ...overtimeRequests.filter((request) => request.status === "PENDING").map((request) => ({ kind: "overtime" as const, request }))
+      ...overtimeRequests.filter((request) => request.status === "PENDING").map((request) => ({ kind: "overtime" as const, request })),
+      ...correctionRequests.filter((request) => request.status === "PENDING").map((request) => ({ kind: "correction" as const, request }))
     ],
-    [leaveRequests, overtimeRequests]
+    [correctionRequests, leaveRequests, overtimeRequests]
   );
   const historyItems = useMemo<ApprovalQueueItem[]>(
     () => [
       ...leaveRequests.filter((request) => request.status !== "PENDING").map((request) => ({ kind: "leave" as const, request })),
-      ...overtimeRequests.filter((request) => request.status !== "PENDING").map((request) => ({ kind: "overtime" as const, request }))
+      ...overtimeRequests.filter((request) => request.status !== "PENDING").map((request) => ({ kind: "overtime" as const, request })),
+      ...correctionRequests.filter((request) => request.status !== "PENDING").map((request) => ({ kind: "correction" as const, request }))
     ],
-    [leaveRequests, overtimeRequests]
+    [correctionRequests, leaveRequests, overtimeRequests]
   );
   const [listMode, setListMode] = useState<ListMode>("pending");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -150,7 +156,7 @@ export function ApprovalQueue({
                 type="button"
               >
                 <span className={`approval-queue-row__type is-${item.kind}`}>
-                  {item.kind === "leave" ? <CalendarClock aria-hidden="true" /> : <Clock3 aria-hidden="true" />}
+                  {item.kind === "leave" ? <CalendarClock aria-hidden="true" /> : item.kind === "overtime" ? <Clock3 aria-hidden="true" /> : <FileText aria-hidden="true" />}
                   {requestTitle(item)}
                 </span>
                 <strong>{personLabel(item, employees)}</strong>
@@ -176,10 +182,15 @@ export function ApprovalQueue({
                     <div><dt>휴가 유형</dt><dd>{leaveTypeLabel(selectedItem.request.type)}</dd></div>
                     <div><dt>휴가 일수</dt><dd>{formatDays(selectedItem.request.days)}</dd></div>
                   </>
-                ) : (
+                ) : selectedItem.kind === "overtime" ? (
                   <>
                     <div><dt>야근 시간</dt><dd>{formatMinutes(selectedItem.request.minutes)}</dd></div>
                     <div><dt>신청 시간</dt><dd>{formatTimeRange(selectedItem.request.startsAt, selectedItem.request.endsAt)}</dd></div>
+                  </>
+                ) : (
+                  <>
+                    <div><dt>정정 유형</dt><dd>{correctionTypeLabel(selectedItem.request.type)}</dd></div>
+                    <div><dt>요청 시각</dt><dd>{selectedItem.request.requestedValue}</dd></div>
                   </>
                 )}
                 <div className="approval-queue__detail-reason"><dt>신청 사유</dt><dd>{selectedItem.request.reason}</dd></div>
@@ -251,6 +262,16 @@ function formatTimeRange(startsAt: string, endsAt: string) {
 
 function requestStatusLabel(status: ApprovalQueueItem["request"]["status"]) {
   return ({ DRAFT: "초안", PENDING: "대기", APPROVED: "승인", REJECTED: "반려", CANCELLED: "취소" } as const)[status];
+}
+
+function correctionTypeLabel(type: AttendanceCorrectionRequest["type"]) {
+  return ({
+    APPROVED_LATE: "인정지각",
+    APPROVED_EARLY_LEAVE: "인정조퇴",
+    CLOCK_IN_CORRECTION: "출근시각 보정",
+    CLOCK_OUT_CORRECTION: "퇴근시각 보정",
+    MISSING_RECORD_CREATED: "누락 기록 추가"
+  } as const)[type];
 }
 
 function formatCreatedAt(value: string) {

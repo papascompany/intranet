@@ -7,6 +7,9 @@ import type {
   CreateEmployeeAccountInput,
   CreateDailyWorkTaskPlanInput,
   CreateAttendanceCorrectionInput,
+  CreateWorkplaceInput,
+  ImportEmployeeAccountsInput,
+  ImportEmployeeAccountsResult,
   Dashboard,
   DashboardInput,
   DownloadPayrollStatementInput,
@@ -19,6 +22,7 @@ import type {
   ResetEmployeeAccountPasswordInput,
   SetEmployeeAccountAccessInput,
   SetOvertimePayApprovalInput,
+  SubmitAttendanceCorrectionRequestInput,
   SoftDeletePayrollStatementInput,
   SubmitLeaveRequestInput,
   SubmitOvertimeRequestInput,
@@ -28,17 +32,22 @@ import type {
   UpdateSettingsInput,
   PersistenceStatus,
   UpdateRequestStatusInput,
+  UpdateAttendanceCorrectionRequestStatusInput,
+  UpdateWorkplaceInput,
+  DeleteWorkplaceInput,
   UploadPayrollStatementInput
 } from "./types";
 import type { AppBootstrap } from "./types";
 import type {
   AttendanceCorrection,
+  AttendanceCorrectionRequest,
   AuditLog,
   DailyWorkTask,
   Employee,
   LeaveRequest,
   OvertimeRequest,
-  PayrollStatement
+  PayrollStatement,
+  Workplace
 } from "../domain/types";
 import type { SystemPolicy } from "./types";
 
@@ -115,7 +124,19 @@ export async function updateRequestStatus(input: UpdateRequestStatusInput) {
 }
 
 export async function cancelRequest(input: CancelRequestInput) {
-  return await post<{ request: LeaveRequest | OvertimeRequest; auditLog: AuditLog }>("cancelRequest", input);
+  return await post<{ request: LeaveRequest | OvertimeRequest | AttendanceCorrectionRequest; auditLog: AuditLog }>("cancelRequest", input);
+}
+
+export async function createWorkplace(input: CreateWorkplaceInput) {
+  return await post<{ workplace: Workplace; auditLog: AuditLog }>("createWorkplace", input);
+}
+
+export async function updateWorkplace(input: UpdateWorkplaceInput) {
+  return await post<{ workplace: Workplace; auditLog: AuditLog }>("updateWorkplace", input);
+}
+
+export async function deleteWorkplace(input: DeleteWorkplaceInput) {
+  return await post<{ workplace: Workplace; auditLog: AuditLog }>("deleteWorkplace", input);
 }
 
 export async function setOvertimePayApproval(input: SetOvertimePayApprovalInput) {
@@ -124,6 +145,14 @@ export async function setOvertimePayApproval(input: SetOvertimePayApprovalInput)
 
 export async function createAttendanceCorrection(input: CreateAttendanceCorrectionInput) {
   return await post<{ correction: AttendanceCorrection; auditLog: AuditLog }>("createAttendanceCorrection", input);
+}
+
+export async function submitAttendanceCorrectionRequest(input: SubmitAttendanceCorrectionRequestInput) {
+  return await post<{ request: AttendanceCorrectionRequest; auditLog: AuditLog }>("submitAttendanceCorrectionRequest", input);
+}
+
+export async function updateAttendanceCorrectionRequestStatus(input: UpdateAttendanceCorrectionRequestStatusInput) {
+  return await post<{ request: AttendanceCorrectionRequest; correction?: AttendanceCorrection; auditLog: AuditLog }>("updateAttendanceCorrectionRequestStatus", input);
 }
 
 export async function updateEmployeeCard(input: UpdateEmployeeCardInput) {
@@ -136,6 +165,10 @@ export async function revealEmployeeSensitiveData(input: Omit<RevealEmployeeSens
 
 export async function createEmployeeAccount(input: Omit<CreateEmployeeAccountInput, "actorId" | "session">) {
   return await post<{ employee: Employee; temporaryPassword: string; auditLog: AuditLog }>("createEmployeeAccount", input);
+}
+
+export async function importEmployeeAccounts(input: Omit<ImportEmployeeAccountsInput, "actorId" | "session">) {
+  return await post<ImportEmployeeAccountsResult>("importEmployeeAccounts", input);
 }
 
 export async function resetEmployeeAccountPassword(employeeId: string, temporaryPassword: string) {
@@ -255,12 +288,18 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.setOvertimePayApproval(payload as never)) as T;
     case "createAttendanceCorrection":
       return (await api.createAttendanceCorrection(payload as never)) as T;
+    case "submitAttendanceCorrectionRequest":
+      return (await api.submitAttendanceCorrectionRequest(payload as never)) as T;
+    case "updateAttendanceCorrectionRequestStatus":
+      return (await api.updateAttendanceCorrectionRequestStatus(payload as never)) as T;
     case "updateEmployeeCard":
       return (await api.updateEmployeeCard(payload as never)) as T;
     case "revealEmployeeSensitiveData":
       return (await api.revealEmployeeSensitiveData(payload as never)) as T;
     case "createEmployeeAccount":
       return (await api.createEmployeeAccount(payload as never)) as T;
+    case "importEmployeeAccounts":
+      return (await api.importEmployeeAccounts(payload as never)) as T;
     case "resetEmployeeAccountPassword":
       return (await api.resetEmployeeAccountPassword(payload as never)) as T;
     case "setEmployeeAccountAccess":
@@ -277,6 +316,12 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.softDeletePayrollStatement(payload as never)) as T;
     case "updateSettings":
       return (await api.updateSettings(payload as never)) as T;
+    case "createWorkplace":
+      return (await api.createWorkplace(payload as never)) as T;
+    case "updateWorkplace":
+      return (await api.updateWorkplace(payload as never)) as T;
+    case "deleteWorkplace":
+      return (await api.deleteWorkplace(payload as never)) as T;
     default:
       throw new Error(`Unsupported local demo action: ${action}`);
   }

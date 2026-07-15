@@ -107,6 +107,15 @@ describe("buildEmployeeViewModel", () => {
     expect(viewModel.pendingOvertimeSummary).toBe("대기 야근 2건 · 2시간");
   });
 
+  it("summarizes pending attendance correction requests", () => {
+    const viewModel = buildEmployeeViewModel({
+      ...baseSnapshot,
+      correctionRequests: [{ status: "PENDING" }, { status: "APPROVED" }]
+    });
+
+    expect(viewModel.correctionSummary).toBe("대기 정정 1건 · 관리자 확인 필요");
+  });
+
   it("shows an empty payroll summary when there are no active payroll statements", () => {
     const viewModel = buildEmployeeViewModel({
       ...baseSnapshot,

@@ -1,0 +1,31 @@
+.workplace-manager { display: grid; gap: 18px; color: var(--color-graphite); }
+.workplace-manager__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.workplace-manager__header h2, .workplace-manager__header p { margin: 0; }
+.workplace-manager__header h2 { font-family: var(--font-cal-sans); font-size: 20px; font-weight: 600; }
+.workplace-manager__header > div > p:last-child { max-width: 640px; margin-top: 5px; color: var(--color-slate); font: 13px/1.5 var(--font-inter); }
+.workplace-manager__eyebrow { display: flex; align-items: center; gap: 7px; margin-bottom: 5px !important; color: var(--color-slate); font: 600 12px var(--font-inter); }
+.workplace-manager__eyebrow svg { width: 16px; }
+.workplace-manager__new, .workplace-manager__save, .workplace-manager__delete { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; border: 1px solid var(--color-silver); border-radius: 9999px; padding: 0 14px; background: var(--color-white); color: var(--color-graphite); font: 600 12px var(--font-inter); white-space: nowrap; }
+.workplace-manager__new { border-color: var(--color-ink); background: var(--color-ink); color: var(--color-white); }
+.workplace-manager__body { display: grid; grid-template-columns: minmax(190px, .65fr) minmax(0, 1.35fr); gap: 14px; }
+.workplace-manager__list { display: grid; align-content: start; gap: 6px; }
+.workplace-manager__list button { display: grid; gap: 4px; width: 100%; border: 1px solid var(--color-silver); border-radius: 8px; padding: 13px; text-align: left; background: var(--color-white); color: var(--color-graphite); }
+.workplace-manager__list button.is-selected { border-color: var(--color-ink); box-shadow: inset 3px 0 0 var(--color-brand-yellow); }
+.workplace-manager__list strong { font: 600 13px var(--font-inter); }
+.workplace-manager__list small { color: var(--color-slate); font: 11px var(--font-inter); }
+.workplace-manager__empty { margin: 0; border: 1px dashed var(--color-silver); border-radius: 8px; padding: 18px 12px; color: var(--color-slate); font: 12px var(--font-inter); text-align: center; }
+.workplace-manager__form { display: grid; gap: 13px; border: 1px solid var(--color-silver); border-radius: 8px; padding: 18px; background: var(--color-white); }
+.workplace-manager__form-title { display: grid; gap: 3px; margin-bottom: 2px; }
+.workplace-manager__form-title strong { font: 600 14px var(--font-inter); }
+.workplace-manager__form-title span { color: var(--color-slate); font: 12px var(--font-inter); }
+.workplace-manager__form label { display: grid; gap: 6px; color: var(--color-graphite); font: 600 12px var(--font-inter); }
+.workplace-manager__form input { box-sizing: border-box; width: 100%; min-height: 40px; border: 1px solid var(--color-silver); border-radius: 8px; padding: 8px 10px; color: var(--color-graphite); background: var(--color-white); font: 13px var(--font-inter); }
+.workplace-manager__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.workplace-manager__unit-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; border: 1px solid var(--color-silver); border-radius: 8px; padding-right: 10px; }
+.workplace-manager__unit-input input { border: 0; outline: 0; }
+.workplace-manager__unit-input em { color: var(--color-slate); font: 400 12px var(--font-inter); }
+.workplace-manager__actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.workplace-manager__delete { margin-right: auto; border-color: #fecaca; color: #b91c1c; }
+.workplace-manager__save { border-color: var(--color-brand-yellow); background: var(--color-brand-yellow); color: var(--color-ink); }
+.workplace-manager button:disabled { cursor: not-allowed; opacity: .55; }
+@media (max-width: 760px) { .workplace-manager__header, .workplace-manager__body { display: grid; grid-template-columns: 1fr; } .workplace-manager__new { width: 100%; } .workplace-manager__grid { grid-template-columns: 1fr; } }

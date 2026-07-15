@@ -38,6 +38,7 @@ export const employees: Employee[] = [
       { id: "custom-admin-field-4", label: "관리 메모 4", value: "샘플: 건강검진 안내" },
       { id: "custom-admin-field-5", label: "관리 메모 5", value: "샘플: 비상연락망 확인" }
     ],
+    workplaceId: "office-main",
     pilot: true
   },
   {
@@ -67,6 +68,7 @@ export const employees: Employee[] = [
       { id: "custom-admin-field-5", label: "관리 메모 5", value: "샘플: 파일럿 대상" }
     ],
     approverId: "emp-ceo",
+    workplaceId: "office-main",
     pilot: true
   },
   {
@@ -96,6 +98,7 @@ export const employees: Employee[] = [
       { id: "custom-admin-field-5", label: "관리 메모 5", value: "샘플: 파일럿 대상" }
     ],
     approverId: "emp-ceo",
+    workplaceId: "office-main",
     pilot: true
   },
   {
@@ -125,6 +128,7 @@ export const employees: Employee[] = [
       { id: "custom-admin-field-5", label: "관리 메모 5", value: "샘플: 제작팀 배정" }
     ],
     approverId: "emp-ops-2",
+    workplaceId: "office-studio",
     pilot: false
   }
 ];
@@ -132,19 +136,19 @@ export const employees: Employee[] = [
 export const workplaces: Workplace[] = [
   {
     id: "office-main",
-    name: "본사 사무실",
-    latitude: 37.5665,
-    longitude: 126.978,
+    name: "삼송테크노밸리",
+    latitude: 37.64907,
+    longitude: 126.901901,
     allowedRadiusMeters: 300,
-    qrPath: "/qr/office-main"
+    qrPath: "/qr/samsong-techno-valley"
   },
   {
     id: "office-studio",
-    name: "제작 스튜디오",
-    latitude: 37.5651,
-    longitude: 126.98955,
+    name: "에이스하이엔드타워 지축역",
+    latitude: 37.643093,
+    longitude: 126.883733,
     allowedRadiusMeters: 300,
-    qrPath: "/qr/office-studio"
+    qrPath: "/qr/ace-highend-jichuk"
   }
 ];
 

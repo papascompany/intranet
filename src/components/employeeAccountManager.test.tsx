@@ -7,7 +7,7 @@ const employees = [{ id: "emp-1", name: "김운영", employeeNumber: "P-001", ro
 const workplaces = [{ id: "hq", name: "본사" }];
 
 function renderManager(overrides: Partial<React.ComponentProps<typeof EmployeeAccountManager>> = {}) {
-  return render(<EmployeeAccountManager accountStates={[{ employeeId: "emp-1", loginId: "kim-ops", enabled: true }]} employees={employees} onCreate={vi.fn().mockResolvedValue({ temporaryPassword: "Temp-2026!" })} onResetPassword={vi.fn().mockResolvedValue(undefined)} onSetEnabled={vi.fn()} workplaces={workplaces} {...overrides} />);
+  return render(<EmployeeAccountManager accountStates={[{ employeeId: "emp-1", loginId: "kim-ops", enabled: true }]} employees={employees} onCreate={vi.fn().mockResolvedValue({ temporaryPassword: "Temp-2026!" })} onImport={vi.fn().mockResolvedValue({ created: [], auditLogs: [] })} onResetPassword={vi.fn().mockResolvedValue(undefined)} onSetEnabled={vi.fn()} workplaces={workplaces} {...overrides} />);
 }
 
 describe("EmployeeAccountManager", () => {
@@ -54,5 +54,23 @@ describe("EmployeeAccountManager", () => {
     expect(screen.queryByText("Reset-2026!")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "김운영 계정 사용 중지" }));
     expect(onSetEnabled).toHaveBeenCalledWith("emp-1", false);
+  });
+
+  it("previews a CSV employee list before issuing accounts", async () => {
+    const onImport = vi.fn().mockResolvedValue({
+      created: [{ employee: { ...employees[0], name: "이제작", id: "emp-2" }, loginId: "lee-production", temporaryPassword: "Bulk-Temp-2026!" }],
+      auditLogs: []
+    });
+    renderManager({ onImport });
+    const csv = new File(["이름,아이디,사번,입사일,근무지\n이제작,lee-production,P-002,2026-07-14,본사"], "직원명부.csv", { type: "text/csv" });
+
+    fireEvent.change(screen.getByLabelText("직원명부 CSV 선택"), { target: { files: [csv] } });
+
+    const dialog = await screen.findByRole("dialog", { name: "직원명부 가져오기" });
+    expect(within(dialog).getByText("이제작")).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("button", { name: "계정 일괄 발급" }));
+
+    await waitFor(() => expect(onImport).toHaveBeenCalledWith([expect.objectContaining({ loginId: "lee-production", rowNumber: 2 })]));
+    expect(await screen.findByText("Bulk-Temp-2026!")).toBeVisible();
   });
 });
