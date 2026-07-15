@@ -42,11 +42,13 @@ model Store {
   phone         String?
   address       String?
   status        StoreStatus @default(ONBOARDING)
-  theme         Json        @default("{}")     // docs/05 §6 ThemeConfig
+  theme         Json        @default("{}")     // docs/05 §10 ThemeConfig
   coverImageUrl String?
   logoUrl       String?
   openingHours  Json        @default("{}")     // 요일별 {open,close,breakStart?...}
-  settings      Json        @default("{}")     // StoreSettings: prepayRequired, useInProgressStatus, orderPauseUntil ...
+  settings      Json        @default("{}")     // StoreSettings: prepayRequired, useInProgressStatus, orderPauseUntil,
+                                               // autoConfirmOrders, firstOrderManualConfirm(기본 true), skipPaymentRecord,
+                                               // businessDayCutoff(기본 "06:00"), unconfirmedEscalation{afterMin,phone} ...
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -129,7 +131,8 @@ model TableSession {
   @@index([tableId, status])
 }
 
-enum SessionStatus { OPEN BILL_REQUESTED CLOSED }
+enum SessionStatus { OPEN BILL_REQUESTED CLOSED EXPIRED }
+// EXPIRED = 주문 0건 세션이 마지막 활동 30분 경과로 자동 정리된 상태(유령 세션 — 정산 불변식 I-5 무관, 통계 제외)
 
 // ───────── 메뉴 ─────────
 model MenuCategory {
@@ -137,6 +140,7 @@ model MenuCategory {
   storeId   String
   name      String                  // "시그니처", "브런치", "내추럴 와인"
   tagline   String?                 // 목차에 실리는 한 줄 (매거진 챕터 부제)
+  displayMode ChapterDisplayMode @default(SPREAD) // SPREAD=화보 스프레드 / INDEX=차림 인덱스 지면(음료·주류 권장, docs/05 §4.4)
   sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
   store     Store    @relation(fields: [storeId], references: [id])
@@ -144,6 +148,8 @@ model MenuCategory {
 
   @@index([storeId, sortOrder])
 }
+
+enum ChapterDisplayMode { SPREAD INDEX }
 
 model MenuItem {
   id          String    @id @default(cuid())
@@ -246,6 +252,7 @@ model Order {
   status       OrderStatus @default(PENDING)
   totalAmount  Int                       // 라인합계 합. 스냅샷 기준
   customerMemo String?
+  deviceId     String?                   // 발신 기기 uuid(mb_table 쿠키) — 다인 테이블 분쟁 증빙(docs/06 §4)
   rejectReason String?
   placedAt     DateTime    @default(now())
   confirmedAt  DateTime?
@@ -377,8 +384,10 @@ stateDiagram-v2
     [*] --> OPEN : 첫 QR 진입 or POS 수동 오픈
     OPEN --> BILL_REQUESTED : 손님 계산서 요청
     OPEN --> CLOSED : 정산 완료(결제 합계 ≥ 주문 합계)
+    OPEN --> EXPIRED : 주문 0건 · 활동 30분 경과(자동)
     BILL_REQUESTED --> CLOSED : 정산 완료
     CLOSED --> [*]
+    EXPIRED --> [*]
 ```
 
 - 세션 CLOSE 시: 소속 SERVED 주문 → COMPLETED 일괄 전이, `totalAmount` 확정, 테이블 QR 진입 시 새 세션 생성.
@@ -392,11 +401,11 @@ stateDiagram-v2
 |---|---|
 | I-1 | OrderItem 금액은 항상 스냅샷 기준으로 계산·저장 (`lineTotal = (priceSnapshot + Σ optionsSnapshot.priceDelta) × qty`) |
 | I-2 | `Order.totalAmount = Σ items.lineTotal` — 생성 트랜잭션 내에서 서버가 재계산(클라이언트 금액 신뢰 금지) |
-| I-3 | 품절(`isSoldOut`)·숨김·삭제 메뉴는 주문 생성 시점 서버 검증에서 거부 (`SOLD_OUT`) |
+| I-3 | 품절(`isSoldOut`)·숨김·삭제 **메뉴 및 품절 옵션 선택지(OptionChoice.isSoldOut)**는 주문 생성 시점 서버 검증에서 거부 (`SOLD_OUT`) |
 | I-4 | 상태 전이는 §3 다이어그램에 있는 간선만 허용, 위반 시 `INVALID_TRANSITION` |
 | I-5 | 세션 CLOSE 조건: `Σ payments(PAID).amount ≥ Σ orders(CONFIRMED 이상, 취소 제외).totalAmount` |
 | I-6 | 모든 조회/변경은 storeId 스코프 (02 §5) |
-| I-7 | `orderNo`는 매장×영업일 단위 단조 증가 (트랜잭션 내 카운터, 동시 주문 안전) |
+| I-7 | `orderNo`는 매장×**영업일**(`settings.businessDayCutoff`, 기본 06:00 경계 — 자정 넘김 영업 대응) 단위 단조 증가. stats `today`·일 마감 리포트·'오늘만 품절' 해제가 모두 같은 경계를 공유한다 |
 | I-8 | AI 생성 이미지는 운영자 **선택·승인 전(MenuImage 확정 전)에는 고객 표면에 절대 노출되지 않는다** — 후보 URL은 admin 전용 경로에만 존재 |
 
 ## 5. 마이그레이션·시드 정책

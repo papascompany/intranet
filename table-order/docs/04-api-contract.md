@@ -8,9 +8,9 @@
 - 변이는 REST Route Handler(`app/api/**`), 화면 초기 데이터는 RSC에서 서비스 레이어 직접 호출(같은 서비스 함수 공유 — 로직 이원화 금지).
 - 응답: 성공 `2xx + 데이터`, 실패 `4xx/5xx + { error: { code, message, details? } }`
 - 금액은 원 단위 정수. 시각은 ISO 8601(UTC).
-- 변이 요청은 `Idempotency-Key` 헤더 지원(주문 생성·결제는 **필수**). 같은 키 재요청 → 최초 응답 재반환.
-- 공개(고객) API rate limit: IP+tableToken당 주문 5회/분, 호출 3회/분. 초과 → `429 RATE_LIMITED`.
-- 인증: 관리자 API는 Supabase 세션 쿠키 + `requireStaff(slug, minRole?)`. 고객 API는 `mb_table` 서명 쿠키 + `requireTable(slug)`.
+- 변이 요청은 `Idempotency-Key` 헤더 지원(주문 생성·결제는 **필수**). 같은 키 재요청 → 최초 응답 재반환. **주문의 멱등키 = 카트 스냅샷 해시** — 타임아웃·재탭 재전송이 같은 키를 재사용한다(docs/05 §4.7 전송 상태기계).
+- 공개(고객) API rate limit: IP+tableToken당 주문 5회/분. 호출은 **동일 테이블·동일 kind 60초 쿨다운 + 세션당 10회/시간**(클라이언트 쿨다운과 단일 수치). 초과 → `429 RATE_LIMITED`.
+- 인증: 관리자 API는 Supabase 세션 쿠키 + `requireStaff(slug, minRole?)`. 고객 API는 `mb_table` 서명 쿠키 + `requireTable(slug)` — 쿠키 저장이 막히는 인앱브라우저용 **`X-Table-Token` 서명 헤더 폴백** 허용(진입 응답 바디로 발급, docs/05 §4.1).
 
 ### 에러 코드 enum (`packages/shared/src/contracts/errors.ts`)
 
@@ -21,9 +21,11 @@
 | 메서드·경로 | 설명 | 비고 |
 |---|---|---|
 | `GET /api/s/[slug]/lookbook` | 룩북 전체 데이터(테마+카테고리+메뉴+이미지) | RSC가 주로 사용, CDN 캐시 60s + 품절은 실시간 이벤트로 보정 |
-| `POST /api/s/[slug]/table-entry` | QR 토큰 검증 → 세션 확보 → `mb_table` 쿠키 발급 | body: `{ tableToken }` |
+| `GET /q/[token]` (페이지 라우트) | QR 진입 — **서버 1왕복**: 토큰 검증+Set-Cookie+피드 렌더(리다이렉트 없음), 응답에 헤더 폴백용 세션 토큰 포함 | docs/05 §4.1 |
+| `POST /api/s/[slug]/table-entry` | 쿠키 재발급 · `이어서 주문하기`(만료 복구) · 재스캔 시 해당 테이블 OPEN 세션 합류 | body: `{ tableToken }` |
 | `POST /api/s/[slug]/orders` | 주문 생성 | 멱등키 필수 |
-| `GET /api/s/[slug]/session` | 내 세션 누적 주문·합계·상태 | 폴링 폴백 겸용(10s) |
+| `GET /api/s/[slug]/session` | 내 세션 누적 주문·합계·상태 + **품절 diff(soldOutItemIds)** | 폴링 폴백 겸용(10s), 전송 재시도 전 자가 확인에도 사용 |
+| `GET /api/s/[slug]/session/receipt` | 정산 후 24h 읽기 전용 영수증 뷰(주문·시각·금액) | C-12 |
 | `POST /api/s/[slug]/orders/[orderId]/cancel` | 손님 취소(PENDING만) | |
 | `POST /api/s/[slug]/calls` | 직원 호출/계산서 요청 | body: `{ kind: "STAFF"\|"BILL"\|"WATER" }` |
 | `POST /api/s/[slug]/payments/toss/confirm` | (선결제) 토스 위젯 승인 콜백 | docs/08 §3 |
@@ -68,12 +70,16 @@
 |---|---|---|
 | `GET /api/admin/orders?status=&sinceEventAt=` | 주문 보드 데이터. `sinceEventAt`은 실시간 유실 복구용 diff | STAFF |
 | `PATCH /api/admin/orders/[id]` | 상태 전이 `{ action: CONFIRM\|REJECT\|START\|SERVE\|CANCEL, reason? }` | STAFF |
+| `POST /api/admin/orders/bulk-confirm` | 일괄 확인 `{ orderIds[] }` — 피크타임(A-8) | STAFF |
+| `POST /api/admin/sessions/[id]/move` | 세션 테이블 이동 `{ toTableId }` — 주문 이력 보존, AuditLog | STAFF |
 | `GET /api/admin/sessions?status=OPEN` | 테이블 세션 목록(테이블맵) | STAFF |
 | `POST /api/admin/sessions/[id]/checkout` | 카운터 결제 기록 `{ method, amount }` → 완납 시 세션 CLOSE | STAFF |
 | `POST /api/admin/sessions/[id]/force-close` | 강제 종료(사유) | MANAGER |
 | `GET/POST/PATCH/DELETE /api/admin/categories[/id]` | 카테고리 CRUD·정렬 | MANAGER |
 | `GET/POST/PATCH/DELETE /api/admin/items[/id]` | 메뉴 CRUD (story, badges, layoutHint 포함) | MANAGER |
-| `PATCH /api/admin/items/[id]/sold-out` | 품절 토글 `{ isSoldOut }` → menu.updated 이벤트 | STAFF |
+| `PATCH /api/admin/items/[id]/sold-out` | 품절 토글 `{ isSoldOut, scope: TODAY\|INDEFINITE }` — TODAY는 영업일 경계에 자동 해제 | STAFF |
+| `PATCH /api/admin/options/[choiceId]/sold-out` | 옵션 선택지 품절 토글 (I-3 검증 대상) | STAFF |
+| `GET /api/admin/reports/day-close?date=` | 일 마감 리포트(현금/카드/PG 합계·미정산·강제종료) — 기존 포스 대사용, 인쇄/CSV | STAFF |
 | `POST /api/admin/media/presign` | 이미지 업로드 presign | MANAGER |
 | `POST /api/admin/media/commit` | 업로드 완료 → 변환(리사이즈·blurhash) 트리거 | MANAGER |
 | `POST /api/admin/ai/items/[id]/jobs` | AI 연출컷 잡 시작 `{ style: HERO\|DECONSTRUCTED\|CLOSEUP, mood?, emphasize? }` — 크레딧 차감 | MANAGER |

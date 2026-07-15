@@ -20,10 +20,10 @@
 | 채널 | 구독자 | 이벤트 | 인가 |
 |---|---|---|---|
 | `store:{storeId}:ops` | 해당 매장 POS | order.created, order.status_changed, call.created, session.bill_requested, session.closed | Realtime 토큰에 storeId 클레임 — 스태프 세션만 발급(`/api/admin/realtime-token`) |
-| `session:{sessionId}` | 해당 테이블 손님 | order.status_changed, session.closed, menu.updated(품절) | 테이블 쿠키 보유자에게 세션 스코프 토큰 발급 |
+| `session:{sessionId}` | 해당 테이블 손님 — **주문 현황 화면이 열려 있을 때만 lazy 구독**(supabase-js 동적 import, 첫 로드 JS 제외) | order.status_changed, session.closed | 테이블 쿠키/헤더 토큰 보유자에게 세션 스코프 토큰 발급 |
 
 - 채널 인가: Supabase Realtime authorization(private channel) 사용. 토큰 없는 임의 구독 차단 — 주문 내역은 개인정보는 아니나 매장 운영정보이므로 공개 채널 금지.
-- 고객 품절 반영은 `session:*`에 브로드캐스트하지 않고 매장 단위가 필요하므로 예외적으로 `store:{storeId}:menu`(읽기 전용 public, 페이로드는 itemId·isSoldOut만) 채널을 둔다.
+- **고객 브라우징 중 상시 WS 구독은 금지**(동시 연결이 N-7 규모에서 수천~1만+로 폭증, 배터리·JS 25KB — docs/05 §6). v0.2의 `store:{storeId}:menu` 공개 채널은 **폐지**: 고객 품절 반영은 lookbook 캐시(60s) + 퀵담기/디테일/카트 진입 시 재검증 + `GET session` 폴링 응답의 품절 diff + 주문 시 서버 거부(`SOLD_OUT` 복구 UX)로 담보한다. `menu.updated` 이벤트는 POS(ops 채널) 전용으로 남는다. 이에 따라 수용 기준 A-3의 문구는 docs/06 §9 개정판을 따른다.
 
 ## 3. 이벤트 스키마 (`packages/shared/src/contracts/realtime.ts` — Zod 유니온)
 
@@ -76,8 +76,8 @@ export async function publishSessionEvent(sessionId: string, event: RealtimeEven
 
 ```ts
 useStoreOps(storeId, { onEvent })      // POS: 구독+폴백 상태기계+lastEventAt 관리, 연결상태 반환
-useSessionUpdates(sessionId)           // 고객: 현황 갱신 트리거
-useMenuLive(storeId)                   // 고객: 품절 실시간 반영
+useSessionUpdates(sessionId)           // 고객: 현황 갱신 — 현황 화면 마운트 시에만 lazy 구독 + 10s 폴링 병행
+useSoldOutSync(storeId)                // 고객: 품절 동기화 — WS 아님(진입 시 재검증 + 폴링 diff, docs/05 §6)
 useOrderAlarm()                        // 알림음(Web Audio)·브라우저 알림·재알림 타이머, 제스처 활성화 처리
 ```
 

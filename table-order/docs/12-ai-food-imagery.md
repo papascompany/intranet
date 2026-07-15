@@ -72,14 +72,16 @@ sequenceDiagram
 ```
 
 - **제공자 어댑터**: `interface ImageGenProvider { generate(req: GenRequest): Promise<GenResult> }` — 구현 교체 가능(`imagen`, `gpt-image`, …). 벤더 종속 금지.
+- **2단계 생성(원가 최적화)**: 후보 4장은 **저해상(512~768px) 프리뷰**로 생성 → 운영자가 선택한 1장만 고해상 재생성/업스케일 후 변환 파이프라인 합류 — 회당 원가 약 60% 절감. 프리뷰는 admin 전용 경로에만 저장(I-8 동일).
 - 실행 환경: Vercel 서버리스(최대 실행시간 내 분할 — 후보 4장은 병렬 호출). 타임아웃 120s 초과 시 FAILED 처리·환불.
 - 상태머신: `QUEUED → GENERATING → READY → (SELECTED | DISCARDED)`, 어느 단계든 `→ FAILED(환불)`.
 
 ## 5. 크레딧·비용 통제
 
-- 플랜별 월 크레딧: `PLAN_LIMITS.aiCreditsMonthly` (TRIAL 10 / BASIC 애드온 / PRO 50 — 가설, docs/09 §3). `Subscription.aiCreditsUsed` 월 리셋.
+- 플랜별 월 크레딧: `PLAN_LIMITS.aiCreditsMonthly` (FREE 3회 1회성 / TRIAL 10 / BASIC 5/월 / PRO 50/월 — 가설, docs/09 §3). `Subscription.aiCreditsUsed` 월 리셋. 애드온 10회 ₩9,900.
 - 차감 시점 = 잡 생성 트랜잭션. FAILED·타임아웃 시 자동 환불(정합 테스트 필수). DISCARDED는 환불 없음(생성은 소비됨).
-- 남용 방지: 매장당 동시 실행 잡 1개, 생성 rate limit 10회/시간. 생성 1회 원가 상한을 env로 두고 초과 제공자 사용 차단.
+- **유닛 이코노믹스 게이트(docs/13 §5와 연동)**: 생성 1회 원가 상한 **300원**(저해상 4장+고해상 1장 합산, env로 강제). PRO 풀사용 시 AI 원가 ≤ 15,000원(요금의 25%), 매장 blended COGS ≤ 요금의 30%(매출총이익률 ≥ 70%).
+- 남용 방지: 매장당 동시 실행 잡 1개, 생성 rate limit 10회/시간.
 
 ## 6. 정책·가드레일
 
@@ -96,7 +98,7 @@ sequenceDiagram
 1. 고정 벤치마크 20종(한식/양식/디저트/음료 × 스타일 3종) 프롬프트 픽스처 작성
 2. 후보 제공자(Gemini API Imagen 계열, OpenAI gpt-image, 기타 1)에 동일 실행
 3. 블라인드 평가: 오케스트레이터+사용자에게 HTML 비교 시트 제출 — 식욕도/실사성/스타일 준수/한식 표현력 4축 채점
-4. 단가·지연(p50/p95)·상업 이용 약관 표와 함께 **디폴트 제공자 확정** → 어댑터 디폴트 설정
+4. 단가·지연(p50/p95)·상업 이용 약관 표와 함께 **디폴트 제공자 확정** → 어댑터 디폴트 설정. 합격 게이트: **회당 원가 ≤ 300원**(2단계 생성 기준) — 미달 제공자는 품질이 좋아도 기각
 5. 산출물: `docs/12` 부록으로 PoC 결과 기록
 
 ## 8. 테스트 (qa 협업)
