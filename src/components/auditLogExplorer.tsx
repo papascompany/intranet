@@ -6,6 +6,7 @@ import "./auditLogExplorer.css";
 export interface AuditLogExplorerProps {
   auditLogs: readonly AuditLog[];
   employees: readonly Pick<Employee, "id" | "name" | "department">[];
+  variant?: "audit" | "history";
 }
 
 type Filters = {
@@ -39,7 +40,7 @@ function formatCreatedAt(value: string) {
   }).format(date);
 }
 
-export function AuditLogExplorer({ auditLogs, employees }: AuditLogExplorerProps) {
+export function AuditLogExplorer({ auditLogs, employees, variant = "audit" }: AuditLogExplorerProps) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const filteredLogs = useMemo(() => auditLogs.filter((log) => {
     const actor = formatActor(log, employees);
@@ -59,9 +60,9 @@ export function AuditLogExplorer({ auditLogs, employees }: AuditLogExplorerProps
     <section aria-labelledby="audit-log-explorer-title" className="audit-log-explorer">
       <header className="audit-log-explorer__header">
         <div>
-          <p className="audit-log-explorer__eyebrow"><ClipboardList aria-hidden="true" /> 관리자 기록</p>
-          <h2 id="audit-log-explorer-title">감사 로그</h2>
-          <p>계정과 업무 기록을 조건으로 바로 확인할 수 있습니다.</p>
+          <p className="audit-log-explorer__eyebrow"><ClipboardList aria-hidden="true" /> {variant === "history" ? "업무 처리 기록" : "관리자 기록"}</p>
+          <h2 id="audit-log-explorer-title">{variant === "history" ? "처리 이력" : "감사 로그"}</h2>
+          <p>{variant === "history" ? "신청·승인·보정·열람 결과를 다시 확인할 수 있습니다." : "계정과 업무 기록을 조건으로 바로 확인할 수 있습니다."}</p>
         </div>
         <output aria-live="polite" className="audit-log-explorer__count">
           {filteredLogs.length}건
@@ -100,7 +101,7 @@ export function AuditLogExplorer({ auditLogs, employees }: AuditLogExplorerProps
                 <tr key={log.id}>
                   <td><time dateTime={log.createdAt}>{formatCreatedAt(log.createdAt)}</time></td>
                   <td>{formatActor(log, employees)}</td>
-                  <td><code>{log.action}</code></td>
+                  <td><code>{variant === "history" ? humanizeAction(log.action) : log.action}</code></td>
                   <td><span>{log.targetType}</span><small>{log.targetId}</small></td>
                   <td>{log.detail}</td>
                 </tr>
@@ -120,4 +121,33 @@ export function AuditLogExplorer({ auditLogs, employees }: AuditLogExplorerProps
       )}
     </section>
   );
+}
+
+function humanizeAction(action: string) {
+  const labels: Record<string, string> = {
+    ATTENDANCE_CLOCKED_IN: "출근 처리",
+    ATTENDANCE_CLOCKED_OUT: "퇴근 처리",
+    ATTENDANCE_CORRECTED: "근태 보정",
+    ATTENDANCE_CORRECTION_CREATED: "근태 보정 등록",
+    DAILY_WORK_TASK_PLAN_CREATED: "작업 계획 등록",
+    DAILY_WORK_TASK_PLAN_UPDATED: "작업 계획 수정",
+    DAILY_WORK_TASK_COMPLETED: "작업 완료",
+    EMPLOYEE_CARD_UPDATED: "직원카드 수정",
+    EMPLOYEE_SENSITIVE_DATA_VIEWED: "민감정보 열람",
+    LEAVE_REQUEST_SUBMITTED: "휴가 신청",
+    LEAVEREQUEST_APPROVED: "휴가 승인",
+    LEAVEREQUEST_REJECTED: "휴가 반려",
+    LEAVEREQUEST_CANCELLED: "휴가 취소",
+    OVERTIME_REQUEST_SUBMITTED: "야근 신청",
+    OVERTIMEREQUEST_APPROVED: "야근 승인",
+    OVERTIMEREQUEST_REJECTED: "야근 반려",
+    OVERTIMEREQUEST_CANCELLED: "야근 취소",
+    OVERTIME_PAY_APPROVED: "야근 수당 인정",
+    OVERTIME_PAY_UNAPPROVED: "야근 수당 인정 취소",
+    PAYROLL_STATEMENT_REGISTERED: "급여명세서 등록",
+    PAYROLL_STATEMENT_DOWNLOADED: "급여명세서 열람",
+    PAYROLL_STATEMENT_SOFT_DELETED: "급여명세서 삭제 처리",
+    SETTINGS_UPDATED: "운영 정책 수정"
+  };
+  return labels[action] ?? action;
 }

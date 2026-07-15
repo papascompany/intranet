@@ -500,6 +500,34 @@ describe("hr api", () => {
     ).resolves.toHaveLength(2);
   });
 
+  it("lets employees re-check approval outcomes for their own requests", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitLeaveRequest({
+      employeeId: employeeSession.employeeId,
+      type: "SPECIAL",
+      startsOn: "2026-07-20",
+      endsOn: "2026-07-20",
+      days: 1,
+      reason: "개인 일정",
+      session: employeeSession
+    });
+
+    await hrApi.updateRequestStatus({
+      requestId: submitted.request.id,
+      targetType: "LeaveRequest",
+      status: "APPROVED",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      detail: "승인 완료"
+    });
+
+    await expect(hrApi.getAuditLogs({ session: employeeSession, targetId: submitted.request.id })).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "LEAVEREQUEST_APPROVED", targetId: submitted.request.id, detail: "승인 완료" })
+      ])
+    );
+  });
+
   it("allows approver sessions to change request status", async () => {
     const hrApi = api();
     const submitted = await hrApi.submitLeaveRequest({

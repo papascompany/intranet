@@ -33,6 +33,7 @@ import {
   getAppBootstrap,
   downloadPayrollStatement,
   getEmployeeSnapshot,
+  getAuditLogs,
   resetEmployeeAccountPassword,
   revealEmployeeSensitiveData,
   setOvertimePayApproval,
@@ -96,6 +97,7 @@ const navIcons: Record<ErpActiveSection, React.ReactNode> = {
   overtime: <Clock size={16} />,
   payroll: <FileText size={16} />,
   settings: <Settings size={16} />,
+  history: <History size={16} />,
   audit: <History size={16} />
 };
 
@@ -128,16 +130,17 @@ type ClockFeedback = {
   time: string;
 };
 
-const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll"];
+const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll", "history"];
 const approverSections: ErpActiveSection[] = [...employeeSections, "approvals"];
-const adminSections: ErpActiveSection[] = ["overview", "employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
+const adminSections: ErpActiveSection[] = ["overview", "employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "history", "audit"];
 const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
   "self-service": "나의 하루",
   "employee-card": "내 정보",
   attendance: "근태 기록",
   leave: "휴가",
   overtime: "야근",
-  payroll: "급여"
+  payroll: "급여",
+  history: "처리 이력"
 };
 
 const rowColumns: DataTableColumn<ErpViewModelRow>[] = [
@@ -172,6 +175,8 @@ function App() {
   const [employeeAccountStates, setEmployeeAccountStates] = useState<EmployeeAccountState[]>([]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [employeeSnapshot, setEmployeeSnapshot] = useState<EmployeeSnapshot | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [isAuditLoading, setIsAuditLoading] = useState(false);
   const [notice, setNotice] = useState("운영팀 파일럿 API/DB 계층이 준비되었습니다.");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -344,6 +349,29 @@ function App() {
   }, [activeSection]);
 
   useEffect(() => {
+    if (!isLoggedIn || !authSession || authSession.passwordChangeRequired || !["audit", "history"].includes(activeSection)) {
+      return;
+    }
+
+    let active = true;
+    setIsAuditLoading(true);
+    void getAuditLogs({ session: authSession, limit: 500 })
+      .then((logs) => {
+        if (active) setAuditLogs(logs);
+      })
+      .catch((error) => {
+        if (active) setLoadError(error instanceof Error ? error.message : "처리 이력을 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (active) setIsAuditLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeSection, authSession, isLoggedIn]);
+
+  useEffect(() => {
     if (userMode === "ADMIN" && selectedEmployee && !isAdminAccount) {
       setUserMode("EMPLOYEE");
       setNotice("관리자모드는 관리자 지정 계정만 사용할 수 있습니다.");
@@ -415,6 +443,7 @@ function App() {
     setUserMode("EMPLOYEE");
     setActiveSection("self-service");
     setNotice("로그아웃되었습니다.");
+    setAuditLogs([]);
   }
 
   function changeMode(nextMode: UserMode) {
@@ -853,7 +882,6 @@ function App() {
       await refresh(selectedEmployee.id);
     } catch (error) {
       setEmployeeCardError(error instanceof Error ? error.message : "직원카드를 저장하지 못했습니다.");
-      throw error;
     } finally {
       setIsSavingEmployeeCard(false);
     }
@@ -1092,7 +1120,8 @@ function App() {
               payrollStatements: employeeSnapshot?.payrollStatements ?? [],
               systemPolicy: dashboard?.settings ?? defaultSystemPolicy,
               workplaces: employeeSnapshot?.workplaceOptions ?? [],
-              auditLogs: dashboard?.recentAuditLogs ?? [],
+              auditLogs: auditLogs.length ? auditLogs : dashboard?.recentAuditLogs ?? [],
+              isAuditLoading,
               isSavingTaskPlan,
               isRevealingEmployeeSensitiveData,
               isEmployeeSensitiveDataRevealed,
@@ -1382,6 +1411,7 @@ function renderSection(props: {
   systemPolicy: SystemPolicy;
   workplaces: import("./domain/types").Workplace[];
   auditLogs: AuditLog[];
+  isAuditLoading: boolean;
   taskPlanError: string | null;
 }) {
   switch (props.activeSection) {
@@ -1403,8 +1433,10 @@ function renderSection(props: {
       return <PayrollSection {...props} />;
     case "settings":
       return <SettingsSection {...props} />;
+    case "history":
+      return <HistorySection auditLogs={props.auditLogs} employees={props.employees} isLoading={props.isAuditLoading} />;
     case "audit":
-      return <AuditSection auditLogs={props.auditLogs} employees={props.employees} viewModel={props.erpViewModel} />;
+      return <AuditSection auditLogs={props.auditLogs} employees={props.employees} isLoading={props.isAuditLoading} viewModel={props.erpViewModel} />;
   }
 }
 
@@ -1878,13 +1910,23 @@ function SettingsSection(props: {
   );
 }
 
-function AuditSection({ auditLogs, employees, viewModel }: { auditLogs: AuditLog[]; employees: Employee[]; viewModel: ErpViewModel }) {
+function HistorySection({ auditLogs, employees, isLoading }: { auditLogs: AuditLog[]; employees: Employee[]; isLoading: boolean }) {
+  return (
+    <div className="erp-two-column">
+      <AuditLogExplorer auditLogs={auditLogs} employees={employees} variant="history" />
+      {isLoading ? <p className="sr-only" aria-live="polite">처리 이력을 불러오는 중입니다.</p> : null}
+    </div>
+  );
+}
+
+function AuditSection({ auditLogs, employees, isLoading, viewModel }: { auditLogs: AuditLog[]; employees: Employee[]; isLoading: boolean; viewModel: ErpViewModel }) {
   return (
     <div className="erp-two-column">
       <AuditLogExplorer auditLogs={auditLogs} employees={employees} />
       <DetailPanel title="보정 확인" description="보정 이력은 별도 행으로도 확인합니다.">
         <DataTable columns={rowColumns} rows={viewModel.correctionRows} emptyState={<EmptyState title="보정 없음" />} />
       </DetailPanel>
+      {isLoading ? <p className="sr-only" aria-live="polite">감사 로그를 불러오는 중입니다.</p> : null}
     </div>
   );
 }
@@ -1913,6 +1955,7 @@ function sectionTitle(section: ErpActiveSection) {
     overtime: "야근/상계",
     payroll: "급여명세서",
     settings: "설정/정책",
+    history: "처리 이력",
     audit: "감사 로그"
   };
 
@@ -1922,7 +1965,7 @@ function sectionTitle(section: ErpActiveSection) {
 function sectionFromLocation(): ErpActiveSection {
   if (typeof window === "undefined") return "self-service";
   const candidate = new URLSearchParams(window.location.search).get("section");
-  const sections: ErpActiveSection[] = ["overview", "self-service", "employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "audit"];
+  const sections: ErpActiveSection[] = ["overview", "self-service", "employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "history", "audit"];
   return sections.includes(candidate as ErpActiveSection) ? candidate as ErpActiveSection : "self-service";
 }
 

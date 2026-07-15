@@ -17,6 +17,7 @@ export type MaybePromise<T> = T | Promise<T>;
 
 export interface HrRepository {
   listEmployees(): MaybePromise<Employee[]>;
+  findEmployee(employeeId: string): MaybePromise<Employee | undefined>;
   updateEmployee(employee: Employee): MaybePromise<Employee>;
   createEmployeeWithAccount(employee: Employee, account: EmployeeAuthAccount): MaybePromise<{ employee: Employee; account: EmployeeAuthAccount }>;
   listEmployeeAccounts(): MaybePromise<EmployeeAuthAccount[]>;

@@ -20,6 +20,7 @@ export type ErpActiveSection =
   | "overtime"
   | "payroll"
   | "settings"
+  | "history"
   | "audit";
 
 export type ErpViewModelInput = {
@@ -79,6 +80,7 @@ const navLabels = {
   overtime: "야근",
   payroll: "급여",
   settings: "설정",
+  history: "처리 이력",
   audit: "감사"
 } satisfies Record<ErpActiveSection, string>;
 
@@ -209,6 +211,7 @@ function buildNavItems({
     overtime: dashboard.overtimeRequests.length,
     payroll: dashboard.activePayrollStatements.length,
     settings: employees.length,
+    history: dashboard.recentAuditLogs.length,
     audit: dashboard.recentAuditLogs.length
   } satisfies Record<ErpActiveSection, number>;
 

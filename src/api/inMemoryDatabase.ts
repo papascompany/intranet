@@ -77,6 +77,11 @@ export class InMemoryDatabase implements HrRepository {
     return cloneList(this.employees);
   }
 
+  findEmployee(employeeId: string) {
+    const employee = this.employees.find((item) => item.id === employeeId);
+    return employee ? cloneItem(employee) : undefined;
+  }
+
   updateEmployee(employee: Employee) {
     const index = this.employees.findIndex((item) => item.id === employee.id);
     if (index < 0) {

@@ -55,4 +55,18 @@ describe("ApprovalQueue", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("승인 권한이 없습니다.");
     expect(onReject).toHaveBeenCalledWith(expect.objectContaining({ kind: "leave" }), "대체 인력 확인이 필요합니다.");
   });
+
+  it("keeps completed requests available in the processing history tab", () => {
+    renderQueue({
+      leaveRequests: [{ ...leaveRequests[0], status: "APPROVED", decidedBy: "emp-1", decidedAt: "2026-07-15T09:30:00+09:00" }]
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: /처리 완료/u }));
+    fireEvent.click(screen.getByRole("button", { name: /휴가 신청.*김운영.*2026-07-20/u }));
+
+    expect(screen.getByText("처리 결과")).toBeVisible();
+    expect(screen.getAllByText("승인").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("2026. 7. 15. 오전 9:30")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
+  });
 });

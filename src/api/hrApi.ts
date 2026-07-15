@@ -449,7 +449,7 @@ export class HrApi {
       await this.assertAdmin(actorId, input.session);
     }
 
-    const employee = (await this.db.listEmployees()).find((item) => item.id === input.employeeId);
+    const employee = await this.db.findEmployee(input.employeeId);
     if (!employee) {
       throw new Error(`Employee not found: ${input.employeeId}`);
     }
@@ -857,7 +857,10 @@ export class HrApi {
   }
 
   async getAuditLogs(filter: AuditLogFilter = {}) {
-    const logs = this.filterAuditLogsBySession(await this.db.listAuditLogs(), filter.session)
+    const [auditLogs, employees] = await Promise.all([this.db.listAuditLogs(), this.db.listEmployees()]);
+    const visibleEmployeeIds = this.visibleEmployeeIds(filter.session, employees);
+    const visibleTargetIds = await this.visibleAuditTargetIds(filter.session, visibleEmployeeIds);
+    const logs = this.filterAuditLogsBySession(auditLogs, filter.session, visibleTargetIds)
       .filter((log) => !filter.actorId || log.actorId === filter.actorId)
       .filter((log) => !filter.targetType || log.targetType === filter.targetType)
       .filter((log) => !filter.targetId || log.targetId === filter.targetId)
@@ -1071,6 +1074,32 @@ export class HrApi {
     }
 
     return logs.filter((log) => log.actorId === session.employeeId || Boolean(visibleTargetIds?.has(log.targetId)));
+  }
+
+  private async visibleAuditTargetIds(session: AuthSession | undefined, visibleEmployeeIds: Set<string>) {
+    if (!session || isAdminSession(session)) {
+      return undefined;
+    }
+
+    const [attendance, leaveRequests, overtimeRequests, corrections, payrollStatements, dailyWorkTasks] = await Promise.all([
+      this.db.listAttendanceRecords(),
+      this.db.listLeaveRequests(),
+      this.db.listOvertimeRequests(),
+      this.db.listCorrections(),
+      this.db.listPayrollStatements(true),
+      this.db.listDailyWorkTasks()
+    ]);
+    const visible = <T extends { employeeId: string }>(rows: T[]) => rows.filter((row) => visibleEmployeeIds.has(row.employeeId));
+
+    return new Set([
+      ...visibleEmployeeIds,
+      ...visible(attendance).map((record) => record.id),
+      ...visible(leaveRequests).map((request) => request.id),
+      ...visible(overtimeRequests).map((request) => request.id),
+      ...visible(corrections).flatMap((correction) => [correction.id, correction.attendanceId]),
+      ...visible(payrollStatements).map((statement) => statement.id),
+      ...visible(dailyWorkTasks).map((task) => task.id)
+    ]);
   }
 
   private async workplacesWithPolicyRadius(workplaceId?: string) {

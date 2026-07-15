@@ -208,8 +208,11 @@ export function EmployeeCardEditor({
     [adminDraft, basicDraft, canAdmin, employee, workplaceId]
   );
   const requiresReason = canAdmin && sensitiveAdminFieldsChanged(employee, adminDraft);
-  const hasInvalidAdminNumbers = canAdmin && [adminDraft.annualSalary, adminDraft.severancePay, adminDraft.incomeDeductionDependents]
+  const hasInvalidAdminNumbers = canAdmin && [adminDraft.annualSalary, adminDraft.severancePay]
     .some((value) => value.trim() !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0));
+  const hasInvalidDependents = canAdmin
+    && adminDraft.incomeDeductionDependents.trim() !== ""
+    && (!Number.isInteger(Number(adminDraft.incomeDeductionDependents)) || Number(adminDraft.incomeDeductionDependents) < 0);
   const hasInvalidLeaveAdjustment = canAdmin && adminDraft.annualLeaveAdjustmentDays.trim() !== "" && !Number.isFinite(Number(adminDraft.annualLeaveAdjustmentDays));
   const hasMissingAdminRequired = canAdmin && (!adminDraft.name.trim() || !adminDraft.employeeNumber.trim() || !adminDraft.hireDate);
   const hasUnnamedCustomField = canAdmin && adminDraft.customAdminFields.some((field) => !field.label.trim());
@@ -227,7 +230,7 @@ export function EmployeeCardEditor({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || hasInvalidAdminNumbers || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())) return;
+    if (busy || hasInvalidAdminNumbers || hasInvalidDependents || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())) return;
 
     const update: EmployeeCardBasicUpdate & Partial<EmployeeCardAdminUpdate> = { ...basicDraft };
     if (canAdmin) {
@@ -247,7 +250,7 @@ export function EmployeeCardEditor({
       onClose={onClose}
       onSubmit={submit}
       open={open}
-      submitDisabled={hasInvalidAdminNumbers || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())}
+      submitDisabled={hasInvalidAdminNumbers || hasInvalidDependents || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())}
       submitLabel="변경 저장"
       title={`${employee.name} 직원카드 편집`}
     >

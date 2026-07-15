@@ -33,6 +33,11 @@ export class PostgresHrRepository implements HrRepository {
     return rows.map((row) => this.employeeFromRow(row));
   }
 
+  async findEmployee(employeeId: string) {
+    const [row] = await this.query<EmployeeRow>("select * from employees where id = $1 limit 1", [employeeId]);
+    return row ? this.employeeFromRow(row) : undefined;
+  }
+
   async updateEmployee(employee: Employee) {
     const [row] = await this.update<EmployeeRow>("employees", employeeToRow(employee, this.config), "id", employee.id);
     return this.employeeFromRow(requireRow(row, "employees", employee.id));
@@ -342,7 +347,7 @@ function employeeToRow(employee: Employee, config: PostgresRepositoryConfig): Db
     severance_pay: employee.severancePay ?? null,
     income_deduction_dependents: employee.incomeDeductionDependents ?? null,
     annual_leave_adjustment_days: employee.annualLeaveAdjustmentDays ?? 0,
-    custom_admin_fields: employee.customAdminFields ?? null,
+    custom_admin_fields: employee.customAdminFields ?? [],
     approver_id: employee.approverId ?? null,
     workplace_id: employee.workplaceId ?? null,
     pilot: employee.pilot

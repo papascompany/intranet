@@ -67,8 +67,8 @@ export function validateEmployeeCardUpdate(input: EmployeeCardUpdateInput) {
     throw new Error("Severance pay must be zero or greater");
   }
 
-  if (input.incomeDeductionDependents !== undefined && input.incomeDeductionDependents < 0) {
-    throw new Error("Income deduction dependents must be zero or greater");
+  if (input.incomeDeductionDependents !== undefined && (!Number.isInteger(input.incomeDeductionDependents) || input.incomeDeductionDependents < 0)) {
+    throw new Error("Income deduction dependents must be a non-negative integer");
   }
 
   if (input.annualLeaveAdjustmentDays !== undefined && !Number.isFinite(input.annualLeaveAdjustmentDays)) {
