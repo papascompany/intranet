@@ -8,6 +8,7 @@ export type PayrollStatementManagerMode = "employee" | "admin";
 
 export interface PayrollStatementManagerProps {
   busy?: boolean;
+  employeeNames?: Readonly<Record<string, string>>;
   mode: PayrollStatementManagerMode;
   onDelete?: (statement: PayrollStatement, reason: string) => void | Promise<void>;
   onDownload: (statement: PayrollStatement) => void | Promise<void>;
@@ -32,6 +33,7 @@ function uploadedAtLabel(uploadedAt: string) {
 
 export function PayrollStatementManager({
   busy = false,
+  employeeNames = {},
   mode,
   onDelete,
   onDownload,
@@ -89,7 +91,7 @@ export function PayrollStatementManager({
         <div>
           <p className="payroll-statement-manager__eyebrow"><FileText aria-hidden="true" /> 급여</p>
           <h2 id="payroll-statement-manager-title">급여명세서</h2>
-          <p>{isAdmin ? "선택한 직원의 급여명세서를 관리합니다." : "내 급여명세서를 열람하고 내려받을 수 있습니다."}</p>
+          <p>{isAdmin ? "전체 직원의 급여명세서를 관리합니다." : "내 급여명세서를 열람하고 내려받을 수 있습니다."}</p>
         </div>
         <span aria-label={`급여명세서 ${visibleStatements.length}건`} className="payroll-statement-manager__count">{visibleStatements.length}건</span>
       </header>
@@ -104,8 +106,8 @@ export function PayrollStatementManager({
               <div className="payroll-statement-row__file">
                 <FileText aria-hidden="true" />
                 <div>
-                  <strong>{statement.filename}</strong>
-                  <span>등록일 {uploadedAtLabel(statement.uploadedAt)}</span>
+                  <strong>{isAdmin ? `${employeeNames[statement.employeeId] ?? statement.employeeId} · ${statement.filename}` : statement.filename}</strong>
+                  <span>{isAdmin ? `${statement.employeeId} · ` : ""}등록일 {uploadedAtLabel(statement.uploadedAt)}</span>
                 </div>
               </div>
               <div className="payroll-statement-row__actions">

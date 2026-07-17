@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   MapPin,
   QrCode,
+  RefreshCw,
   Settings,
   ShieldCheck,
   TimerReset,
@@ -139,7 +140,7 @@ type ClockFeedback = {
   time: string;
 };
 
-const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll", "history"];
+const employeeSections: ErpActiveSection[] = ["self-service", "attendance", "leave", "overtime", "payroll", "employee-card", "history"];
 const approverSections: ErpActiveSection[] = [...employeeSections, "approvals"];
 const adminSections: ErpActiveSection[] = ["overview", "employee-card", "attendance", "approvals", "leave", "overtime", "payroll", "settings", "history", "audit"];
 const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
@@ -212,6 +213,8 @@ function App() {
   const [isAuthenticating, setIsAuthenticating] = useState(true);
   const [taskPlanError, setTaskPlanError] = useState<string | null>(null);
   const [isSavingTaskPlan, setIsSavingTaskPlan] = useState(false);
+  const [taskUpdateError, setTaskUpdateError] = useState<string | null>(null);
+  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [isCorrectionDialogOpen, setIsCorrectionDialogOpen] = useState(false);
   const [isSubmittingCorrection, setIsSubmittingCorrection] = useState(false);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
@@ -251,7 +254,6 @@ function App() {
         setEmployeeAccountStates(bootstrap.employeeAccountStates);
         setIsEmployeeSensitiveDataRevealed(false);
         setRevealedEmployee(null);
-        setClockFeedback(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : "데이터를 불러오지 못했습니다.";
         setLoadError(message);
@@ -308,6 +310,9 @@ function App() {
   const isAdminAccount = isAdminSession(authSession ?? undefined);
   const isApproverAccount = authSession?.role === "APPROVER";
   const effectiveMode: UserMode = userMode === "ADMIN" && isAdminAccount ? "ADMIN" : "EMPLOYEE";
+  const hasLoadedData = dashboard !== null && employeeSnapshot !== null;
+  const isInitialLoading = isLoading && !hasLoadedData;
+  const isRefreshing = isLoading && hasLoadedData;
   const allowedSections = effectiveMode === "ADMIN" ? adminSections : isApproverAccount ? approverSections : employeeSections;
   const employeeViewModel = useMemo(
     () => (employeeSnapshot ? buildEmployeeViewModel(toEmployeeViewModelSnapshot(employeeSnapshot)) : null),
@@ -410,8 +415,9 @@ function App() {
       .then((snapshot) => {
         setEmployeeSnapshot((current) => current?.employee.id === employeeId ? snapshot : current);
       })
-      .catch(() => {
-        // The instant summary remains usable when the background detail refresh is unavailable.
+      .catch((error) => {
+        setLoadError(error instanceof Error ? error.message : "선택한 직원의 상세 정보를 불러오지 못했습니다.");
+        setNotice("직원 요약은 표시되지만 상세 정보 동기화에 실패했습니다. 다시 시도해 주세요.");
       });
     if (rememberLogin) {
       localStorage.setItem("intranet:employee-id", employeeId);
@@ -519,22 +525,30 @@ function App() {
   }
 
   async function updateDailyTask(task: DailyWorkTask) {
-    if (!selectedEmployee) return;
+    if (!selectedEmployee || updatingTaskId) return;
 
     const nextStatus = task.status === "DONE" ? "TODO" : "DONE";
-    const result = await updateDailyWorkTaskStatus({
-      taskId: task.id,
-      status: nextStatus,
-      actorId: authActorId(authSession, selectedEmployee.id),
-      session: authSession ?? undefined,
-      completedAt: nextStatus === "DONE" ? today : undefined
-    });
+    setUpdatingTaskId(task.id);
+    setTaskUpdateError(null);
+    try {
+      const result = await updateDailyWorkTaskStatus({
+        taskId: task.id,
+        status: nextStatus,
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined,
+        completedAt: nextStatus === "DONE" ? today : undefined
+      });
 
-    setNotice(nextStatus === "DONE" ? `작업 완료 · ${result.task.title}` : `완료 취소 · ${result.task.title}`);
-    setEmployeeSnapshot((current) => current ? {
-      ...current,
-      dailyWorkTasks: upsertRecord(current.dailyWorkTasks, result.task)
-    } : current);
+      setNotice(nextStatus === "DONE" ? `작업 완료 · ${result.task.title}` : `완료 취소 · ${result.task.title}`);
+      setEmployeeSnapshot((current) => current ? {
+        ...current,
+        dailyWorkTasks: upsertRecord(current.dailyWorkTasks, result.task)
+      } : current);
+    } catch (error) {
+      setTaskUpdateError(error instanceof Error ? error.message : "작업 상태를 저장하지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      setUpdatingTaskId(null);
+    }
   }
 
   async function createDailyTaskPlan(draft: DailyWorkPlanDraft) {
@@ -729,17 +743,38 @@ function App() {
     });
 
     if (status === "APPROVED") {
+      try {
+        await setOvertimePayApproval({
+          requestId,
+          payApproved: true,
+          actorId: authActorId(authSession, selectedEmployee?.id),
+          session: authSession ?? undefined,
+          detail: "관리자 인정 초과근무수당 집계"
+        });
+      } catch (error) {
+        await refresh(selectedEmployeeId);
+        throw new Error(`야근 신청은 승인됐지만 수당 인정 저장에 실패했습니다. 처리 완료 이력에서 다시 시도해 주세요. ${error instanceof Error ? error.message : ""}`.trim());
+      }
+    }
+
+    setNotice(`야근 신청 ${status === "APPROVED" ? "승인 및 수당 인정" : "반려"} · ${result.request.id}`);
+    await refresh(selectedEmployeeId);
+  }
+
+  async function retryOvertimePayApproval(requestId: string) {
+    try {
       await setOvertimePayApproval({
         requestId,
         payApproved: true,
         actorId: authActorId(authSession, selectedEmployee?.id),
         session: authSession ?? undefined,
-        detail: "관리자 인정 초과근무수당 집계"
+        detail: "처리 완료 이력에서 초과근무수당 인정 재시도"
       });
+      setNotice("초과근무수당 인정을 완료했습니다.");
+      await refresh(selectedEmployeeId);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "초과근무수당 인정을 저장하지 못했습니다.");
     }
-
-    setNotice(`야근 신청 ${status === "APPROVED" ? "승인 및 수당 인정" : "반려"} · ${result.request.id}`);
-    await refresh(selectedEmployeeId);
   }
 
   async function cancelEmployeeRequest(targetType: "LeaveRequest" | "OvertimeRequest" | "AttendanceCorrectionRequest", requestId?: string) {
@@ -1164,7 +1199,8 @@ function App() {
           actions={
             <InlineActions>
               <button disabled={isLoading} onClick={() => void refresh(selectedEmployeeId)}>
-                새로고침
+                {isRefreshing ? <RefreshCw className="is-spinning" size={14} /> : null}
+                {isRefreshing ? "동기화 중..." : "새로고침"}
               </button>
             </InlineActions>
           }
@@ -1188,9 +1224,10 @@ function App() {
               activeSection,
               employeeViewModel,
               erpViewModel,
-              isLoading,
+              isLoading: isInitialLoading,
               onApproveLeave: approveLeave,
               onApproveOvertime: approveOvertime,
+              onRetryOvertimePayApproval: retryOvertimePayApproval,
               onApproveAttendanceCorrection: approveAttendanceCorrection,
               onCancelLeave: (requestId) => void cancelEmployeeRequest("LeaveRequest", requestId),
               onCancelOvertime: (requestId) => void cancelEmployeeRequest("OvertimeRequest", requestId),
@@ -1235,12 +1272,16 @@ function App() {
               leaveBalance: employeeSnapshot?.leaveBalance,
               leaveBalanceAdjustments: employeeSnapshot?.leaveBalanceAdjustments ?? [],
               overtimeRequests: dashboard?.overtimeRequests ?? [],
-              payrollStatements: employeeSnapshot?.payrollStatements ?? [],
+              payrollStatements: effectiveMode === "ADMIN"
+                ? dashboard?.activePayrollStatements ?? []
+                : employeeSnapshot?.payrollStatements ?? [],
               systemPolicy: dashboard?.settings ?? defaultSystemPolicy,
               workplaces: employeeSnapshot?.workplaceOptions ?? [],
               auditLogs: auditLogs.length ? auditLogs : dashboard?.recentAuditLogs ?? [],
               isAuditLoading,
               isSavingTaskPlan,
+              taskUpdateError,
+              updatingTaskId,
               isRevealingEmployeeSensitiveData,
               isEmployeeSensitiveDataRevealed,
               taskPlanError
@@ -1498,8 +1539,11 @@ function renderSection(props: {
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
+  taskUpdateError: string | null;
+  updatingTaskId: string | null;
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
+  onRetryOvertimePayApproval: (requestId: string) => void | Promise<void>;
   onApproveAttendanceCorrection: (requestId?: string, status?: "APPROVED" | "REJECTED", detail?: string) => void | Promise<void>;
   onCancelLeave: (requestId?: string) => void | Promise<void>;
   onCancelOvertime: (requestId?: string) => void | Promise<void>;
@@ -1634,6 +1678,8 @@ function SelfServiceSection(props: {
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
+  taskUpdateError: string | null;
+  updatingTaskId: string | null;
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
   onUpdateDailyTask: (task: DailyWorkTask) => void;
   onSubmitLeave: () => void;
@@ -1709,13 +1755,18 @@ function SelfServiceSection(props: {
             <strong>내 작업 {dailyTasks.length}건</strong>
             <span>완료 {completedTasks.length} · 남음 {incompleteTasks.length}</span>
           </div>
+          {props.taskUpdateError ? (
+            <InlineNotice title="작업 상태를 저장하지 못했습니다" tone="danger">
+              {props.taskUpdateError} 다시 시도해 주세요.
+            </InlineNotice>
+          ) : null}
           <div className="daily-task-list">
             {dailyTasks.map((task) => (
               <article className={`daily-task is-${task.status.toLowerCase()}`} key={task.id}>
                 <button
                   aria-label={`${task.title} ${task.status === "DONE" ? "완료 취소" : "완료 처리"}`}
                   className="task-check"
-                  disabled={props.isLoading}
+                  disabled={props.isLoading || props.updatingTaskId !== null}
                   onClick={() => props.onUpdateDailyTask(task)}
                 >
                   {task.status === "DONE" ? <Check size={16} /> : null}
@@ -1785,27 +1836,31 @@ function EmployeeCardSection(props: {
     status: adjustment.days > 0 ? "APPROVED" : "REJECTED"
   }));
   return (
-    <div className="people-workspace">
-      <EmployeeDirectory
-        accountStates={props.employeeAccountStates}
-        busy={props.isLoading}
-        employees={props.employees}
-        onSelect={props.onSelectEmployee}
-        selectedEmployeeId={props.selectedEmployeeId}
-      />
+    <div className={`people-workspace${props.canAdmin ? "" : " people-workspace--self"}`}>
+      {props.canAdmin ? (
+        <EmployeeDirectory
+          accountStates={props.employeeAccountStates}
+          busy={props.isLoading}
+          employees={props.employees}
+          onSelect={props.onSelectEmployee}
+          selectedEmployeeId={props.selectedEmployeeId}
+        />
+      ) : null}
       <div className="people-workspace__detail">
         <DetailPanel
-          title={`${props.erpViewModel.employeeSummary.name} 인사기록 카드`}
-          description="기본 인사정보와 급여·퇴직·소득공제 항목을 함께 관리합니다."
+          title={props.canAdmin ? `${props.erpViewModel.employeeSummary.name} 인사기록 카드` : "내 인사정보"}
+          description={props.canAdmin ? "기본 인사정보와 급여·퇴직·소득공제 항목을 함께 관리합니다." : "내 연락처와 급여 지급 정보를 확인하고 수정합니다."}
           actions={
             <InlineActions>
-              <button disabled={props.isLoading || props.isRevealingEmployeeSensitiveData} onClick={props.onToggleEmployeeSensitiveData} type="button">
-                {props.isEmployeeSensitiveDataRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
-                {props.isEmployeeSensitiveDataRevealed ? "민감정보 숨기기" : "민감정보 열람"}
-              </button>
+              {props.canAdmin ? (
+                <button disabled={props.isLoading || props.isRevealingEmployeeSensitiveData} onClick={props.onToggleEmployeeSensitiveData} type="button">
+                  {props.isEmployeeSensitiveDataRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {props.isEmployeeSensitiveDataRevealed ? "민감정보 숨기기" : "민감정보 열람"}
+                </button>
+              ) : null}
               <button disabled={props.isLoading} onClick={props.onUpdateEmployeeCard}>
                 <BadgeCheck size={14} />
-                인사카드 편집
+                {props.canAdmin ? "인사카드 편집" : "내 정보 수정"}
               </button>
             </InlineActions>
           }
@@ -1890,6 +1945,7 @@ function ApprovalsSection(props: {
   overtimeRequests: import("./domain/types").OvertimeRequest[];
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED", detail?: string) => void | Promise<void>;
   onApproveOvertime: (requestId?: string, status?: "APPROVED" | "REJECTED", detail?: string) => void | Promise<void>;
+  onRetryOvertimePayApproval: (requestId: string) => void | Promise<void>;
   onApproveAttendanceCorrection: (requestId?: string, status?: "APPROVED" | "REJECTED", detail?: string) => void | Promise<void>;
   onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
   onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
@@ -1908,6 +1964,7 @@ function ApprovalsSection(props: {
           : item.kind === "overtime"
             ? props.onApproveOvertime(item.request.id)
             : props.onApproveAttendanceCorrection(item.request.id)}
+        onRetryOvertimePayApproval={props.onRetryOvertimePayApproval}
         onReject={(item: ApprovalQueueItem, reason: string) => item.kind === "leave"
           ? props.onApproveLeave(item.request.id, "REJECTED", reason)
           : item.kind === "overtime"
@@ -2017,6 +2074,7 @@ function OvertimeSection(props: {
 function PayrollSection(props: {
   canAdmin: boolean;
   erpViewModel: ErpViewModel;
+  employees: Employee[];
   isLoading: boolean;
   onUploadPayroll: () => void;
   onDownloadPayroll: (statementId?: string) => void;
@@ -2035,6 +2093,7 @@ function PayrollSection(props: {
       ) : null}
       <PayrollStatementManager
         busy={props.isLoading}
+        employeeNames={Object.fromEntries(props.employees.map((employee) => [employee.id, employee.name]))}
         mode={props.canAdmin ? "admin" : "employee"}
         onDelete={props.canAdmin ? (statement, reason) => props.onDeletePayroll(statement.id, reason) : undefined}
         onDownload={(statement) => props.onDownloadPayroll(statement.id)}

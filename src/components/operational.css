@@ -77,6 +77,11 @@
   background: var(--color-paper);
 }
 
+.operational-dialog__close:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
 .operational-dialog__close svg,
 .operational-notice__dismiss svg {
   width: 16px;

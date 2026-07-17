@@ -71,6 +71,54 @@ describe("PostgresHrRepository", () => {
     expect(employee.workplaceId).toBe("samsong-techno-valley");
   });
 
+  it("persists corrected attendance clocks and early-leave ledger status", async () => {
+    const { calls, repository } = repositoryWithRows([
+      [{
+        id: "att-2026-07-08-emp-ops-1",
+        employee_id: "emp-ops-1",
+        work_date: "2026-07-08",
+        clock_in_at: "2026-07-08T07:58:00+09:00",
+        clock_out_at: "2026-07-08T17:00:00+09:00",
+        status: "GPS_PASSED",
+        verification_id: "ver-seed-1",
+        early_leave_minutes: 0
+      }],
+      [{
+        id: "early-att-2026-07-08-emp-ops-1",
+        employee_id: "emp-ops-1",
+        work_date: "2026-07-08",
+        minutes: 0,
+        status: "CORRECTED",
+        reason: "정정 승인"
+      }]
+    ]);
+
+    const attendance = await repository.upsertAttendanceRecord({
+      id: "att-2026-07-08-emp-ops-1",
+      employeeId: "emp-ops-1",
+      date: "2026-07-08",
+      clockInAt: "2026-07-08T07:58:00+09:00",
+      clockOutAt: "2026-07-08T17:00:00+09:00",
+      status: "GPS_PASSED",
+      verificationId: "ver-seed-1",
+      earlyLeaveMinutes: 0
+    });
+    const ledger = await repository.upsertEarlyLeaveLedger({
+      id: "early-att-2026-07-08-emp-ops-1",
+      employeeId: "emp-ops-1",
+      date: "2026-07-08",
+      minutes: 0,
+      status: "CORRECTED",
+      reason: "정정 승인"
+    });
+
+    expect(calls[0].sql).toContain("on conflict (id) do update");
+    expect(calls[0].sql).toContain("clock_out_at");
+    expect(calls[1].sql).toContain("early_leave_ledger");
+    expect(attendance).toMatchObject({ clockOutAt: "2026-07-08T17:00:00+09:00", earlyLeaveMinutes: 0 });
+    expect(ledger).toMatchObject({ minutes: 0, status: "CORRECTED" });
+  });
+
   it("persists an unassigned employee workplace as null", async () => {
     const { calls, repository } = repositoryWithRows([
       [
@@ -226,6 +274,37 @@ describe("PostgresHrRepository", () => {
     expect(calls[0].sql).toContain("actor_employee_id");
     expect(calls[0].params).toContain("emp-ceo");
     expect(log.actorId).toBe("emp-ceo");
+  });
+
+  it("preserves attendance correction request decisions and trace fields", async () => {
+    const pendingRow = {
+      id: "correction-request-1",
+      attendance_id: "att-2026-07-08-emp-ops-1",
+      employee_id: "emp-ops-1",
+      type: "CLOCK_OUT_CORRECTION",
+      before_value: "2026-07-08T16:35:00+09:00",
+      requested_value: "2026-07-08T17:00:00+09:00",
+      reason: "거래처 미팅",
+      status: "PENDING",
+      decided_by: null,
+      decided_at: null,
+      created_at: "2026-07-08T17:10:00+09:00"
+    };
+    const approvedRow = { ...pendingRow, status: "APPROVED", decided_by: "emp-ceo", decided_at: "2026-07-08T18:00:00+09:00" };
+    const { calls, repository } = repositoryWithRows([[pendingRow], [approvedRow]]);
+
+    const [pending] = await repository.listCorrectionRequests();
+    const saved = await repository.updateCorrectionRequest({
+      ...pending,
+      status: "APPROVED",
+      decidedBy: "emp-ceo",
+      decidedAt: "2026-07-08T18:00:00+09:00"
+    });
+
+    expect(calls[0].sql).toContain("from attendance_correction_requests order by created_at desc");
+    expect(calls[1].sql).toContain("update attendance_correction_requests set attendance_id = $2");
+    expect(calls[1].params).toContain("APPROVED");
+    expect(saved).toMatchObject({ id: "correction-request-1", status: "APPROVED", decidedBy: "emp-ceo" });
   });
 
   it("maps and persists daily work task status using database column names", async () => {

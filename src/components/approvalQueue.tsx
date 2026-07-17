@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { CalendarClock, Check, Clock3, FileText, X } from "lucide-react";
 import type { AttendanceCorrectionRequest, Employee, LeaveRequest, OvertimeRequest } from "../domain/types";
 import { ConfirmDialog, FormDialog, InlineNotice } from "./operational";
@@ -15,6 +15,7 @@ export interface ApprovalQueueProps {
   error?: string | null;
   leaveRequests: readonly LeaveRequest[];
   onApprove: (item: ApprovalQueueItem) => void | Promise<void>;
+  onRetryOvertimePayApproval?: (requestId: string) => void | Promise<void>;
   onReject: (item: ApprovalQueueItem, reason: string) => void | Promise<void>;
   overtimeRequests: readonly OvertimeRequest[];
   correctionRequests?: readonly AttendanceCorrectionRequest[];
@@ -58,6 +59,7 @@ export function ApprovalQueue({
   error,
   leaveRequests,
   onApprove,
+  onRetryOvertimePayApproval,
   onReject,
   overtimeRequests,
   correctionRequests = []
@@ -88,6 +90,11 @@ export function ApprovalQueue({
   const selectedItem = visibleItems.find((item) => item.request.id === selectedId) ?? null;
   const isBusy = busy || isSubmitting;
   const visibleError = actionError ?? error;
+
+  useEffect(() => {
+    if (selectedId && visibleItems.some((item) => item.request.id === selectedId)) return;
+    setSelectedId(visibleItems[0]?.request.id ?? null);
+  }, [selectedId, visibleItems]);
 
   const closeDialog = () => {
     if (!isBusy) {
@@ -134,14 +141,14 @@ export function ApprovalQueue({
       <div className="approval-queue__content">
         <div className="approval-queue__list-panel">
           <div aria-label="승인 목록 보기" className="approval-queue__tabs" role="tablist">
-            <button aria-selected={listMode === "pending"} className={listMode === "pending" ? "is-active" : ""} onClick={() => { setListMode("pending"); setActionError(null); }} role="tab" type="button">
+            <button aria-controls="approval-queue-panel" aria-selected={listMode === "pending"} className={listMode === "pending" ? "is-active" : ""} id="approval-queue-pending-tab" onClick={() => { setListMode("pending"); setActionError(null); }} role="tab" type="button">
               대기 <span>{items.length}</span>
             </button>
-            <button aria-selected={listMode === "history"} className={listMode === "history" ? "is-active" : ""} onClick={() => { setListMode("history"); setActionError(null); }} role="tab" type="button">
+            <button aria-controls="approval-queue-panel" aria-selected={listMode === "history"} className={listMode === "history" ? "is-active" : ""} id="approval-queue-history-tab" onClick={() => { setListMode("history"); setActionError(null); }} role="tab" type="button">
               처리 완료 <span>{historyItems.length}</span>
             </button>
           </div>
-          <div aria-label={listMode === "pending" ? "대기 요청 목록" : "처리 완료 이력 목록"} className="approval-queue__list" role="list">
+          <div aria-label={listMode === "pending" ? "대기 요청 목록" : "처리 완료 이력 목록"} aria-labelledby={listMode === "pending" ? "approval-queue-pending-tab" : "approval-queue-history-tab"} className="approval-queue__list" id="approval-queue-panel" role="tabpanel" tabIndex={0}>
           {visibleItems.length ? visibleItems.map((item) => {
             const selected = item.request.id === selectedItem?.request.id;
             return (
@@ -201,11 +208,23 @@ export function ApprovalQueue({
                   <button className="approval-queue__approve" disabled={isBusy} onClick={() => setDialog("approve")} type="button"><Check aria-hidden="true" /> 승인</button>
                 </div>
               ) : (
-                <dl className="approval-queue__resolution">
-                  <div><dt>처리 결과</dt><dd>{requestStatusLabel(selectedItem.request.status)}</dd></div>
-                  <div><dt>처리 시각</dt><dd>{selectedItem.request.decidedAt ? formatCreatedAt(selectedItem.request.decidedAt) : "기록 없음"}</dd></div>
-                  <div><dt>처리자</dt><dd>{selectedItem.request.decidedBy ? employeeName(selectedItem.request.decidedBy, employees) : "기록 없음"}</dd></div>
-                </dl>
+                <>
+                  <dl className="approval-queue__resolution">
+                    <div><dt>처리 결과</dt><dd>{requestStatusLabel(selectedItem.request.status)}</dd></div>
+                    <div><dt>처리 시각</dt><dd>{selectedItem.request.decidedAt ? formatCreatedAt(selectedItem.request.decidedAt) : "기록 없음"}</dd></div>
+                    <div><dt>처리자</dt><dd>{selectedItem.request.decidedBy ? employeeName(selectedItem.request.decidedBy, employees) : "기록 없음"}</dd></div>
+                    {selectedItem.kind === "overtime" && selectedItem.request.status === "APPROVED" ? (
+                      <div><dt>수당 인정</dt><dd>{selectedItem.request.payApproved ? "인정 완료" : "추가 처리 필요"}</dd></div>
+                    ) : null}
+                  </dl>
+                  {selectedItem.kind === "overtime" && selectedItem.request.status === "APPROVED" && !selectedItem.request.payApproved && onRetryOvertimePayApproval ? (
+                    <div className="approval-queue__actions">
+                      <button className="approval-queue__approve" disabled={isBusy} onClick={() => void runAction(() => onRetryOvertimePayApproval(selectedItem.request.id))} type="button">
+                        <Check aria-hidden="true" /> 수당 인정 재시도
+                      </button>
+                    </div>
+                  ) : null}
+                </>
               )}
             </>
           ) : <div className="approval-queue__placeholder">목록에서 대기 요청을 선택해 주세요.</div>}

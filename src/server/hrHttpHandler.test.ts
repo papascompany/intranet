@@ -358,6 +358,30 @@ describe("hrHttpHandler", () => {
     });
   });
 
+  it("returns a client error for invalid overtime input without exposing a server failure", async () => {
+    const response = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "submitOvertimeRequest",
+          payload: {
+            employeeId: "emp-ops-1",
+            date: "2026-07-10",
+            startsAt: "2026-07-10T19:00:00+09:00",
+            endsAt: "2026-07-10T17:30:00+09:00",
+            minutes: 90,
+            reason: "잘못된 시간"
+          }
+        },
+        serverSession: employeeSession
+      },
+      api()
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: expect.stringContaining("must be after the start time") });
+  });
+
   it("rejects protected resources without a server-authenticated session", async () => {
     const response = await handleHrHttpRequest(
       { method: "POST", body: { action: "getDashboard", payload: {} } },

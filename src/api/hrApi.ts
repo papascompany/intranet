@@ -1,11 +1,13 @@
-import { buildAttendanceRecord, evaluateVerification } from "../domain/attendance.js";
+import { buildAttendanceRecord, calculateEarlyLeaveMinutes, evaluateVerification } from "../domain/attendance.js";
 import { getLeaveBalance } from "../domain/leave.js";
 import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
 import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
 import type {
   AttendanceCorrection,
   AttendanceCorrectionRequest,
+  AttendanceRecord,
   AuditLog,
+  CorrectionType,
   DailyWorkTask,
   EarlyLeaveLedger,
   Employee,
@@ -70,6 +72,7 @@ type Clock = () => string;
 
 type HrDataSnapshot = {
   employees: Employee[];
+  employeeAccounts?: EmployeeAuthAccount[];
   attendanceRecords: import("../domain/types.js").AttendanceRecord[];
   leaveRequests: LeaveRequest[];
   leaveBalanceAdjustments: LeaveBalanceAdjustment[];
@@ -117,15 +120,13 @@ export class HrApi {
 
   async getAppBootstrap(input: { employeeId: string; asOf?: string; session?: AuthSession }): Promise<AppBootstrap> {
     const asOf = input.asOf ?? this.clock();
-    const data = await this.loadDataSnapshot();
+    const data = await this.loadDataSnapshot(isAdminSession(input.session));
     const targetEmployee = data.employees.find((employee) => employee.id === input.employeeId);
     this.assertCanReadEmployeeRecord(input.employeeId, input.session, targetEmployee);
-    const [snapshot, employeeAccountStates] = await Promise.all([
-      Promise.resolve(data),
-      isAdminSession(input.session)
-        ? this.getEmployeeAccountStatesFromRows(input.session!, data.employees)
-        : Promise.resolve([])
-    ]);
+    const employeeAccountStates = isAdminSession(input.session)
+      ? this.getEmployeeAccountStatesFromRows(input.session!, data.employees, data.employeeAccounts ?? [])
+      : [];
+    const snapshot = data;
     const employees = this.visibleEmployees(snapshot.employees, input.session);
     const dashboard = this.buildDashboard(snapshot, asOf, input.session);
     const employeeSnapshot = this.buildEmployeeSnapshot(snapshot, input.employeeId, asOf, input.session);
@@ -138,8 +139,8 @@ export class HrApi {
     return this.buildDashboard(await this.loadDataSnapshot(), asOf, session);
   }
 
-  private async loadDataSnapshot(): Promise<HrDataSnapshot> {
-    const [employees, attendanceRecords, leaveRequests, earlyLeaveLedger, leaveBalanceAdjustments, overtimeRequests, workplaces, corrections, correctionRequests, payrollStatements, dailyWorkTasks, auditLogs, settings] = await Promise.all([
+  private async loadDataSnapshot(includeEmployeeAccounts = false): Promise<HrDataSnapshot> {
+    const [employees, attendanceRecords, leaveRequests, earlyLeaveLedger, leaveBalanceAdjustments, overtimeRequests, workplaces, corrections, correctionRequests, payrollStatements, dailyWorkTasks, auditLogs, settings, employeeAccounts] = await Promise.all([
       this.db.listEmployees(),
       this.db.listAttendanceRecords(),
       this.db.listLeaveRequests(),
@@ -152,10 +153,11 @@ export class HrApi {
       this.db.listPayrollStatements(false),
       this.db.listDailyWorkTasks(),
       this.db.listAuditLogs(),
-      this.db.getSettings()
+      this.db.getSettings(),
+      includeEmployeeAccounts ? this.db.listEmployeeAccounts() : Promise.resolve([])
     ]);
 
-    return { employees, attendanceRecords, leaveRequests, earlyLeaveLedger, leaveBalanceAdjustments, overtimeRequests, workplaces, corrections, correctionRequests, payrollStatements, dailyWorkTasks, auditLogs, settings };
+    return { employees, employeeAccounts, attendanceRecords, leaveRequests, earlyLeaveLedger, leaveBalanceAdjustments, overtimeRequests, workplaces, corrections, correctionRequests, payrollStatements, dailyWorkTasks, auditLogs, settings };
   }
 
   private visibleEmployees(employees: Employee[], session?: AuthSession) {
@@ -290,6 +292,9 @@ export class HrApi {
     }
     const employee = { ...this.buildNewEmployee(input.employee), id: await this.db.nextId("emp") };
     await this.assertEmployeeNumberAvailable(employee.employeeNumber!);
+    if (employee.workplaceId && !(await this.db.listWorkplaces()).some((workplace) => workplace.id === employee.workplaceId)) {
+      throw new Error(`Workplace not found: ${employee.workplaceId}`);
+    }
     const loginId = await this.assertLoginIdAvailable(input.loginId);
 
     const credential = await createTemporaryCredential();
@@ -441,6 +446,17 @@ export class HrApi {
     const overtimeRequests = overtimeRequestRows.filter((request) => request.employeeId === employeeId);
     const activeOvertime = overtimeRequests.find((request) => request.status === "APPROVED");
     const earlyLeaveMinutes = earlyLeaveLedger.reduce((sum, entry) => sum + entry.minutes, 0);
+    const visibleAuditTargetIds = new Set([
+      employeeId,
+      ...attendanceRecords.map((record) => record.id),
+      ...leaveRequests.map((request) => request.id),
+      ...earlyLeaveLedger.map((entry) => entry.id),
+      ...overtimeRequests.map((request) => request.id),
+      ...correctionRows.filter((correction) => correction.employeeId === employeeId).flatMap((correction) => [correction.id, correction.attendanceId]),
+      ...correctionRequestRows.filter((request) => request.employeeId === employeeId).map((request) => request.id),
+      ...payrollStatementRows.filter((statement) => statement.employeeId === employeeId).map((statement) => statement.id),
+      ...dailyWorkTaskRows.filter((task) => task.employeeId === employeeId).map((task) => task.id)
+    ]);
 
     return {
       asOf,
@@ -471,7 +487,7 @@ export class HrApi {
       payrollStatements: payrollStatementRows.filter((statement) => statement.employeeId === employeeId),
       dailyWorkTasks: dailyWorkTaskRows.filter((task) => task.employeeId === employeeId && task.date === asOf.slice(0, 10)),
       recentAuditLogs: auditLogs
-        .filter((log) => log.actorId === employeeId || log.targetId.includes(employeeId))
+        .filter((log) => log.actorId === employeeId || visibleAuditTargetIds.has(log.targetId))
         .slice(0, 10)
     };
   }
@@ -605,7 +621,8 @@ export class HrApi {
       }
     }
 
-    const saved = await this.db.updateEmployee(applyEmployeeCardUpdate(employee, input.patch));
+    const updatedEmployee = normalizeEmployeeCardForPersistence(applyEmployeeCardUpdate(employee, input.patch));
+    const saved = await this.db.updateEmployee(updatedEmployee);
     const isLeaveAdjustment = Object.prototype.hasOwnProperty.call(input.patch, "annualLeaveAdjustmentDays");
     let leaveBalanceAdjustment: LeaveBalanceAdjustment | undefined;
     if (isLeaveAdjustment) {
@@ -643,7 +660,7 @@ export class HrApi {
       action: "EMPLOYEE_SENSITIVE_DATA_VIEWED",
       targetType: "Employee",
       targetId: input.employeeId,
-      detail: "residentRegistrationNumber,payrollAccount"
+      detail: "residentRegistrationNumber,address,mobile,emergencyContact,familyRelations,payrollBank,payrollAccount"
     });
 
     return { employee, auditLog };
@@ -717,6 +734,7 @@ export class HrApi {
     const settings = await this.db.getSettings();
     const leaveRequests = await this.db.listLeaveRequests();
     this.assertLeaveRequest(input, employee, leaveRequests, settings);
+    const reason = requiredText(input.reason, "Leave request reason");
 
     const request: LeaveRequest = {
       id: await this.db.nextId("leave"),
@@ -725,7 +743,7 @@ export class HrApi {
       startsOn: input.startsOn,
       endsOn: input.endsOn,
       days: input.days,
-      reason: input.reason,
+      reason,
       status: "PENDING"
     };
     const saved = await this.db.addLeaveRequest(request);
@@ -746,15 +764,16 @@ export class HrApi {
     assertActiveEmployment(employee, "submit overtime");
     const actorId = this.resolveActorId(input, input.employeeId);
     await this.assertEmployee(actorId);
+    const { date, minutes, reason } = validateOvertimeRequestInput(input);
 
     const request: OvertimeRequest = {
       id: await this.db.nextId("ot"),
       employeeId: input.employeeId,
-      date: input.date,
+      date,
       startsAt: input.startsAt,
       endsAt: input.endsAt,
-      minutes: input.minutes,
-      reason: input.reason,
+      minutes,
+      reason,
       status: "PENDING",
       payApproved: false
     };
@@ -772,6 +791,7 @@ export class HrApi {
 
   async updateRequestStatus(input: UpdateRequestStatusInput) {
     const actorId = this.resolveActorId(input, input.actorId);
+    assertRequestDecisionStatus(input.status);
 
     if (input.targetType === "LeaveRequest") {
       const request = await this.findLeaveRequest(input.requestId);
@@ -786,6 +806,10 @@ export class HrApi {
       const auditLog = await this.auditStatusChange(actorId, input.targetType, saved.id, input.status, input.detail);
 
       return { request: saved, auditLog };
+    }
+
+    if (input.targetType !== "OvertimeRequest") {
+      throw new Error(`Unsupported request type: ${String(input.targetType)}`);
     }
 
     const request = await this.findOvertimeRequest(input.requestId);
@@ -856,6 +880,9 @@ export class HrApi {
     await this.assertAdmin(actorId, input.session);
 
     const request = await this.findOvertimeRequest(input.requestId);
+    if (request.status !== "APPROVED") {
+      throw new Error("Overtime pay approval requires an approved overtime request");
+    }
     const saved = await this.db.updateOvertimeRequest({ ...request, payApproved: input.payApproved });
     const auditLog = await this.addAuditLog({
       actorId,
@@ -872,6 +899,17 @@ export class HrApi {
     await this.assertEmployee(input.employeeId);
     const correctedById = this.resolveActorId(input, input.correctedById);
     await this.assertAdmin(correctedById, input.session);
+    assertCorrectionType(input.type);
+    const attendance = (await this.db.listAttendanceRecords()).find((record) => record.id === input.attendanceId);
+    if (!attendance || attendance.employeeId !== input.employeeId) {
+      throw new Error("Attendance record not found");
+    }
+    const afterValue = requiredText(input.afterValue, "Corrected attendance value");
+    const reason = requiredText(input.reason, "Correction reason");
+    if (!isValidTimestamp(afterValue)) {
+      throw new Error("Corrected attendance value is invalid");
+    }
+    assertCorrectionDate(attendance.date, afterValue);
 
     const correction: AttendanceCorrection = {
       id: await this.db.nextId("corr"),
@@ -880,36 +918,44 @@ export class HrApi {
       correctedById,
       type: input.type,
       beforeValue: input.beforeValue,
-      afterValue: input.afterValue,
-      reason: input.reason,
+      afterValue,
+      reason,
       createdAt: input.createdAt ?? this.clock()
     };
+    const applied = await this.applyAttendanceCorrection({
+      attendance,
+      type: input.type,
+      requestedValue: afterValue,
+      reason
+    }, correctedById);
     const saved = await this.db.addCorrection(correction);
     const auditLog = await this.addAuditLog({
       actorId: correctedById,
       action: "ATTENDANCE_CORRECTION_CREATED",
       targetType: "AttendanceRecord",
       targetId: input.attendanceId,
-      detail: `${input.type}: ${input.reason}`
+      detail: `${input.type}: ${reason}`
     });
 
-    return { correction: saved, auditLog };
+    return { correction: saved, ...applied, auditLog };
   }
 
   async submitAttendanceCorrectionRequest(input: SubmitAttendanceCorrectionRequestInput) {
     const employee = await this.findEmployee(input.employeeId);
     await this.assertCanReadEmployee(input.employeeId, input.session);
     assertActiveEmployment(employee, "submit attendance correction");
-    const requestedValue = input.requestedValue.trim();
-    const reason = input.reason.trim();
-    if (!requestedValue || !reason) {
-      throw new Error("Requested attendance time and reason are required");
+    assertCorrectionType(input.type);
+    const requestedValue = requiredText(input.requestedValue, "Requested attendance time");
+    const reason = requiredText(input.reason, "Correction reason");
+    if (!isValidTimestamp(requestedValue)) {
+      throw new Error("Requested attendance time is invalid");
     }
     if (input.attendanceId) {
       const attendance = (await this.db.listAttendanceRecords()).find((record) => record.id === input.attendanceId);
       if (!attendance || attendance.employeeId !== input.employeeId) {
         throw new Error("Attendance record not found");
       }
+      assertCorrectionDate(attendance.date, requestedValue);
     }
 
     const request: AttendanceCorrectionRequest = {
@@ -917,7 +963,7 @@ export class HrApi {
       attendanceId: input.attendanceId,
       employeeId: input.employeeId,
       type: input.type,
-      beforeValue: input.beforeValue,
+      beforeValue: normalizeOptionalText(input.beforeValue),
       requestedValue,
       reason,
       status: "PENDING",
@@ -942,6 +988,13 @@ export class HrApi {
     if (request.status !== "PENDING") {
       throw new Error(`Only pending correction requests can be decided. Current status: ${request.status}`);
     }
+    if (input.status === "APPROVED") {
+      if (request.attendanceId) {
+        await this.assertCorrectionAttendance(request);
+      } else {
+        await this.assertMissingAttendanceAvailable(request);
+      }
+    }
 
     const saved = await this.db.updateCorrectionRequest({
       ...request,
@@ -950,18 +1003,33 @@ export class HrApi {
       decidedAt: this.clock()
     });
     let correction: AttendanceCorrection | undefined;
-    if (input.status === "APPROVED" && request.attendanceId) {
-      correction = await this.db.addCorrection({
-        id: await this.db.nextId("corr"),
-        attendanceId: request.attendanceId,
-        employeeId: request.employeeId,
-        correctedById: actorId,
-        type: request.type,
-        beforeValue: request.beforeValue,
-        afterValue: request.requestedValue,
-        reason: request.reason,
-        createdAt: this.clock()
-      });
+    let attendance: AttendanceRecord | undefined;
+    let earlyLeaveLedger: EarlyLeaveLedger | undefined;
+    if (input.status === "APPROVED") {
+      correction = request.attendanceId
+        ? await this.db.addCorrection({
+            id: await this.db.nextId("corr"),
+            attendanceId: request.attendanceId,
+            employeeId: request.employeeId,
+            correctedById: actorId,
+            type: request.type,
+            beforeValue: request.beforeValue,
+            afterValue: request.requestedValue,
+            reason: request.reason,
+            createdAt: this.clock()
+          })
+        : await this.createMissingAttendanceCorrection(request, actorId);
+      if (request.attendanceId) {
+        const target = await this.findAttendanceRecord(request.attendanceId, request.employeeId);
+        const applied = await this.applyAttendanceCorrection({
+          attendance: target,
+          type: request.type,
+          requestedValue: request.requestedValue,
+          reason: request.reason
+        }, actorId);
+        attendance = applied.attendance;
+        earlyLeaveLedger = applied.earlyLeaveLedger;
+      }
     }
     const auditLog = await this.addAuditLog({
       actorId,
@@ -971,7 +1039,12 @@ export class HrApi {
       detail: input.detail ?? `${saved.type} ${input.status === "APPROVED" ? "승인" : "반려"}`
     });
 
-    return { request: saved, correction, auditLog };
+    if (!request.attendanceId && input.status === "APPROVED") {
+      const createdAttendance = await this.findAttendanceByCorrectionRequest(request);
+      attendance = createdAttendance;
+    }
+
+    return { request: saved, correction, attendance, earlyLeaveLedger, auditLog };
   }
 
   async uploadPayrollStatement(input: UploadPayrollStatementInput) {
@@ -1113,6 +1186,114 @@ export class HrApi {
     return typeof filter.limit === "number" ? logs.slice(0, filter.limit) : logs;
   }
 
+  private async createMissingAttendanceCorrection(request: AttendanceCorrectionRequest, actorId: string) {
+    const requestedAt = request.requestedValue;
+    const date = await this.assertMissingAttendanceAvailable(request);
+
+    const verification = {
+      id: await this.db.nextId("ver"),
+      employeeId: request.employeeId,
+      method: "MANUAL_CLICK" as const,
+      status: "MANUAL_REVIEW_REQUIRED" as const,
+      attemptedAt: requestedAt,
+      note: "근태 정정 승인으로 누락 기록 생성"
+    };
+    await this.db.addVerificationAttempt(verification);
+    const createsClockOut = request.type === "CLOCK_OUT_CORRECTION" || request.type === "APPROVED_EARLY_LEAVE";
+    const attendance = await this.db.upsertAttendanceRecord({
+      id: `att-${date}-${request.employeeId}`,
+      employeeId: request.employeeId,
+      date,
+      clockInAt: createsClockOut ? undefined : requestedAt,
+      clockOutAt: createsClockOut ? requestedAt : undefined,
+      status: verification.status,
+      verificationId: verification.id,
+      earlyLeaveMinutes: 0
+    });
+
+    return await this.db.addCorrection({
+      id: await this.db.nextId("corr"),
+      attendanceId: attendance.id,
+      employeeId: request.employeeId,
+      correctedById: actorId,
+      type: request.type,
+      beforeValue: request.beforeValue,
+      afterValue: request.requestedValue,
+      reason: request.reason,
+      createdAt: this.clock()
+    });
+  }
+
+  private async applyAttendanceCorrection(
+    input: {
+      attendance: AttendanceRecord;
+      type: CorrectionType;
+      requestedValue: string;
+      reason: string;
+    },
+    actorId: string
+  ) {
+    const correctsClockIn = input.type === "CLOCK_IN_CORRECTION" || input.type === "APPROVED_LATE";
+    const correctsClockOut = input.type === "CLOCK_OUT_CORRECTION" || input.type === "APPROVED_EARLY_LEAVE";
+    if (!correctsClockIn && !correctsClockOut) {
+      return { attendance: input.attendance };
+    }
+
+    const attendance: AttendanceRecord = {
+      ...input.attendance,
+      clockInAt: correctsClockIn ? input.requestedValue : input.attendance.clockInAt,
+      clockOutAt: correctsClockOut ? input.requestedValue : input.attendance.clockOutAt
+    };
+    let earlyLeaveLedger: EarlyLeaveLedger | undefined;
+    if (correctsClockOut) {
+      const settings = await this.db.getSettings();
+      const scheduledEndHour = settings.workDays.includes(workDayCode(attendance.date))
+        ? Number(settings.workEndTime.slice(0, 2))
+        : 0;
+      attendance.earlyLeaveMinutes = calculateEarlyLeaveMinutes(input.requestedValue, scheduledEndHour);
+      earlyLeaveLedger = await this.syncCorrectedEarlyLeaveLedger(
+        attendance,
+        input.type === "APPROVED_EARLY_LEAVE" ? "APPROVED" : "CORRECTED",
+        input.reason,
+        actorId
+      );
+    }
+
+    return {
+      attendance: await this.db.upsertAttendanceRecord(attendance),
+      earlyLeaveLedger
+    };
+  }
+
+  private async findAttendanceRecord(attendanceId: string, employeeId: string) {
+    const attendance = (await this.db.listAttendanceRecords()).find((record) => record.id === attendanceId);
+    if (!attendance || attendance.employeeId !== employeeId) {
+      throw new Error("Attendance record not found");
+    }
+    return attendance;
+  }
+
+  private async findAttendanceByCorrectionRequest(request: AttendanceCorrectionRequest) {
+    const date = normalizeDateOnly(request.requestedValue.slice(0, 10), "근태 정정일", true)!;
+    const attendance = await this.db.findAttendanceByEmployeeDate(request.employeeId, date);
+    if (!attendance) {
+      throw new Error("Attendance record was not created for the approved correction");
+    }
+    return attendance;
+  }
+
+  private async assertCorrectionAttendance(request: AttendanceCorrectionRequest) {
+    await this.findAttendanceRecord(request.attendanceId!, request.employeeId);
+  }
+
+  private async assertMissingAttendanceAvailable(request: AttendanceCorrectionRequest) {
+    const date = normalizeDateOnly(request.requestedValue.slice(0, 10), "근태 정정일", true)!;
+    if (await this.db.findAttendanceByEmployeeDate(request.employeeId, date)) {
+      throw new Error("Attendance record already exists for the correction date");
+    }
+    return date;
+  }
+
   private async syncEarlyLeaveLedger(attendance: { id: string; employeeId: string; date: string; earlyLeaveMinutes: number }) {
     if (attendance.earlyLeaveMinutes <= 0) {
       return undefined;
@@ -1125,6 +1306,24 @@ export class HrApi {
       minutes: attendance.earlyLeaveMinutes,
       status: "UNAPPROVED",
       reason: "실제 퇴근 기록 기준"
+    };
+
+    return await this.db.upsertEarlyLeaveLedger(entry);
+  }
+
+  private async syncCorrectedEarlyLeaveLedger(
+    attendance: { id: string; employeeId: string; date: string; earlyLeaveMinutes: number },
+    status: EarlyLeaveLedger["status"],
+    reason: string,
+    actorId: string
+  ) {
+    const entry: EarlyLeaveLedger = {
+      id: `early-${attendance.id}`,
+      employeeId: attendance.employeeId,
+      date: attendance.date,
+      minutes: attendance.earlyLeaveMinutes,
+      status,
+      reason: `${reason} (처리자: ${actorId})`
     };
 
     return await this.db.upsertEarlyLeaveLedger(entry);
@@ -1247,14 +1446,14 @@ export class HrApi {
     throw new Error(`Employee access denied: ${session.employeeId} -> ${employeeId}`);
   }
 
-  private async getEmployeeAccountStatesFromRows(session: AuthSession, employees: Employee[]) {
+  private getEmployeeAccountStatesFromRows(session: AuthSession, employees: Employee[], accounts: EmployeeAuthAccount[]) {
     this.assertSessionActor(session, session.employeeId);
     const actor = employees.find((employee) => employee.id === session.employeeId);
     if (!actor || !isAdminSession(session) || (actor.role !== "HR_ADMIN" && actor.role !== "SYSTEM_ADMIN")) {
       throw new Error(`Admin permission required: ${session.employeeId}`);
     }
 
-    return (await this.db.listEmployeeAccounts()).map((account): EmployeeAccountState => ({
+    return accounts.map((account): EmployeeAccountState => ({
       employeeId: account.employeeId,
       loginId: account.loginId,
       enabled: !account.disabledAt,
@@ -1495,9 +1694,10 @@ export class HrApi {
   }
 
   private assertLeaveRequest(input: SubmitLeaveRequestInput, employee: Employee, requests: LeaveRequest[], settings: import("./types.js").SystemPolicy) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startsOn) || !/^\d{4}-\d{2}-\d{2}$/.test(input.endsOn) || input.endsOn < input.startsOn) {
-      throw new Error("Leave period is invalid");
-    }
+    const startsOn = normalizeDateOnly(input.startsOn, "휴가 시작일", true)!;
+    const endsOn = normalizeDateOnly(input.endsOn, "휴가 종료일", true)!;
+    if (endsOn < startsOn) throw new Error("Leave period is invalid");
+    requiredText(input.reason, "Leave request reason");
     if (!Number.isFinite(input.days) || input.days <= 0) {
       throw new Error("Leave days must be greater than zero");
     }
@@ -1506,6 +1706,11 @@ export class HrApi {
     }
     if ((input.type === "ANNUAL" || input.type === "HALF_DAY") && Math.abs(input.days / settings.annualLeaveUnit - Math.round(input.days / settings.annualLeaveUnit)) > 0.0001) {
       throw new Error(`Leave must be requested in ${settings.annualLeaveUnit}-day units`);
+    }
+    const calendarDays = inclusiveCalendarDays(startsOn, endsOn);
+    const expectedDays = input.type === "HALF_DAY" ? (calendarDays === 1 ? 0.5 : undefined) : calendarDays;
+    if (expectedDays === undefined || Math.abs(input.days - expectedDays) > 0.0001) {
+      throw new Error("Leave days must match the selected date range");
     }
     if ((input.type !== "ANNUAL" && input.type !== "HALF_DAY") || settings.annualLeaveOveruseAllowed) return;
 
@@ -1517,6 +1722,24 @@ export class HrApi {
       throw new Error("Requested leave exceeds the available balance");
     }
   }
+}
+
+function normalizeEmployeeCardForPersistence(employee: Employee): Employee {
+  return {
+    ...employee,
+    name: employee.name.trim(),
+    position: normalizeOptionalText(employee.position),
+    hireDate: normalizeDateOnly(employee.hireDate, "입사일", true)!,
+    birthday: normalizeDateOnly(employee.birthday, "생일"),
+    terminationDate: normalizeDateOnly(employee.terminationDate, "퇴사일"),
+    residentRegistrationNumber: normalizeOptionalText(employee.residentRegistrationNumber),
+    address: normalizeOptionalText(employee.address),
+    mobile: normalizeOptionalText(employee.mobile),
+    emergencyContact: normalizeOptionalText(employee.emergencyContact),
+    familyRelations: normalizeOptionalText(employee.familyRelations),
+    payrollBank: normalizeOptionalText(employee.payrollBank),
+    payrollAccount: normalizeOptionalText(employee.payrollAccount)
+  };
 }
 
 function assertSystemPolicy(settings: import("./types.js").SystemPolicy) {
@@ -1602,6 +1825,24 @@ function assertPendingRequest(status: RequestStatus) {
   }
 }
 
+function assertRequestDecisionStatus(status: unknown): asserts status is Extract<RequestStatus, "APPROVED" | "REJECTED"> {
+  if (status !== "APPROVED" && status !== "REJECTED") {
+    throw new Error("Request status must be APPROVED or REJECTED");
+  }
+}
+
+function assertCorrectionType(type: unknown): asserts type is CorrectionType {
+  if (!["APPROVED_LATE", "APPROVED_EARLY_LEAVE", "CLOCK_IN_CORRECTION", "CLOCK_OUT_CORRECTION", "MISSING_RECORD_CREATED"].includes(type as string)) {
+    throw new Error("Unsupported attendance correction type");
+  }
+}
+
+function assertCorrectionDate(attendanceDate: string, timestamp: string) {
+  if (timestamp.slice(0, 10) !== attendanceDate) {
+    throw new Error("Correction time must match the attendance date");
+  }
+}
+
 function workDayCode(timestamp: string): import("./types.js").SystemPolicy["workDays"][number] {
   const date = new Date(`${timestamp.slice(0, 10)}T00:00:00Z`);
   return ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][date.getUTCDay()] as import("./types.js").SystemPolicy["workDays"][number];
@@ -1615,9 +1856,72 @@ function assertSelfServiceEmployeeCardPatch(patch: UpdateEmployeeCardInput["patc
   }
 }
 
-function normalizeOptionalText(value: string | null | undefined) {
-  const normalized = value?.trim();
+function normalizeOptionalText(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim() : undefined;
   return normalized || undefined;
+}
+
+function normalizeDateOnly(value: unknown, label: string, required = false) {
+  const normalized = typeof value === "string" ? value.trim() : undefined;
+  if (!normalized) {
+    if (required) {
+      throw new Error(`${label} is required`);
+    }
+    return undefined;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    throw new Error(`${label} must use YYYY-MM-DD`);
+  }
+
+  const [year, month, day] = normalized.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw new Error(`${label} must be a valid calendar date`);
+  }
+
+  return normalized;
+}
+
+function inclusiveCalendarDays(startsOn: string, endsOn: string) {
+  const start = Date.parse(`${startsOn}T00:00:00Z`);
+  const end = Date.parse(`${endsOn}T00:00:00Z`);
+  return Math.floor((end - start) / 86_400_000) + 1;
+}
+
+function validateOvertimeRequestInput(input: SubmitOvertimeRequestInput) {
+  const date = normalizeDateOnly(input.date, "근무일", true)!;
+  const reason = requiredText(input.reason, "Overtime request reason");
+
+  if (typeof input.startsAt !== "string" || typeof input.endsAt !== "string") {
+    throw new Error("Overtime start and end times are invalid");
+  }
+
+  const startsAt = new Date(input.startsAt);
+  const endsAt = new Date(input.endsAt);
+  if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime())) {
+    throw new Error("Overtime start and end times are invalid");
+  }
+  if (!input.startsAt.startsWith(date)) {
+    throw new Error("Overtime start time must match the work date");
+  }
+  const minutes = Math.round((endsAt.getTime() - startsAt.getTime()) / 60000);
+  if (minutes <= 0 || minutes > 24 * 60) {
+    throw new Error("Overtime end time must be after the start time and within 24 hours");
+  }
+
+  return { date, minutes, reason };
+}
+
+function requiredText(value: unknown, label: string) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} is required`);
+  }
+  return value.trim();
+}
+
+function isValidTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(new Date(value).getTime()) && value.includes("T");
 }
 
 const TEMPORARY_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";

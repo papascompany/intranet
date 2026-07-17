@@ -4,6 +4,7 @@ import type {
   CancelRequestInput,
   ClockAttendanceInput,
   ClockAttendanceResult,
+  CreateAttendanceCorrectionResult,
   CreateEmployeeAccountInput,
   CreateDailyWorkTaskPlanInput,
   CreateAttendanceCorrectionInput,
@@ -33,6 +34,7 @@ import type {
   PersistenceStatus,
   UpdateRequestStatusInput,
   UpdateAttendanceCorrectionRequestStatusInput,
+  UpdateAttendanceCorrectionRequestStatusResult,
   UpdateWorkplaceInput,
   DeleteWorkplaceInput,
   UploadPayrollStatementInput
@@ -144,7 +146,7 @@ export async function setOvertimePayApproval(input: SetOvertimePayApprovalInput)
 }
 
 export async function createAttendanceCorrection(input: CreateAttendanceCorrectionInput) {
-  return await post<{ correction: AttendanceCorrection; auditLog: AuditLog }>("createAttendanceCorrection", input);
+  return await post<CreateAttendanceCorrectionResult>("createAttendanceCorrection", input);
 }
 
 export async function submitAttendanceCorrectionRequest(input: SubmitAttendanceCorrectionRequestInput) {
@@ -152,7 +154,7 @@ export async function submitAttendanceCorrectionRequest(input: SubmitAttendanceC
 }
 
 export async function updateAttendanceCorrectionRequestStatus(input: UpdateAttendanceCorrectionRequestStatusInput) {
-  return await post<{ request: AttendanceCorrectionRequest; correction?: AttendanceCorrection; auditLog: AuditLog }>("updateAttendanceCorrectionRequestStatus", input);
+  return await post<UpdateAttendanceCorrectionRequestStatusResult>("updateAttendanceCorrectionRequestStatus", input);
 }
 
 export async function updateEmployeeCard(input: UpdateEmployeeCardInput) {

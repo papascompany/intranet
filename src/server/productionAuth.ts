@@ -27,6 +27,7 @@ type AuthAccountRow = Record<string, unknown> & {
   login_id: string;
   password_hash: string;
   password_change_required: boolean;
+  failed_sign_in_count?: number;
   role: AuthSession["role"];
   employment_status?: "ACTIVE" | "LEAVE" | "TERMINATED";
   disabled_at?: string | null;
@@ -47,6 +48,8 @@ export type AuthenticatedServerSession = {
 
 const SESSION_COOKIE_NAME = "intranet_session";
 const INVALID_CREDENTIALS = "Invalid login ID or password.";
+const MAX_FAILED_SIGN_INS = 5;
+const SIGN_IN_LOCK_DURATION_MS = 15 * 60 * 1000;
 
 export function getAuthQuery(env: ServerAuthEnv = process.env): AuthAccountQuery {
   if (!env.DATABASE_URL) {
@@ -71,12 +74,14 @@ export async function authenticateCredentials(
     throw new AuthenticationError(INVALID_CREDENTIALS);
   }
 
+  await clearExpiredSignInLock(query, account, now);
+
   if (!(await verifyPassword(input.password, account.password_hash))) {
-    await recordFailedSignIn(query, account.account_id);
+    await recordFailedSignIn(query, account.account_id, now);
     throw new AuthenticationError(INVALID_CREDENTIALS);
   }
 
-  await query("update auth_accounts set failed_sign_in_count = 0, last_signed_in_at = now(), updated_at = now() where id = $1", [account.account_id]);
+  await query("update auth_accounts set failed_sign_in_count = 0, locked_until = null, last_signed_in_at = now(), updated_at = now() where id = $1", [account.account_id]);
   const authenticated = toAuthenticatedSession(account, input.rememberLogin ?? false, now);
   const secret = getRequiredSessionSecret(env);
   const lifetimeSeconds = authenticated.session.rememberLogin ? 30 * 24 * 60 * 60 : 8 * 60 * 60;
@@ -169,6 +174,7 @@ export async function findAccountByLoginId(query: AuthAccountQuery, loginId: str
        auth_accounts.login_id,
        auth_accounts.password_hash,
        auth_accounts.password_change_required,
+       auth_accounts.failed_sign_in_count,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
        employees.role,
@@ -191,6 +197,7 @@ export async function findAccountBySignedSession(query: AuthAccountQuery, token:
        auth_accounts.login_id,
        auth_accounts.password_hash,
        auth_accounts.password_change_required,
+       auth_accounts.failed_sign_in_count,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
        employees.role,
@@ -221,13 +228,40 @@ export function toAuthenticatedSession(account: AuthAccountRow, rememberLogin: b
 }
 
 export function isAccountActive(account: AuthAccountRow, now: Date) {
-  return account.employment_status !== "TERMINATED"
-    && !account.disabled_at
-    && (!account.locked_until || new Date(account.locked_until).getTime() <= now.getTime());
+  if (account.employment_status === "TERMINATED" || account.disabled_at) {
+    return false;
+  }
+  if (!account.locked_until) {
+    return true;
+  }
+
+  const lockedUntil = new Date(account.locked_until).getTime();
+  return Number.isFinite(lockedUntil) && lockedUntil <= now.getTime();
 }
 
-async function recordFailedSignIn(query: AuthAccountQuery, accountId: string) {
-  await query("update auth_accounts set failed_sign_in_count = failed_sign_in_count + 1, updated_at = now() where id = $1", [accountId]);
+async function recordFailedSignIn(query: AuthAccountQuery, accountId: string, now: Date) {
+  const lockedUntil = new Date(now.getTime() + SIGN_IN_LOCK_DURATION_MS).toISOString();
+  await query(
+    `update auth_accounts
+     set failed_sign_in_count = coalesce(failed_sign_in_count, 0) + 1,
+         locked_until = case when coalesce(failed_sign_in_count, 0) + 1 >= $2 then $3::timestamptz else locked_until end,
+         updated_at = now()
+     where id = $1`,
+    [accountId, MAX_FAILED_SIGN_INS, lockedUntil]
+  );
+}
+
+async function clearExpiredSignInLock(query: AuthAccountQuery, account: AuthAccountRow, now: Date) {
+  if (!account.locked_until || new Date(account.locked_until).getTime() > now.getTime()) {
+    return;
+  }
+
+  await query(
+    "update auth_accounts set failed_sign_in_count = 0, locked_until = null, updated_at = now() where id = $1 and locked_until <= $2",
+    [account.account_id, now.toISOString()]
+  );
+  account.failed_sign_in_count = 0;
+  account.locked_until = null;
 }
 
 function shouldUseSecureCookie(env: ServerAuthEnv) {

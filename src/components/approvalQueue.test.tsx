@@ -69,4 +69,15 @@ describe("ApprovalQueue", () => {
     expect(screen.getByText("2026. 7. 15. 오전 9:30")).toBeVisible();
     expect(screen.queryByRole("button", { name: "승인" })).not.toBeInTheDocument();
   });
+
+  it("opens the first request when switching to a populated history tab", () => {
+    renderQueue({
+      leaveRequests: [{ ...leaveRequests[0], status: "APPROVED", decidedBy: "emp-1", decidedAt: "2026-07-15T09:30:00+09:00" }]
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: /처리 완료/u }));
+
+    expect(screen.getByText("가족 일정")).toBeVisible();
+    expect(screen.getByText("처리 결과")).toBeVisible();
+  });
 });

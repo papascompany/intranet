@@ -49,6 +49,20 @@ describe("PayrollStatementManager", () => {
     expect(onDelete).toHaveBeenCalledWith(statements[0], "정정본 재발행");
   });
 
+  it("identifies the employee in the administrator's all-staff list", () => {
+    render(
+      <PayrollStatementManager
+        employeeNames={{ "employee-1": "김운영" }}
+        mode="admin"
+        onDownload={vi.fn()}
+        statements={statements}
+      />
+    );
+
+    expect(screen.getByText("김운영 · 2026-06-급여명세서.pdf")).toBeVisible();
+    expect(screen.getAllByText(/employee-1 · 등록일/u)).toHaveLength(2);
+  });
+
   it("does not render soft-deleted statements", () => {
     render(
       <PayrollStatementManager

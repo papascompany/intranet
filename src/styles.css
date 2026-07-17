@@ -57,6 +57,18 @@ button {
   cursor: pointer;
 }
 
+.is-spinning {
+  animation: app-spin 900ms linear infinite;
+}
+
+@keyframes app-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning { animation: none; }
+}
+
 .app-shell {
   width: min(1200px, calc(100% - 32px));
   margin: 0 auto;
@@ -1198,6 +1210,15 @@ select {
 
   .attendance-summary {
     grid-template-columns: 1fr;
+  }
+
+  .attendance-feedback {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .attendance-feedback span {
+    grid-column: 2;
+    text-align: left;
   }
 
   .attendance-summary div {

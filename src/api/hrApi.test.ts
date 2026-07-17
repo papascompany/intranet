@@ -355,6 +355,20 @@ describe("hr api", () => {
     );
   });
 
+  it("rejects leave requests whose days do not match the selected date range", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.submitLeaveRequest({
+      employeeId: employeeSession.employeeId,
+      type: "SPECIAL",
+      startsOn: "2026-07-20",
+      endsOn: "2026-07-21",
+      days: 1,
+      reason: "기간 불일치 검증",
+      session: employeeSession
+    })).rejects.toThrow("Leave days must match the selected date range");
+  });
+
   it("allows employees to cancel only their own pending leave request", async () => {
     const hrApi = api();
     const submitted = await hrApi.submitLeaveRequest({
@@ -539,6 +553,29 @@ describe("hr api", () => {
     ).resolves.toHaveLength(1);
   });
 
+  it("derives overtime minutes on the server and rejects invalid time ranges", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-10",
+      startsAt: "2026-07-10T17:30:00+09:00",
+      endsAt: "2026-07-10T19:00:00+09:00",
+      minutes: 1,
+      reason: "서버 계산 확인"
+    });
+
+    expect(result.request.minutes).toBe(90);
+    await expect(hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-10",
+      startsAt: "2026-07-10T19:00:00+09:00",
+      endsAt: "2026-07-10T17:30:00+09:00",
+      minutes: 90,
+      reason: "잘못된 야근 시간"
+    })).rejects.toThrow("Overtime end time must be after the start time");
+  });
+
   it("forces authenticated overtime submissions into the pending queue", async () => {
     const hrApi = api();
     const result = await hrApi.submitOvertimeRequest({
@@ -667,6 +704,14 @@ describe("hr api", () => {
       status: "APPROVED"
     });
 
+    await hrApi.updateRequestStatus({
+      requestId: submitted.request.id,
+      targetType: "OvertimeRequest",
+      status: "APPROVED",
+      actorId: "emp-ceo",
+      detail: "야근 승인"
+    });
+
     const result = await hrApi.setOvertimePayApproval({
       requestId: submitted.request.id,
       payApproved: true,
@@ -678,6 +723,24 @@ describe("hr api", () => {
     expect(result.auditLog.action).toBe("OVERTIME_PAY_APPROVED");
     expect(result.auditLog.detail).toBe("수당 지급 대상");
     await expect(hrApi.getAuditLogs({ action: "OVERTIME_PAY_APPROVED" })).resolves.toHaveLength(1);
+  });
+
+  it("does not allow overtime pay approval before request approval", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitOvertimeRequest({
+      employeeId: "emp-ops-1",
+      date: "2026-07-10",
+      startsAt: "2026-07-10T17:30:00+09:00",
+      endsAt: "2026-07-10T19:00:00+09:00",
+      minutes: 90,
+      reason: "승인 순서 확인"
+    });
+
+    await expect(hrApi.setOvertimePayApproval({
+      requestId: submitted.request.id,
+      payApproved: true,
+      actorId: adminSession.employeeId
+    })).rejects.toThrow("requires an approved overtime request");
   });
 
   it("updates employee overtime pay eligible minutes after overtime approval and pay approval", async () => {
@@ -762,6 +825,17 @@ describe("hr api", () => {
       detail: "출퇴근 기록 확인 후 승인"
     });
     expect(decided).toMatchObject({ request: { status: "APPROVED", decidedBy: adminSession.employeeId }, correction: { attendanceId } });
+    expect(decided.attendance).toMatchObject({
+      id: attendanceId,
+      clockOutAt: "2026-07-08T17:00:00+09:00",
+      earlyLeaveMinutes: 0,
+      status: "GPS_PASSED"
+    });
+    expect(decided.earlyLeaveLedger).toMatchObject({
+      id: `early-${attendanceId}`,
+      minutes: 0,
+      status: "CORRECTED"
+    });
 
     const employeeSnapshot = await hrApi.getEmployeeSnapshot(employeeSession.employeeId, fixedNow, employeeSession);
     expect(employeeSnapshot.attendanceCorrectionRequests).toEqual(expect.arrayContaining([
@@ -808,6 +882,7 @@ describe("hr api", () => {
     await hrApi.getAppBootstrap({ employeeId: "emp-ceo", asOf: fixedNow, session: adminSession });
 
     expect(calls.get("listEmployees")).toBe(1);
+    expect(calls.get("listEmployeeAccounts")).toBe(1);
     expect(calls.get("listAttendanceRecords")).toBe(1);
     expect(calls.get("listLeaveRequests")).toBe(1);
     expect(calls.get("listCorrectionRequests")).toBe(1);
@@ -994,6 +1069,29 @@ describe("hr api", () => {
     expect(snapshot.employee.residentRegistrationNumber).toBeUndefined();
   });
 
+  it("normalizes cleared employee-card dates and optional text before persistence", async () => {
+    const hrApi = api();
+
+    const result = await hrApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: {
+        birthday: "",
+        terminationDate: "",
+        address: "",
+        payrollBank: ""
+      }
+    });
+
+    expect(result.employee).toMatchObject({
+      birthday: undefined,
+      terminationDate: undefined,
+      address: undefined,
+      payrollBank: undefined
+    });
+  });
+
   it("prevents HR administrators from escalating account roles or changing immutable employee numbers", async () => {
     const hrApi = api();
 
@@ -1054,7 +1152,7 @@ describe("hr api", () => {
         action: "EMPLOYEE_SENSITIVE_DATA_VIEWED",
         targetType: "Employee",
         targetId: "emp-ops-1",
-        detail: "residentRegistrationNumber,payrollAccount"
+        detail: "residentRegistrationNumber,address,mobile,emergencyContact,familyRelations,payrollBank,payrollAccount"
       }
     });
     await expect(hrApi.revealEmployeeSensitiveData({
@@ -1263,6 +1361,72 @@ describe("hr api", () => {
     expect(dashboard.corrections.find((correction) => correction.id === result.correction.id)).toMatchObject({
       attendanceId: "att-2026-07-08-emp-ops-1",
       type: "CLOCK_OUT_CORRECTION"
+    });
+  });
+
+  it("rejects corrections that target another employee's attendance record", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.createAttendanceCorrection({
+      attendanceId: "att-2026-07-08-emp-ops-2",
+      employeeId: "emp-ops-1",
+      correctedById: adminSession.employeeId,
+      type: "CLOCK_IN_CORRECTION",
+      afterValue: "2026-07-08T08:00:00+09:00",
+      reason: "대상 연결 검증"
+    })).rejects.toThrow("Attendance record not found");
+  });
+
+  it("creates a traceable attendance record when an approved correction fills a missing record", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitAttendanceCorrectionRequest({
+      employeeId: "emp-ops-1",
+      type: "MISSING_RECORD_CREATED",
+      requestedValue: "2026-07-15T08:05:00+09:00",
+      reason: "누락된 출근 기록 확인"
+    });
+
+    const decided = await hrApi.updateAttendanceCorrectionRequestStatus({
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: adminSession.employeeId
+    });
+    const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow);
+
+    expect(decided).toMatchObject({
+      request: { status: "APPROVED" },
+      correction: { type: "MISSING_RECORD_CREATED", attendanceId: "att-2026-07-15-emp-ops-1" }
+    });
+    expect(snapshot.attendanceRecords).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "att-2026-07-15-emp-ops-1", clockInAt: "2026-07-15T08:05:00+09:00" })
+    ]));
+  });
+
+  it("marks an approved early-leave correction in the attendance ledger", async () => {
+    const hrApi = api();
+    const submitted = await hrApi.submitAttendanceCorrectionRequest({
+      employeeId: "emp-ops-1",
+      attendanceId: "att-2026-07-08-emp-ops-1",
+      type: "APPROVED_EARLY_LEAVE",
+      requestedValue: "2026-07-08T16:30:00+09:00",
+      reason: "승인된 조기퇴근 정정"
+    });
+
+    const decided = await hrApi.updateAttendanceCorrectionRequestStatus({
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: adminSession.employeeId
+    });
+
+    expect(decided.attendance).toMatchObject({
+      clockOutAt: "2026-07-08T16:30:00+09:00",
+      earlyLeaveMinutes: 30,
+      status: "GPS_PASSED"
+    });
+    expect(decided.earlyLeaveLedger).toMatchObject({
+      minutes: 30,
+      status: "APPROVED",
+      reason: expect.stringContaining("승인된 조기퇴근 정정")
     });
   });
 

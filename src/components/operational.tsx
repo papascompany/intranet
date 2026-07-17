@@ -23,6 +23,7 @@ function getFocusableElements(container: HTMLElement) {
 }
 
 interface OperationalDialogProps {
+  busy?: boolean;
   children: ReactNode;
   className?: string;
   description?: ReactNode;
@@ -31,7 +32,7 @@ interface OperationalDialogProps {
   title: ReactNode;
 }
 
-function OperationalDialog({ children, className, description, onClose, open, title }: OperationalDialogProps) {
+function OperationalDialog({ busy = false, children, className, description, onClose, open, title }: OperationalDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -68,13 +69,14 @@ function OperationalDialog({ children, className, description, onClose, open, ti
     >
       <div
         aria-describedby={description ? descriptionId : undefined}
+        aria-busy={busy || undefined}
         aria-labelledby={titleId}
         aria-modal="true"
         className={cx("operational-dialog", className)}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
-            onClose();
+            if (!busy) onClose();
             return;
           }
 
@@ -108,7 +110,7 @@ function OperationalDialog({ children, className, description, onClose, open, ti
             <h2 id={titleId}>{title}</h2>
             {description ? <p id={descriptionId}>{description}</p> : null}
           </div>
-          <button aria-label="닫기" className="operational-dialog__close" onClick={onClose} type="button">
+          <button aria-label="닫기" className="operational-dialog__close" disabled={busy} onClick={onClose} type="button">
             <X aria-hidden="true" />
           </button>
         </div>
@@ -179,7 +181,7 @@ export function FormDialog({
   };
 
   return (
-    <OperationalDialog className="operational-form-dialog" description={description} onClose={cancel} open={open} title={title}>
+    <OperationalDialog busy={busy} className="operational-form-dialog" description={description} onClose={cancel} open={open} title={title}>
       <form onSubmit={onSubmit}>
         <div className="operational-dialog__body">{children}</div>
         {error ? <InlineNotice tone="danger" title="처리하지 못했습니다">{error}</InlineNotice> : null}
@@ -228,7 +230,7 @@ export function ConfirmDialog({
   };
 
   return (
-    <OperationalDialog className="operational-confirm-dialog" description={description} onClose={cancel} open={open} title={title}>
+    <OperationalDialog busy={busy} className="operational-confirm-dialog" description={description} onClose={cancel} open={open} title={title}>
       <div className="operational-dialog__body">{children}</div>
       {error ? <InlineNotice tone="danger" title="처리하지 못했습니다">{error}</InlineNotice> : null}
       <div className="operational-dialog__actions">

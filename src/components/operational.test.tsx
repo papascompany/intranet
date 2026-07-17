@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import type { FormEvent } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialog, FormDialog, InlineNotice } from "./operational";
+
+afterEach(cleanup);
 
 describe("operational UI primitives", () => {
   it("announces an actionable error notice", () => {
@@ -57,5 +59,16 @@ describe("operational UI primitives", () => {
     fireEvent.click(screen.getByRole("button", { name: "삭제" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("locks the dialog close control while an action is in progress", () => {
+    render(
+      <FormDialog busy onClose={vi.fn()} onSubmit={vi.fn()} open title="직원카드 저장">
+        <p>저장 중</p>
+      </FormDialog>
+    );
+
+    expect(screen.getByRole("button", { name: "닫기" })).toBeDisabled();
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-busy", "true");
   });
 });

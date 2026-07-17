@@ -75,7 +75,7 @@ export type SubmitOvertimeRequestInput = AuthenticatedInput & {
 export type UpdateRequestStatusInput = AuthenticatedInput & {
   targetType: "LeaveRequest" | "OvertimeRequest";
   requestId: string;
-  status: Extract<RequestStatus, "APPROVED" | "REJECTED" | "PENDING">;
+  status: Extract<RequestStatus, "APPROVED" | "REJECTED">;
   actorId: string;
   detail?: string;
 };
@@ -136,6 +136,21 @@ export type UpdateAttendanceCorrectionRequestStatusInput = AuthenticatedInput & 
   status: Extract<AttendanceCorrectionRequest["status"], "APPROVED" | "REJECTED">;
   actorId: string;
   detail?: string;
+};
+
+export type CreateAttendanceCorrectionResult = {
+  correction: AttendanceCorrection;
+  attendance: AttendanceRecord;
+  earlyLeaveLedger?: EarlyLeaveLedger;
+  auditLog: AuditLog;
+};
+
+export type UpdateAttendanceCorrectionRequestStatusResult = {
+  request: AttendanceCorrectionRequest;
+  correction?: AttendanceCorrection;
+  attendance?: AttendanceRecord;
+  earlyLeaveLedger?: EarlyLeaveLedger;
+  auditLog: AuditLog;
 };
 
 export type UploadPayrollStatementInput = AuthenticatedInput & {

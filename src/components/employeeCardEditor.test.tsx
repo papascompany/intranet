@@ -76,6 +76,15 @@ describe("EmployeeCardEditor", () => {
     }));
   });
 
+  it("explains why the save action is disabled for sensitive changes", () => {
+    render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={vi.fn()} open />);
+
+    fireEvent.change(screen.getByLabelText("주민등록번호"), { target: { value: "900310-1234567" } });
+
+    expect(screen.getByText("변경 사유가 필요합니다")).toBeVisible();
+    expect(screen.getByRole("button", { name: "변경 저장" })).toBeDisabled();
+  });
+
   it("exposes new administrator employment and leave-adjustment fields with labels", () => {
     render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={vi.fn()} open />);
 

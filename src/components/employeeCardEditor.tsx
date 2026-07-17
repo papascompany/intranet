@@ -216,6 +216,14 @@ export function EmployeeCardEditor({
   const hasInvalidLeaveAdjustment = canAdmin && adminDraft.annualLeaveAdjustmentDays.trim() !== "" && !Number.isFinite(Number(adminDraft.annualLeaveAdjustmentDays));
   const hasMissingAdminRequired = canAdmin && (!adminDraft.name.trim() || !adminDraft.employeeNumber.trim() || !adminDraft.hireDate);
   const hasUnnamedCustomField = canAdmin && adminDraft.customAdminFields.some((field) => !field.label.trim());
+  const hasChanges = canAdmin ? hasAdminChanges : basicFieldsChanged(employee, basicDraft);
+  const saveDisabled = !hasChanges
+    || hasInvalidAdminNumbers
+    || hasInvalidDependents
+    || hasInvalidLeaveAdjustment
+    || hasMissingAdminRequired
+    || hasUnnamedCustomField
+    || (requiresReason && !reason.trim());
 
   const updateBasic = (key: EditableBasicField, value: string) => setBasicDraft((current) => ({ ...current, [key]: value }));
   const updateAdmin = <Key extends Exclude<keyof AdminDraft, "customAdminFields">>(key: Key, value: AdminDraft[Key]) => {
@@ -230,7 +238,7 @@ export function EmployeeCardEditor({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy || hasInvalidAdminNumbers || hasInvalidDependents || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())) return;
+    if (busy || saveDisabled) return;
 
     const update: EmployeeCardBasicUpdate & Partial<EmployeeCardAdminUpdate> = { ...basicDraft };
     if (canAdmin) {
@@ -250,7 +258,7 @@ export function EmployeeCardEditor({
       onClose={onClose}
       onSubmit={submit}
       open={open}
-      submitDisabled={hasInvalidAdminNumbers || hasInvalidDependents || hasInvalidLeaveAdjustment || hasMissingAdminRequired || hasUnnamedCustomField || (requiresReason && !reason.trim())}
+      submitDisabled={saveDisabled}
       submitLabel="변경 저장"
       title={`${employee.name} 직원카드 편집`}
     >
@@ -319,6 +327,16 @@ export function EmployeeCardEditor({
                 </div>
               ))}
             </div>
+            {hasAdminChanges && requiresReason && !reason.trim() ? (
+              <InlineNotice className="employee-card-editor__save-hint" title="변경 사유가 필요합니다" tone="warning">
+                주민등록번호, 급여, 권한, 재직 상태와 같은 민감 항목을 변경하려면 관리자 변경 사유를 입력해 주세요.
+              </InlineNotice>
+            ) : null}
+            {hasAdminChanges && (hasInvalidAdminNumbers || hasInvalidDependents || hasInvalidLeaveAdjustment) ? (
+              <InlineNotice className="employee-card-editor__save-hint" title="입력값을 확인해 주세요" tone="warning">
+                급여·부양가족 수·연차 보정은 숫자로 입력해야 하며, 음수는 연차 보정에만 허용됩니다.
+              </InlineNotice>
+            ) : null}
             {hasAdminChanges ? (
               <label className="employee-card-editor__reason">
                 <span>관리자 변경 사유 {requiresReason ? "(필수)" : "(선택)"}</span>
