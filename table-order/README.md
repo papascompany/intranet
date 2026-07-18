@@ -49,6 +49,7 @@
 | 11 | [docs/11-agent-orchestration.md](docs/11-agent-orchestration.md) | **서브에이전트 구성 + 오케스트레이션 개발 계획** |
 | 12 | [docs/12-ai-food-imagery.md](docs/12-ai-food-imagery.md) | AI 연출컷 스튜디오(재료 입력→실사 이미지 생성) 설계 |
 | 13 | [docs/13-business-plan.md](docs/13-business-plan.md) | 사업계획 — 시장·경쟁 매트릭스·GTM·유닛 이코노믹스·KPI 트리 |
+| 14 | [docs/14-beta-gtm-playbook.md](docs/14-beta-gtm-playbook.md) | 베타 GTM 실행 플레이북 — 상권 확정·스크리닝·촬영 패키지 계약·아웃리치·8주 운영 |
 
 > 🎨 **룩북 스타일 시각화**: [design/menu-style-concept.html](design/menu-style-concept.html) — 큐레이션 스프레드 · 풀스크린 디테일 컷 · AI 분해컷 · 주문→POS 플로우를 브라우저에서 바로 확인할 수 있다.
 
