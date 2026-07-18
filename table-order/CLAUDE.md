@@ -4,7 +4,7 @@
 
 ## 절대 규칙
 
-1. **격리**: `table-order/` 밖(레포 루트의 인트라넷 코드: `src/`, `api/`, `database/`, `docs/`, `outputs/`, 루트 설정 파일)은 어떤 이유로도 읽기 외 접근(수정/삭제/이동) 금지.
+1. **격리**: `table-order/` 밖(레포 루트의 인트라넷 코드: `src/`, `api/`, `database/`, `docs/`, `outputs/`, 루트 설정 파일)은 어떤 이유로도 읽기 외 접근(수정/삭제/이동) 금지. **유일한 예외**: `/.github/workflows/table-order-ci.yml` — GitHub Actions가 레포 루트만 읽기 때문이며, 이 파일 외 루트 `.github` 파일은 건드리지 않는다.
 2. **문서가 SSOT**: `docs/01~11`이 단일 진실 공급원이다. 구현이 문서와 충돌하면 먼저 문서를 갱신(사유 기록)한 뒤 구현한다. 에이전트에게 위임할 때 반드시 관련 문서 경로를 프롬프트에 명시한다.
 3. **계약 우선(Contract-first)**: 병렬 작업 fan-out 전에 해당 마일스톤의 계약물(Prisma 스키마 `packages/db/prisma/schema.prisma`, API 계약 `docs/04`, 공유 타입/Zod `packages/shared/src/contracts/*`)을 먼저 확정·커밋한다. 계약이 흔들리면 병렬 작업 전체가 흔들린다.
 4. **파일 소유권**: 한 경로는 한 에이전트만 수정한다(소유권 표는 `docs/11` §3). 두 에이전트가 같은 경로를 만져야 하면 순차 실행하거나 오케스트레이터가 직접 통합한다.

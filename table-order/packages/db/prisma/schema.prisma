@@ -1,0 +1,12 @@
+// M0 골격 — 전체 스키마는 M1에서 db-schema 에이전트가 docs/03 §2를 그대로 구현한다.
+// prisma·@prisma/client 의존성도 M1에서 추가한다(placeholder 단계에서 generate 강제하지 않기 위함).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}

@@ -1,0 +1,32 @@
+# table-order/ 전용 CI — 기존 인트라넷 프로젝트와 무관하며 table-order/** 변경에만 트리거된다.
+# (GitHub Actions는 레포 루트 .github/workflows만 읽으므로 이 파일만 예외적으로 루트에 둔다 — table-order/CLAUDE.md 격리 규칙의 명시적 예외)
+name: table-order CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+    paths: ["table-order/**", ".github/workflows/table-order-ci.yml"]
+  pull_request:
+    paths: ["table-order/**", ".github/workflows/table-order-ci.yml"]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: table-order
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: table-order/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build

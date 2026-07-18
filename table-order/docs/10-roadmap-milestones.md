@@ -9,7 +9,7 @@
 - [x] 설계 문서 v0.1 (docs/01~11) — 2026-07-12
 - [x] 레퍼런스 반영 v0.2 (룩북 3층 구조·AI 연출컷·docs/12) — 2026-07-12
 - [x] 설계 검증 v0.3 — 5렌즈 49건 비평→3심 판정 반영(UX 예산·모바일 실전·운영 현실) + 사업계획 docs/13 — 2026-07-15
-- [ ] M0 스캐폴드
+- [x] M0 스캐폴드 — 2026-07-15 (예외: Vercel 프리뷰 연결만 보류 — 오너 계정 결정 대기, M0 표 DoD 참조)
 - [ ] M1 계약·코어 도메인
 - [ ] M2 룩북 메뉴판 + 메뉴 관리
 - [ ] M3 주문 파이프라인 + POS 보드 (실시간)
@@ -25,7 +25,7 @@
 | 목표 | 모노레포 골격 + CI 파이프라인 + 배포 연결 |
 | 투입 | 오케스트레이터 직접 (+ `db-schema` Supabase 로컬 셋업) |
 | 산출물 | pnpm+Turborepo, apps/web(Next.js 15, Tailwind v4, shadcn 초기화), packages/db·shared·ui 빈 골격, ESLint(테넌트 가드 규칙 포함)·Prettier·Vitest·Playwright 설정, `.env.example`, GitHub Actions(typecheck/lint/test), Vercel 연결 |
-| DoD | `pnpm dev` 기동, `pnpm typecheck && lint && test` 그린, 프리뷰 배포 URL 생성 |
+| DoD | ✅ `pnpm dev` 기동(`/`·`/api/health` 스모크 통과) ✅ `pnpm typecheck && lint && test && build` 그린(2026-07-15) ✅ CI 워크플로 `/.github/workflows/table-order-ci.yml`(table-order/** 경로 필터) ⏸ Vercel 프리뷰 연결 — 오너의 Vercel 계정/팀 결정 후 즉시 완료 가능 |
 
 ## M1 — 계약·코어 도메인 (1주)
 

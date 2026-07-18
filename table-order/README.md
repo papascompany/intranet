@@ -69,6 +69,19 @@
 | `ai-imagery` | AI 연출컷 생성·크레딧 | `apps/web/src/ai`, `app/api/admin/ai` |
 | `qa` | 테스트·검증(전 영역 읽기) | `apps/web/tests`, `packages/*/tests` |
 
+## 개발 (M0 스캐폴드 완료)
+
+```bash
+cd table-order
+pnpm install
+pnpm dev        # apps/web → http://localhost:3000 (/api/health 헬스체크)
+pnpm typecheck && pnpm lint && pnpm test && pnpm build
+```
+
+- 모노레포: `apps/web`(Next.js 15 + React 19 + Tailwind v4) · `packages/shared`(Zod 계약 — 에러 코드 구현됨) · `packages/db`(Prisma 골격, M1) · `packages/ui`(디자인 시스템, M1)
+- 테넌트 격리 ESLint 가드 활성: `@menubook/db` import는 `src/server/repos/**`에서만 허용
+- CI: 레포 루트 `.github/workflows/table-order-ci.yml` (table-order 변경에만 트리거)
+
 ## 시작하기 (개발 착수 시)
 
 ```bash

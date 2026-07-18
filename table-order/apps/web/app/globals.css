@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+:root {
+  --mb-paper: #f4efe4;
+  --mb-ink: #231b12;
+  --mb-green: #2e4a3b;
+  --mb-seal: #b23a2a;
+}
+
+body {
+  background: var(--mb-paper);
+  color: var(--mb-ink);
+}
