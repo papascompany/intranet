@@ -8,6 +8,7 @@ type VercelRequest = IncomingMessage & { method?: string };
 type HealthQuery = <T extends Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>;
 
 export type ProductionHealth = {
+  release: "self-hosted-2026-07-20";
   ok: boolean;
   checks: {
     database: "ok" | "missing" | "unreachable";
@@ -78,7 +79,7 @@ export async function checkProductionHealth(
     && checks.encryption !== "missing"
     && checks.blob === "ok";
 
-  return { ok, checks, repository: getPersistenceStatusFromEnv(env) };
+  return { release: "self-hosted-2026-07-20", ok, checks, repository: getPersistenceStatusFromEnv(env) };
 }
 
 export default async function handler(request: VercelRequest, response: ServerResponse) {
