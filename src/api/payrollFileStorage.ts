@@ -52,7 +52,7 @@ export class InMemoryPayrollFileStorage implements PayrollFileStorage {
 }
 
 export class UnavailablePayrollFileStorage implements PayrollFileStorage {
-  constructor(private readonly message = "BLOB_READ_WRITE_TOKEN is required for payroll file storage.") {}
+  constructor(private readonly message = "PAYROLL_STORAGE_DIR (or BLOB_READ_WRITE_TOKEN) is required for payroll file storage.") {}
 
   async put(_file: PayrollFileUpload): Promise<StoredPayrollFile> {
     throw new Error(this.message);
@@ -72,7 +72,9 @@ export function decodePayrollPdf(contentBase64: string | undefined, declaredSize
   }
 
   const normalized = contentBase64.replace(/\s/g, "");
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized)) {
+  // Linear-time validation: the previous grouped-repetition regex exhausted the
+  // regex stack on multi-megabyte inputs (RangeError on ~3.5MB+ payloads).
+  if (normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
     throw new Error("Payroll file content must be valid base64.");
   }
 
@@ -91,9 +93,14 @@ export function decodePayrollPdf(contentBase64: string | undefined, declaredSize
 }
 
 export function validatePayrollFilename(filename: string): string {
-  const normalized = filename.trim();
+  // NFC first: macOS supplies NFD names whose UTF-8 form is 2-3x larger.
+  const normalized = filename.trim().normalize("NFC");
   if (!normalized || normalized.length > 180 || normalized !== normalized.replace(/[\\/]/g, "") || /[\u0000-\u001f\u007f]/.test(normalized)) {
     throw new Error("Payroll filename is invalid.");
+  }
+  // Disk storage appends a 9-char suffix and ext4 caps names at 255 bytes.
+  if (new TextEncoder().encode(normalized).byteLength > 200) {
+    throw new Error("Payroll filename is too long.");
   }
   if (!normalized.toLowerCase().endsWith(".pdf")) {
     throw new Error("Payroll filename must end with .pdf.");
@@ -109,13 +116,14 @@ export function validatePayrollMonth(month: string): string {
 }
 
 function base64ToBytes(value: string): Uint8Array {
-  if (typeof atob !== "undefined") {
-    const binary = atob(value);
-    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  // Prefer Buffer: on the server a 10MB PDF decodes in one native call instead
+  // of atob + a per-character callback over ~14M characters.
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(value, "base64"));
   }
 
-  // Node's test and server runtime do not always expose atob.
-  return new Uint8Array(Buffer.from(value, "base64"));
+  const binary = atob(value);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 function hasPdfSignature(bytes: Uint8Array) {

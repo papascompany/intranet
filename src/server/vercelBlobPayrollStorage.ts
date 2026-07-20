@@ -6,9 +6,11 @@ import type {
   StoredPayrollFile
 } from "../api/payrollFileStorage.js";
 import { PAYROLL_STORAGE_BUCKET, UnavailablePayrollFileStorage } from "../api/payrollFileStorage.js";
+import { DiskPayrollStorage } from "./diskPayrollStorage.js";
 
 export type PayrollStorageEnv = {
   BLOB_READ_WRITE_TOKEN?: string;
+  PAYROLL_STORAGE_DIR?: string;
 };
 
 export class VercelBlobPayrollStorage implements PayrollFileStorage {
@@ -38,6 +40,9 @@ export class VercelBlobPayrollStorage implements PayrollFileStorage {
 }
 
 export function createPayrollFileStorageFromEnv(env: PayrollStorageEnv = process.env): PayrollFileStorage {
+  if (env.PAYROLL_STORAGE_DIR) {
+    return new DiskPayrollStorage(env.PAYROLL_STORAGE_DIR);
+  }
   if (!env.BLOB_READ_WRITE_TOKEN) {
     return new UnavailablePayrollFileStorage();
   }

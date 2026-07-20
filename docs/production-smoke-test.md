@@ -1,6 +1,6 @@
 # Production Smoke Test
 
-After a Vercel deployment, run these checks against the deployed origin. Do not put secret values in the repository or in chat.
+After a deployment (Coolify or Vercel), run these checks against the deployed origin. Do not put secret values in the repository or in chat.
 
 ```bash
 curl -i https://<deployment-domain>/api/health

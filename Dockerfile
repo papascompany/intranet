@@ -14,6 +14,10 @@ ENV PORT=3000
 
 COPY --from=build /app /app
 
+# Payroll volume mounts here; pre-create it owned by node so the named volume
+# inherits writable ownership on first use.
+RUN mkdir -p /data/payroll && chown -R node:node /data/payroll
+
 EXPOSE 3000
 USER node
 

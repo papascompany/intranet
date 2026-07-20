@@ -1,5 +1,5 @@
 import type { AuthSession } from "../api/auth.js";
-import { createNeonQuery } from "./neonRepositoryFactory.js";
+import { createDatabaseQuery } from "./neonRepositoryFactory.js";
 import {
   createSignedSessionToken,
   getRequiredSessionSecret,
@@ -55,7 +55,7 @@ export function getAuthQuery(env: ServerAuthEnv = process.env): AuthAccountQuery
   if (!env.DATABASE_URL) {
     throw new Error("DATABASE_URL is required for server authentication.");
   }
-  return createNeonQuery(env.DATABASE_URL);
+  return createDatabaseQuery(env.DATABASE_URL);
 }
 
 export async function authenticateCredentials(

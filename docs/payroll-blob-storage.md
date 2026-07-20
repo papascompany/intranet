@@ -1,3 +1,9 @@
+> **UPDATE 2026-07-20 — 정본 스토리지 변경**: 운영은 사내 서버의 로컬 디스크
+> (`PAYROLL_STORAGE_DIR=/data/payroll`, `DiskPayrollStorage`)가 정본이다. 이 문서의
+> Vercel Blob 구성은 `BLOB_READ_WRITE_TOKEN`만 설정된 경우의 레거시 폴백으로만 남아 있다.
+> 클라이언트 직접 업로드(`/api/payroll-upload`)는 제거됐고 업로드는 `/api/hr`의
+> `uploadPayrollStatement` 액션(base64)으로 서버를 경유한다.
+
 # 급여명세서 Vercel Blob 운영 설정
 
 급여명세서 파일은 Vercel Blob의 `private` 접근 등급으로 저장된다. Blob URL과 `BLOB_READ_WRITE_TOKEN`은 브라우저에 노출하지 않는다. 다운로드는 로그인 세션을 다시 검증하는 `GET /api/payroll?statementId=...`가 파일을 스트리밍한다.

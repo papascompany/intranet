@@ -28,6 +28,6 @@ describe("payroll file storage", () => {
     const file = await storage.get("emp-ops-1/2026-07/payroll.pdf");
     expect(file.contentType).toBe("application/pdf");
     await expect(new UnavailablePayrollFileStorage().put({ pathname: "x", content: pdf, contentType: "application/pdf" }))
-      .rejects.toThrow("BLOB_READ_WRITE_TOKEN is required");
+      .rejects.toThrow("PAYROLL_STORAGE_DIR (or BLOB_READ_WRITE_TOKEN) is required");
   });
 });

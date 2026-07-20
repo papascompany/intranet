@@ -34,6 +34,7 @@ import {
   createWorkplace,
   getAppBootstrap,
   downloadPayrollStatement,
+  uploadPayrollStatement,
   getEmployeeSnapshot,
   getAuditLogs,
   importEmployeeAccounts,
@@ -87,7 +88,7 @@ import { isPayrollNoticeDay, payrollNoticeDate } from "./domain/payroll";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
 import type { EmployeeImportRow } from "./features/employeeCsv";
-import { uploadPayrollPdfDirect } from "./api/payrollClientUpload";
+import { MAX_PAYROLL_FILE_BYTES } from "./api/payrollFileStorage";
 import {
   buildErpViewModel,
   type ErpActiveSection,
@@ -908,16 +909,28 @@ function App() {
       setPayrollUploadError("급여명세서는 PDF 파일만 업로드할 수 있습니다.");
       return;
     }
+    if (payrollUploadDraft.file.size > MAX_PAYROLL_FILE_BYTES) {
+      setPayrollUploadError("급여명세서 PDF는 10MB 이하만 업로드할 수 있습니다.");
+      return;
+    }
 
     setIsUploadingPayroll(true);
     setPayrollUploadError(null);
     try {
-      await uploadPayrollPdfDirect({
+      const file = payrollUploadDraft.file;
+      await uploadPayrollStatement({
         employeeId: selectedEmployee.id,
         month: payrollUploadDraft.month,
-        file: payrollUploadDraft.file
+        filename: file.name,
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined,
+        file: {
+          contentBase64: await fileToBase64(file),
+          contentType: "application/pdf",
+          sizeBytes: file.size
+        }
       });
-      setNotice(`${selectedEmployee.name} 급여명세서 업로드 완료 · 명세서 등록 중`);
+      setNotice(`${selectedEmployee.name} 급여명세서 업로드 완료`);
       setIsPayrollUploadOpen(false);
       await refresh(selectedEmployee.id);
     } catch (error) {
@@ -2276,6 +2289,16 @@ function iconForKpi(id: string) {
 
 function filterRowsForMode(rows: ErpViewModelRow[], employeeName: string, canAdmin: boolean) {
   return canAdmin ? rows : rows.filter((row) => row.label === employeeName);
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function authActorId(session: AuthSession | null, fallbackEmployeeId?: string) {

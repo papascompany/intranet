@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { createNeonQuery, type HrServerEnv, getPersistenceStatusFromEnv } from "../src/server/neonRepositoryFactory.js";
+import { access } from "node:fs/promises";
+import { constants } from "node:fs";
+import { createDatabaseQuery, type HrServerEnv, getPersistenceStatusFromEnv } from "../src/server/neonRepositoryFactory.js";
 import { getRequiredSessionSecret } from "../src/server/sessionAuth.js";
 
 type VercelRequest = IncomingMessage & { method?: string };
@@ -17,6 +19,18 @@ export type ProductionHealth = {
   repository: ReturnType<typeof getPersistenceStatusFromEnv>;
 };
 
+async function checkPayrollStorage(env: HrServerEnv): Promise<"ok" | "missing"> {
+  if (env.PAYROLL_STORAGE_DIR) {
+    try {
+      await access(env.PAYROLL_STORAGE_DIR, constants.W_OK);
+      return "ok";
+    } catch {
+      return "missing";
+    }
+  }
+  return env.BLOB_READ_WRITE_TOKEN ? "ok" : "missing";
+}
+
 export async function checkProductionHealth(
   env: HrServerEnv & { SESSION_SECRET?: string } = process.env,
   query?: HealthQuery
@@ -27,7 +41,9 @@ export async function checkProductionHealth(
     schema: env.DATABASE_URL ? "unknown" : "missing",
     session: "missing",
     encryption: persistent && env.NODE_ENV === "production" ? "missing" : "not-required",
-    blob: env.BLOB_READ_WRITE_TOKEN ? "ok" : "missing"
+    // The `blob` key is kept for wire compatibility; it reports whichever
+    // payroll storage backend is configured (local disk or Vercel Blob).
+    blob: await checkPayrollStorage(env)
   };
 
   if (env.SESSION_SECRET) {
@@ -45,7 +61,7 @@ export async function checkProductionHealth(
 
   if (env.DATABASE_URL) {
     try {
-      const databaseQuery = query ?? createNeonQuery(env.DATABASE_URL);
+      const databaseQuery = query ?? createDatabaseQuery(env.DATABASE_URL);
       const rows = await databaseQuery<{ employees_table?: string | null }>(
         "select 1 as ok, to_regclass('public.employees') as employees_table"
       );

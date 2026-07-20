@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import authHandler from "./api/auth.js";
 import healthHandler from "./api/health.js";
 import hrHandler from "./api/hr.js";
-import payrollUploadHandler from "./api/payroll-upload.js";
 import payrollHandler from "./api/payroll.js";
 
 // Self-hosted entry point. Reproduces the two Vercel Node runtime behaviors the
@@ -25,13 +24,12 @@ const API_ROUTES: Record<string, ApiHandler> = {
   "/api/auth": authHandler,
   "/api/health": healthHandler,
   "/api/hr": hrHandler,
-  "/api/payroll": payrollHandler,
-  "/api/payroll-upload": payrollUploadHandler
+  "/api/payroll": payrollHandler
 };
 
-// Upload control messages and HR payloads are small JSON; payroll PDFs go
-// directly from the browser to Vercel Blob and never pass through this server.
-const MAX_BODY_BYTES = 5 * 1024 * 1024;
+// Payroll PDFs upload through /api/hr as base64 JSON (10MB PDF ≈ 13.4MB
+// encoded), so the body cap must stay comfortably above that.
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(rootDir, "dist");
@@ -219,6 +217,12 @@ const server = createServer((request, response) => {
     }
   });
 });
+
+// The health endpoint checks W_OK on this directory, so ensure it exists even
+// outside the container image (local smoke runs, fresh volumes).
+if (process.env.PAYROLL_STORAGE_DIR) {
+  await fs.mkdir(process.env.PAYROLL_STORAGE_DIR, { recursive: true });
+}
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 server.listen(port, "0.0.0.0", () => {

@@ -2,8 +2,53 @@ import { readFile } from "node:fs/promises";
 import { randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { neon } from "@neondatabase/serverless";
+import pg from "pg";
+import { isNeonDatabaseUrl } from "../src/server/neonRepositoryFactory.ts";
 import { hashPassword } from "../src/server/sessionAuth.ts";
 import { createSensitiveDataCrypto } from "../src/server/sensitiveDataCrypto.ts";
+
+type ScriptQuery = (text: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
+
+type ScriptDatabase = {
+  query: ScriptQuery;
+  transaction(queries: { text: string; values: unknown[] }[]): Promise<void>;
+  end(): Promise<void>;
+};
+
+/** Neon URLs use the SQL-over-HTTP driver; any other Postgres URL uses node-postgres. */
+function createScriptDatabase(databaseUrl: string): ScriptDatabase {
+  if (isNeonDatabaseUrl(databaseUrl)) {
+    const sql = neon(databaseUrl);
+    return {
+      query: async (text, params = []) => (await sql.query(text, params)) as Record<string, unknown>[],
+      transaction: async (queries) => {
+        await sql.transaction((transaction) => queries.map((query) => transaction.query(query.text, query.values)));
+      },
+      end: async () => {}
+    };
+  }
+
+  const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
+  return {
+    query: async (text, params = []) => (await pool.query(text, params)).rows as Record<string, unknown>[],
+    transaction: async (queries) => {
+      const client = await pool.connect();
+      try {
+        await client.query("begin");
+        for (const query of queries) {
+          await client.query(query.text, query.values);
+        }
+        await client.query("commit");
+      } catch (error) {
+        await client.query("rollback").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    end: () => pool.end()
+  };
+}
 
 const DEFAULT_CSV_PATH = "/Users/yohan/Desktop/스토리지/00 회사일반/00 근로계약서/더스토리지 직원명부.csv";
 const REQUIRED_COLUMNS = ["아이디", "사번", "사원명", "부서", "직위", "입사일", "연봉", "은행"] as const;
@@ -91,68 +136,74 @@ export async function importEmployees(options: { csvPath?: string; apply?: boole
   const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("Database configuration is required.");
 
-  const sql = neon(databaseUrl);
-  await assertRequiredAccountColumns(sql);
-  const statements = await Promise.all(employees.map(async (employee) => ({
-    employee,
-    residentRegistrationNumberEncrypted: sensitiveDataCrypto.encodeSensitiveText("resident_registration_number_enc", employee.residentRegistrationNumber),
-    payrollAccountEncrypted: sensitiveDataCrypto.encodeSensitiveText("payroll_account_enc", employee.payrollAccount),
-    passwordHash: await hashPassword(createTemporaryPassword()),
-    employeeId: randomUUID(),
-    accountId: randomUUID()
-  })));
+  const db = createScriptDatabase(databaseUrl);
+  try {
+    await assertRequiredAccountColumns(db.query);
+    const statements = await Promise.all(employees.map(async (employee) => ({
+      employee,
+      residentRegistrationNumberEncrypted: sensitiveDataCrypto.encodeSensitiveText("resident_registration_number_enc", employee.residentRegistrationNumber),
+      payrollAccountEncrypted: sensitiveDataCrypto.encodeSensitiveText("payroll_account_enc", employee.payrollAccount),
+      passwordHash: await hashPassword(createTemporaryPassword()),
+      employeeId: randomUUID(),
+      accountId: randomUUID()
+    })));
 
-  await sql.transaction((transaction) => statements.map(({
-    employee,
-    residentRegistrationNumberEncrypted,
-    payrollAccountEncrypted,
-    passwordHash,
-    employeeId,
-    accountId
-  }) => transaction.query(
-    `with upserted_employee as (
-       insert into employees (
-         id, name, department, position, hire_date, annual_salary, payroll_bank, employee_number, resident_registration_number_enc, payroll_account_enc
-       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       on conflict (employee_number) do update set
-         name = excluded.name,
-         department = excluded.department,
-         position = excluded.position,
-         hire_date = excluded.hire_date,
-         annual_salary = excluded.annual_salary,
-         payroll_bank = excluded.payroll_bank,
-         resident_registration_number_enc = coalesce(excluded.resident_registration_number_enc, employees.resident_registration_number_enc),
-         payroll_account_enc = coalesce(excluded.payroll_account_enc, employees.payroll_account_enc),
-         updated_at = now()
-       returning id
-     )
-     insert into auth_accounts (
-       id, employee_id, employee_number, login_id, password_hash, password_change_required, disabled_at
-     )
-     select $11, id, $8, $12, $13, true, now() from upserted_employee
-     on conflict (employee_id) do update set
-       employee_number = excluded.employee_number,
-       login_id = excluded.login_id,
-       updated_at = now()`,
-    [
+    await db.transaction(statements.map(({
+      employee,
+      residentRegistrationNumberEncrypted,
+      payrollAccountEncrypted,
+      passwordHash,
       employeeId,
-      employee.name,
-      employee.department,
-      employee.position ?? null,
-      employee.hireDate,
-      employee.annualSalary ?? null,
-      employee.payrollBank ?? null,
-      employee.employeeNumber,
-      residentRegistrationNumberEncrypted ?? null,
-      payrollAccountEncrypted ?? null,
-      accountId,
-      employee.loginId,
-      passwordHash
-    ]
-  )));
+      accountId
+    }) => ({
+      text: UPSERT_EMPLOYEE_SQL,
+      values: [
+        employeeId,
+        employee.name,
+        employee.department,
+        employee.position ?? null,
+        employee.hireDate,
+        employee.annualSalary ?? null,
+        employee.payrollBank ?? null,
+        employee.employeeNumber,
+        residentRegistrationNumberEncrypted ?? null,
+        payrollAccountEncrypted ?? null,
+        accountId,
+        employee.loginId,
+        passwordHash
+      ]
+    })));
 
-  return { rows: employees.length, valid: employees.length, upserted: employees.length, dryRun, errors: 0 };
+    return { rows: employees.length, valid: employees.length, upserted: employees.length, dryRun, errors: 0 };
+  } finally {
+    await db.end();
+  }
 }
+
+const UPSERT_EMPLOYEE_SQL = `with upserted_employee as (
+   insert into employees (
+     id, name, department, position, hire_date, annual_salary, payroll_bank, employee_number, resident_registration_number_enc, payroll_account_enc
+   ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+   on conflict (employee_number) do update set
+     name = excluded.name,
+     department = excluded.department,
+     position = excluded.position,
+     hire_date = excluded.hire_date,
+     annual_salary = excluded.annual_salary,
+     payroll_bank = excluded.payroll_bank,
+     resident_registration_number_enc = coalesce(excluded.resident_registration_number_enc, employees.resident_registration_number_enc),
+     payroll_account_enc = coalesce(excluded.payroll_account_enc, employees.payroll_account_enc),
+     updated_at = now()
+   returning id
+ )
+ insert into auth_accounts (
+   id, employee_id, employee_number, login_id, password_hash, password_change_required, disabled_at
+ )
+ select $11, id, $8, $12, $13, true, now() from upserted_employee
+ on conflict (employee_id) do update set
+   employee_number = excluded.employee_number,
+   login_id = excluded.login_id,
+   updated_at = now()`;
 
 export function createTemporaryPassword(): string {
   return randomBytes(24).toString("base64url");
@@ -240,8 +291,8 @@ function assertUnique(values: string[]): void {
   if (new Set(values).size !== values.length) throw new Error("CSV has duplicate identifiers.");
 }
 
-async function assertRequiredAccountColumns(sql: ReturnType<typeof neon>): Promise<void> {
-  const columns = await sql.query<{ column_name: string }>(
+async function assertRequiredAccountColumns(query: ScriptQuery): Promise<void> {
+  const columns = await query(
     "select column_name from information_schema.columns where table_schema = 'public' and table_name = 'auth_accounts' and column_name in ('login_id', 'password_change_required')"
   );
   if (columns.length !== 2) throw new Error("Required account schema is unavailable.");
