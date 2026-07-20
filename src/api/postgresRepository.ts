@@ -392,7 +392,9 @@ function employeeToRow(employee: Employee, config: PostgresRepositoryConfig): Db
     severance_pay: employee.severancePay ?? null,
     income_deduction_dependents: employee.incomeDeductionDependents ?? null,
     annual_leave_adjustment_days: employee.annualLeaveAdjustmentDays ?? 0,
-    custom_admin_fields: employee.customAdminFields ?? [],
+    // jsonb columns must be bound as JSON text: both pg and the Neon driver
+    // serialize raw JS arrays as Postgres array literals, which jsonb rejects.
+    custom_admin_fields: JSON.stringify(employee.customAdminFields ?? []),
     approver_id: employee.approverId ?? null,
     workplace_id: employee.workplaceId ?? null,
     pilot: employee.pilot
@@ -765,8 +767,9 @@ function policyToRow(settings: Partial<SystemPolicy>): DbRow {
     work_end_time: settings.workEndTime,
     break_start_time: settings.breakStartTime,
     break_end_time: settings.breakEndTime,
-    work_days: settings.workDays,
-    payroll_holiday_dates: settings.payrollHolidayDates,
+    // jsonb columns: keep undefined so partial updates skip them, else bind JSON text.
+    work_days: settings.workDays === undefined ? undefined : JSON.stringify(settings.workDays),
+    payroll_holiday_dates: settings.payrollHolidayDates === undefined ? undefined : JSON.stringify(settings.payrollHolidayDates),
     annual_leave_auto_accrual: settings.annualLeaveAutoAccrual,
     annual_leave_unit: settings.annualLeaveUnit,
     partial_leave_allowed: settings.partialLeaveAllowed,
