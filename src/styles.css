@@ -87,6 +87,25 @@ button {
   gap: 16px;
 }
 
+.my-day__product-footer {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  border-top: 1px solid var(--color-silver);
+  padding: 20px 4px 0;
+}
+
+.my-day__product-footer h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.my-day__product-footer p {
+  margin: 0;
+  color: var(--color-slate);
+  font: 13px/1.5 var(--font-inter);
+}
+
 .admin-operations-stack {
   display: grid;
   gap: 16px;
@@ -692,6 +711,20 @@ h3 {
   min-width: 0;
 }
 
+.product-logo {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.product-logo img {
+  display: block;
+  width: 150px;
+  max-width: 42vw;
+  height: auto;
+  object-fit: contain;
+}
+
 .signed-in-identity {
   display: grid;
   gap: 2px;
@@ -1166,6 +1199,10 @@ select {
   .login-grid {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .product-logo {
+    align-self: flex-start;
   }
 
   .signed-in-identity {

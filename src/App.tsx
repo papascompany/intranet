@@ -90,6 +90,7 @@ import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/emplo
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
 import type { EmployeeImportRow } from "./features/employeeCsv";
 import { MAX_PAYROLL_FILE_BYTES } from "./api/payrollFileStorage";
+import storigeLogo from "./assets/storige-logo.png";
 import {
   buildErpViewModel,
   type ErpActiveSection,
@@ -312,6 +313,7 @@ function App() {
   const isAdminAccount = isAdminSession(authSession ?? undefined);
   const isApproverAccount = authSession?.role === "APPROVER";
   const effectiveMode: UserMode = userMode === "ADMIN" && isAdminAccount ? "ADMIN" : "EMPLOYEE";
+  const isEmployeeHome = effectiveMode === "EMPLOYEE" && activeSection === "self-service";
   const hasLoadedData = dashboard !== null && employeeSnapshot !== null;
   const isInitialLoading = isLoading && !hasLoadedData;
   const isRefreshing = isLoading && hasLoadedData;
@@ -1159,9 +1161,15 @@ function App() {
         }
         topbar={
           <>
-            <div>
-              <h1>사내 근태 관리</h1>
-            </div>
+            {isEmployeeHome ? (
+              <div className="product-logo">
+                <img alt="더스토리지" src={storigeLogo} />
+              </div>
+            ) : (
+              <div>
+                <h1>사내 근태 관리</h1>
+              </div>
+            )}
             <div className="topbar-controls">
               {isAdminAccount ? (
                 <>
@@ -1207,18 +1215,20 @@ function App() {
           </>
         }
       >
-        <Toolbar
-          title={effectiveMode === "EMPLOYEE" && activeSection === "self-service" ? "오늘의 업무" : sectionTitle(activeSection)}
-          description={effectiveMode === "EMPLOYEE" && activeSection === "self-service" ? "필요한 일만 빠르게 확인하고 처리하세요." : notice}
-          actions={
-            <InlineActions>
-              <button disabled={isLoading} onClick={() => void refresh(selectedEmployeeId)}>
-                {isRefreshing ? <RefreshCw className="is-spinning" size={14} /> : null}
-                {isRefreshing ? "동기화 중..." : "새로고침"}
-              </button>
-            </InlineActions>
-          }
-        />
+        {!isEmployeeHome ? (
+          <Toolbar
+            title={sectionTitle(activeSection)}
+            description={notice}
+            actions={
+              <InlineActions>
+                <button disabled={isLoading} onClick={() => void refresh(selectedEmployeeId)}>
+                  {isRefreshing ? <RefreshCw className="is-spinning" size={14} /> : null}
+                  {isRefreshing ? "동기화 중..." : "새로고침"}
+                </button>
+              </InlineActions>
+            }
+          />
+        ) : null}
         {loadError ? (
           <InlineNotice onDismiss={() => setLoadError(null)} title="동기화 오류" tone="danger">
             {loadError}
@@ -1765,6 +1775,8 @@ function SelfServiceSection(props: {
         </dl>
       </section>
 
+      <Toolbar title="오늘의 업무" description="필요한 일만 빠르게 확인하고 처리하세요." />
+
       <div className="my-day__content">
         <DetailPanel
           title={employee.department === "제작팀" ? "오늘의 제작 플랜" : "오늘의 업무 계획"}
@@ -1827,6 +1839,11 @@ function SelfServiceSection(props: {
           </DetailPanel>
         </div>
       </div>
+
+      <section className="my-day__product-footer" aria-label="사내 근태 관리">
+        <h2>사내 근태 관리</h2>
+        <p>출퇴근, 업무, 휴가와 급여 정보를 한 곳에서 관리합니다.</p>
+      </section>
     </div>
   );
 }
