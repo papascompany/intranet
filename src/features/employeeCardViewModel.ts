@@ -69,6 +69,7 @@ export function buildEmployeeCardViewModel(
       sensitive: true
     }),
     row("annualLeaveAdjustmentDays", "연차 HR 보정", formatDays(employee.annualLeaveAdjustmentDays), { adminOnly: true }),
+    row("annualLeaveAdjustmentYear", "연차 HR 보정 기준연도", employee.annualLeaveAdjustmentYear ? String(employee.annualLeaveAdjustmentYear) : "현재 연도", { adminOnly: true }),
     ...normalizedCustomAdminFields(employee.customAdminFields).map((field) =>
       row(field.id, field.label, field.value, {
         adminOnly: true,

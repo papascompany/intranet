@@ -67,6 +67,30 @@ describe("leave policy", () => {
     expect(balance).toMatchObject({ usedDays: 1.5, pendingDays: 1, currentYearUsedDays: 1.5, currentMonthUsedDays: 1 });
     expect(balance.availableDays).toBe(8.5);
   });
+
+  it("does not carry a prior-year manual correction into the current year's accrual", () => {
+    const balance = getLeaveBalance({
+      employee: { id: "emp-1", name: "직원", role: "EMPLOYEE", department: "운영팀", hireDate: "2025-01-01", annualLeaveAdjustmentDays: -5, annualLeaveAdjustmentYear: 2025, pilot: false },
+      asOf: "2026-07-21T09:00:00+09:00",
+      approvedRequests: []
+    });
+
+    expect(balance.availableDays).toBe(30);
+  });
+
+  it("does not carry prior-year approved leave into the current year's balance", () => {
+    const balance = getLeaveBalance({
+      employee: { id: "emp-1", name: "직원", role: "EMPLOYEE", department: "운영팀", hireDate: "2025-01-01", pilot: false },
+      asOf: "2026-07-21T09:00:00+09:00",
+      approvedRequests: [
+        { id: "leave-2025", employeeId: "emp-1", type: "ANNUAL", startsOn: "2025-12-29", endsOn: "2025-12-29", days: 1, reason: "전년도 사용", status: "APPROVED" },
+        { id: "leave-2026", employeeId: "emp-1", type: "ANNUAL", startsOn: "2026-07-03", endsOn: "2026-07-03", days: 1, reason: "올해 사용", status: "APPROVED" }
+      ]
+    });
+
+    expect(balance).toMatchObject({ usedDays: 1, currentYearUsedDays: 1, currentMonthUsedDays: 1 });
+    expect(balance.availableDays).toBe(29);
+  });
 });
 
 describe("early leave and overtime policy", () => {

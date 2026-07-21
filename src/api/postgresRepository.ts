@@ -332,6 +332,7 @@ export class PostgresHrRepository implements HrRepository {
       severancePay: optionalNumber(row.severance_pay),
       incomeDeductionDependents: optionalNumber(row.income_deduction_dependents),
       annualLeaveAdjustmentDays: optionalNumber(row.annual_leave_adjustment_days),
+      annualLeaveAdjustmentYear: optionalNumber(row.annual_leave_adjustment_year),
       customAdminFields: row.custom_admin_fields as EmployeeCustomAdminFields | undefined,
       approverId: optionalString(row.approver_id),
       workplaceId: optionalString(row.workplace_id),
@@ -394,6 +395,7 @@ function employeeToRow(employee: Employee, config: PostgresRepositoryConfig): Db
     severance_pay: employee.severancePay ?? null,
     income_deduction_dependents: employee.incomeDeductionDependents ?? null,
     annual_leave_adjustment_days: employee.annualLeaveAdjustmentDays ?? 0,
+    annual_leave_adjustment_year: employee.annualLeaveAdjustmentYear ?? null,
     // jsonb columns must be bound as JSON text: both pg and the Neon driver
     // serialize raw JS arrays as Postgres array literals, which jsonb rejects.
     custom_admin_fields: JSON.stringify(employee.customAdminFields ?? []),
@@ -552,7 +554,8 @@ function leaveBalanceAdjustmentFromRow(row: LeaveBalanceAdjustmentRow): LeaveBal
     days: Number(row.days),
     reason: stringValue(row.reason),
     createdBy: stringValue(row.created_by),
-    createdAt: stringValue(row.created_at)
+    createdAt: stringValue(row.created_at),
+    year: optionalNumber(row.leave_year)
   };
 }
 
@@ -563,7 +566,8 @@ function leaveBalanceAdjustmentToRow(adjustment: LeaveBalanceAdjustment): DbRow 
     days: adjustment.days,
     reason: adjustment.reason,
     created_by: adjustment.createdBy,
-    created_at: adjustment.createdAt
+    created_at: adjustment.createdAt,
+    leave_year: adjustment.year ?? null
   };
 }
 

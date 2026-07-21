@@ -45,11 +45,12 @@ export function getLeaveBalance(params: {
     request.employeeId === params.employee.id
     && (request.type === "ANNUAL" || request.type === "HALF_DAY")
   );
-  const approvedRequests = eligibleRequests.filter((request) => request.status === "APPROVED");
-  const pendingRequests = eligibleRequests.filter((request) => request.status === "PENDING");
   const asOfDate = params.asOf.slice(0, 10);
   const currentMonth = asOfDate.slice(0, 7);
   const currentYear = asOfDate.slice(0, 4);
+  const currentYearRequests = eligibleRequests.filter((request) => request.startsOn.slice(0, 4) === currentYear);
+  const approvedRequests = currentYearRequests.filter((request) => request.status === "APPROVED");
+  const pendingRequests = currentYearRequests.filter((request) => request.status === "PENDING");
   const usedDays = sumDays(approvedRequests);
 
   const autoAccrual = params.policy?.annualLeaveAutoAccrual ?? true;
@@ -57,7 +58,8 @@ export function getLeaveBalance(params: {
   const advanceGrantedDays = autoAccrual ? advanceLeaveGrantedDays(params.employee.hireDate, params.asOf, 15) : 0;
   const statutoryUsedDays = Math.min(statutoryDays, usedDays);
   const advanceUsedDays = Math.max(usedDays - statutoryDays, 0);
-  const adjustmentDays = params.employee.annualLeaveAdjustmentDays ?? 0;
+  const adjustmentYear = params.employee.annualLeaveAdjustmentYear ?? Number(currentYear);
+  const adjustmentDays = adjustmentYear === Number(currentYear) ? params.employee.annualLeaveAdjustmentDays ?? 0 : 0;
 
   return {
     statutoryDays,
@@ -67,7 +69,7 @@ export function getLeaveBalance(params: {
     pendingOffsetDays: advanceUsedDays,
     usedDays,
     pendingDays: sumDays(pendingRequests),
-    currentYearUsedDays: sumDays(approvedRequests.filter((request) => request.startsOn.slice(0, 4) === currentYear)),
+    currentYearUsedDays: usedDays,
     currentMonthUsedDays: sumDays(approvedRequests.filter((request) => request.startsOn.slice(0, 7) === currentMonth))
   };
 }

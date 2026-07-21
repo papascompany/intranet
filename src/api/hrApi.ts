@@ -634,7 +634,8 @@ export class HrApi {
           days: delta,
           reason: input.reason?.trim() || "직원카드에서 연차 HR 보정",
           createdBy: actorId,
-          createdAt: this.clock()
+          createdAt: this.clock(),
+          year: saved.annualLeaveAdjustmentYear ?? Number(this.clock().slice(0, 4))
         });
       }
     }

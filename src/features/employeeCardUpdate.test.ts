@@ -59,6 +59,12 @@ describe("applyEmployeeCardUpdate", () => {
     expect(() => applyEmployeeCardUpdate(employee, { workStartTime: "18:00", workEndTime: "17:00" })).toThrow("Work end time");
   });
 
+  it("validates the year of a manual leave balance correction", () => {
+    const updated = applyEmployeeCardUpdate(employee, { annualLeaveAdjustmentDays: -3, annualLeaveAdjustmentYear: 2026 });
+    expect(updated).toMatchObject({ annualLeaveAdjustmentDays: -3, annualLeaveAdjustmentYear: 2026 });
+    expect(() => applyEmployeeCardUpdate(employee, { annualLeaveAdjustmentYear: 1999 })).toThrow("valid year");
+  });
+
   it("requires exactly five ordered custom admin fields", () => {
     expect(() =>
       applyEmployeeCardUpdate(employee, {

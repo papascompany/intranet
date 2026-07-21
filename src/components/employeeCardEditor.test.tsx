@@ -121,6 +121,23 @@ describe("EmployeeCardEditor", () => {
     }));
   });
 
+  it("requires an audit reason when the leave correction year changes", () => {
+    const onSubmit = vi.fn();
+    render(<EmployeeCardEditor canAdmin employee={{ ...employee, annualLeaveAdjustmentDays: -2, annualLeaveAdjustmentYear: 2026 }} onClose={vi.fn()} onSubmit={onSubmit} open />);
+
+    fireEvent.change(screen.getByLabelText("연차 HR 보정 기준연도"), { target: { value: "2025" } });
+    expect(screen.getByLabelText("관리자 변경 사유")).toBeRequired();
+    expect(screen.getByRole("button", { name: "변경 저장" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("관리자 변경 사유"), { target: { value: "전년도 연차 정산" } });
+    fireEvent.click(screen.getByRole("button", { name: "변경 저장" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "전년도 연차 정산",
+      update: expect.objectContaining({ annualLeaveAdjustmentDays: -2, annualLeaveAdjustmentYear: 2025 })
+    }));
+  });
+
   it("keeps the employee number immutable after account creation", () => {
     render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={vi.fn()} open />);
 

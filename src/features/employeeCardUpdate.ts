@@ -26,6 +26,7 @@ export type EmployeeCardAdminUpdate = {
   severancePay?: number;
   incomeDeductionDependents?: number;
   annualLeaveAdjustmentDays?: number;
+  annualLeaveAdjustmentYear?: number;
   customAdminFields?: EmployeeCustomAdminFields;
   workStartTime?: string | null;
   workEndTime?: string | null;
@@ -80,6 +81,10 @@ export function validateEmployeeCardUpdate(input: EmployeeCardUpdateInput) {
 
   if (input.annualLeaveAdjustmentDays !== undefined && !Number.isFinite(input.annualLeaveAdjustmentDays)) {
     throw new Error("Annual leave adjustment must be a finite number");
+  }
+
+  if (input.annualLeaveAdjustmentYear !== undefined && (!Number.isInteger(input.annualLeaveAdjustmentYear) || input.annualLeaveAdjustmentYear < 2000 || input.annualLeaveAdjustmentYear > 2100)) {
+    throw new Error("Annual leave adjustment year must be a valid year");
   }
 
   if (input.customAdminFields) {

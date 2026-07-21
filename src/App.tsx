@@ -1360,6 +1360,7 @@ function App() {
           open={isEmployeeCardEditorOpen}
           defaultWorkStartTime={dashboard?.settings?.workStartTime ?? defaultSystemPolicy.workStartTime}
           defaultWorkEndTime={dashboard?.settings?.workEndTime ?? defaultSystemPolicy.workEndTime}
+          currentLeaveYear={Number((dashboard?.asOf ?? today).slice(0, 4))}
           workplaces={employeeSnapshot?.workplaceOptions ?? []}
         />
       ) : null}

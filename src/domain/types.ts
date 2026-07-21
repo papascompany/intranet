@@ -40,6 +40,7 @@ export type Employee = {
   severancePay?: number;
   incomeDeductionDependents?: number;
   annualLeaveAdjustmentDays?: number;
+  annualLeaveAdjustmentYear?: number;
   customAdminFields?: EmployeeCustomAdminFields;
   approverId?: string;
   workplaceId?: string;
@@ -136,6 +137,7 @@ export type LeaveBalanceAdjustment = {
   reason: string;
   createdBy: string;
   createdAt: string;
+  year?: number;
 };
 export type RequestStatus = "DRAFT" | "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
 
@@ -158,7 +160,7 @@ export type LeaveBalance = {
   advanceUsedDays: number;
   availableDays: number;
   pendingOffsetDays: number;
-  /** Approved annual/half-day usage, calculated from the leave request ledger. */
+  /** Approved annual/half-day usage in the current leave year, calculated from the leave request ledger. */
   usedDays?: number;
   pendingDays?: number;
   currentYearUsedDays?: number;
