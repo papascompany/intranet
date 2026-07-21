@@ -588,6 +588,20 @@ button {
   padding-top: 12vh;
 }
 
+.login-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.login-brand img {
+  display: block;
+  width: 180px;
+  max-width: 56vw;
+  height: auto;
+  object-fit: contain;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -806,6 +820,7 @@ h3 {
   font-size: 12px;
 }
 
+.account-menu__action,
 .account-menu__logout {
   display: flex;
   align-items: center;
@@ -821,6 +836,7 @@ h3 {
   font-weight: 600;
 }
 
+.account-menu__action:hover,
 .account-menu__logout:hover {
   background: var(--color-paper);
 }
@@ -1233,6 +1249,33 @@ select {
     width: 100%;
   }
 
+  .employee-home-shell .erp-shell__topbar {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .employee-home-shell .topbar-controls {
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    margin-left: auto;
+  }
+
+  .employee-home-shell .account-menu,
+  .employee-home-shell .account-menu > summary {
+    width: auto;
+  }
+
+  .employee-home-shell .account-menu > summary {
+    justify-content: center;
+  }
+
+  .employee-home-shell .account-menu__popover {
+    right: 0;
+    left: auto;
+    width: 220px;
+  }
+
   .icon-button {
     width: 100%;
   }
@@ -1255,6 +1298,10 @@ select {
 }
 
 @media (max-width: 520px) {
+  .employee-home-shell .signed-in-identity {
+    display: none;
+  }
+
   .employee-leave-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .employee-balance-strip { grid-template-columns: 1fr; }
   .my-day__hero {

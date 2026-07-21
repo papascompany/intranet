@@ -6,6 +6,7 @@ import {
   type HTMLAttributes,
   type ReactNode
 } from "react";
+import { Menu } from "lucide-react";
 import "./erp.css";
 
 type Align = "left" | "center" | "right";
@@ -35,17 +36,38 @@ export interface ErpShellProps extends HTMLAttributes<HTMLDivElement> {
   sidebar?: ReactNode;
   topbar?: ReactNode;
   navLabel?: string;
+  mobileNavLabel?: string;
 }
 
-export function ErpShell({ sidebar, topbar, navLabel = "ERP navigation", className, children, ...props }: ErpShellProps) {
+export function ErpShell({ sidebar, topbar, navLabel = "ERP navigation", mobileNavLabel = "메뉴", className, children, ...props }: ErpShellProps) {
   return (
     <div className={cx("erp-shell", className)} {...props}>
       {sidebar ? (
-        <aside className="erp-shell__sidebar">
-          <nav className="erp-shell__nav" aria-label={navLabel}>
-            {sidebar}
-          </nav>
-        </aside>
+        <>
+          <aside className="erp-shell__sidebar">
+            <nav className="erp-shell__nav" aria-label={navLabel}>
+              {sidebar}
+            </nav>
+          </aside>
+          <details className="erp-shell__mobile-nav">
+            <summary>
+              <Menu aria-hidden="true" size={18} />
+              <strong>{mobileNavLabel}</strong>
+              <span>메뉴</span>
+            </summary>
+            <nav
+              className="erp-shell__nav"
+              aria-label={navLabel}
+              onClick={(event) => {
+                if ((event.target as HTMLElement).closest("button, a")) {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                }
+              }}
+            >
+              {sidebar}
+            </nav>
+          </details>
+        </>
       ) : null}
       <div className="erp-shell__body">
         {topbar ? <header className="erp-shell__topbar">{topbar}</header> : null}

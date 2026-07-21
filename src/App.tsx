@@ -1146,6 +1146,9 @@ function App() {
   return (
     <div className="app-shell">
       <ErpShell
+        className={isEmployeeHome ? "employee-home-shell" : undefined}
+        mobileNavLabel={visibleNavItems.find((item) => item.section === activeSection)?.label ?? "메뉴"}
+        navLabel="인트라넷 메뉴"
         sidebar={
           visibleNavItems.map((item) => (
             <ErpNavItem
@@ -1171,28 +1174,20 @@ function App() {
               </div>
             )}
             <div className="topbar-controls">
-              {isAdminAccount ? (
-                <>
-                  <button className="mode-button" onClick={() => changeMode(effectiveMode === "ADMIN" ? "EMPLOYEE" : "ADMIN")}>
-                    <ShieldCheck size={16} />
-                    {effectiveMode === "ADMIN" ? "직원 화면" : "관리자 화면"}
-                  </button>
-                  {effectiveMode === "ADMIN" ? (
-                    <label className="select-label select-label--compact">
-                      조회 대상
-                      <select value={selectedEmployeeId} onChange={(event) => void handleEmployeeChange(event.target.value)}>
-                        {employees.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
-                            {employee.name} · {employee.department}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                </>
+              {isAdminAccount && effectiveMode === "ADMIN" ? (
+                <label className="select-label select-label--compact">
+                  조회 대상
+                  <select value={selectedEmployeeId} onChange={(event) => void handleEmployeeChange(event.target.value)}>
+                    {employees.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.name} · {employee.department}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               ) : null}
               <details className="account-menu">
-                <summary aria-label="계정 메뉴 열기">
+                <summary aria-label={`${selectedEmployee?.name ?? "직원"} 계정 메뉴 열기`}>
                   <span className="account-menu__avatar" aria-hidden="true"><UserRound size={16} /></span>
                   <span className="signed-in-identity">
                     <strong>{selectedEmployee?.name ?? "직원"}</strong>
@@ -1205,6 +1200,12 @@ function App() {
                     <strong>{selectedEmployee?.name ?? "직원"}</strong>
                     <span>{isAdminAccount ? "관리자 계정" : "직원 계정"}</span>
                   </div>
+                  {isAdminAccount ? (
+                    <button className="account-menu__action" onClick={() => changeMode(effectiveMode === "ADMIN" ? "EMPLOYEE" : "ADMIN")} type="button">
+                      <ShieldCheck size={16} />
+                      {effectiveMode === "ADMIN" ? "직원 화면으로 전환" : "관리자 화면으로 전환"}
+                    </button>
+                  ) : null}
                   <button className="account-menu__logout" onClick={handleLogout} type="button">
                     <LogOut size={16} />
                     로그아웃
@@ -1666,6 +1667,9 @@ function LoginScreen(props: {
 
   return (
     <div className="app-shell login-shell">
+      <div className="login-brand">
+        <img alt="더스토리지" src={storigeLogo} />
+      </div>
       <DetailPanel
         title="사내 근태 관리 로그인"
         description="아이디와 비밀번호로 로그인합니다."
