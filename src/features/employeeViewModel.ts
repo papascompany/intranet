@@ -14,7 +14,7 @@ import { buildRecognizedWorkSummary, formatRecognizedMinutes } from "./recognize
 type EmployeeSnapshot = Pick<Employee, "id" | "name">;
 type AttendanceTodaySnapshot = Pick<
   AttendanceRecord,
-  "clockInAt" | "clockOutAt" | "earlyLeaveMinutes" | "status"
+  "clockInAt" | "clockOutAt" | "earlyLeaveMinutes" | "status" | "workStatus" | "lateMinutes" | "reviewStatus"
 > | null;
 type LeaveBalanceSnapshot = Pick<
   LeaveBalance,
@@ -78,9 +78,9 @@ const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
 });
 
 const statusLabels: Record<VerificationStatus, string> = {
-  GPS_PASSED: "정상 출근",
-  GPS_FAILED_ALLOWED: "GPS 실패 - 허용",
-  GPS_FAILED_QR_ALLOWED: "GPS 실패 - QR 허용",
+  GPS_PASSED: "GPS 확인 완료",
+  GPS_FAILED_ALLOWED: "대체 인증 완료",
+  GPS_FAILED_QR_ALLOWED: "QR 대체 인증 완료",
   OUT_OF_RANGE: "근무지 범위 밖",
   MANUAL_REVIEW_REQUIRED: "수기 확인 필요"
 };
@@ -99,7 +99,7 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
   return {
     clockInLabel: formatClockLabel(snapshot.attendanceToday?.clockInAt, "출근 기록 없음"),
     clockOutLabel: formatClockLabel(snapshot.attendanceToday?.clockOutAt, "퇴근 기록 없음"),
-    statusLabel: snapshot.attendanceToday ? statusLabels[snapshot.attendanceToday.status] : "근태 기록 없음",
+    statusLabel: snapshot.attendanceToday ? attendanceStatusLabel(snapshot.attendanceToday) : "근태 기록 없음",
     leaveAvailableLabel: `사용 가능 연차 ${formatDays(snapshot.leaveBalance.availableDays)}일`,
     advanceLeaveLabel: `선사용 연차 ${formatDays(snapshot.leaveBalance.advanceUsedDays)}일 / ${formatDays(
       snapshot.leaveBalance.advanceGrantedDays
@@ -128,6 +128,18 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
     currentYearLeaveUsedLabel: `${formatDays(snapshot.leaveBalance.currentYearUsedDays ?? snapshot.leaveBalance.usedDays ?? 0)}일`,
     pendingLeaveDaysLabel: `${formatDays(snapshot.leaveBalance.pendingDays ?? 0)}일`
   };
+}
+
+function attendanceStatusLabel(attendance: NonNullable<EmployeeViewModelSnapshot["attendanceToday"]>) {
+  const workStatus = attendance.workStatus === "LATE"
+    ? `지각${attendance.lateMinutes ? ` ${attendance.lateMinutes}분` : ""}`
+    : "정상 인정";
+  const reviewStatus = attendance.reviewStatus === "EVIDENCE_REQUESTED"
+    ? " · 증빙 요청됨"
+    : attendance.reviewStatus === "PENDING"
+      ? " · 관리자 확인 필요"
+      : "";
+  return `${workStatus} · ${statusLabels[attendance.status]}${reviewStatus}`;
 }
 
 function formatClockLabel(value: string | undefined, emptyLabel: string) {

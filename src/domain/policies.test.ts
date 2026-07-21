@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateEarlyLeaveMinutes, calculateRecognizedWorkMinutes, evaluateVerification } from "./attendance";
+import { buildAttendanceRecord, calculateEarlyLeaveMinutes, calculateLateMinutes, calculateRecognizedWorkMinutes, evaluateVerification } from "./attendance";
 import { advanceLeaveGrantedDays, getLeaveBalance, monthsSinceHire, statutoryAnnualLeaveDays } from "./leave";
 import { offsetOvertimeWithEarlyLeave } from "./overtime";
 import { workplaces } from "./seed";
@@ -33,6 +33,38 @@ describe("attendance verification policy", () => {
 
     expect(result.status).toBe("GPS_FAILED_QR_ALLOWED");
     expect(result.note).toBe("GPS수신실패");
+  });
+
+  it("preserves an unresolved clock-in review when the clock-out GPS succeeds", () => {
+    const result = buildAttendanceRecord({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_OUT",
+      now: "2026-07-08T17:00:00+09:00",
+      existing: {
+        id: "att-review",
+        employeeId: "emp-ops-1",
+        date: "2026-07-08",
+        clockInAt: "2026-07-08T08:00:00+09:00",
+        status: "OUT_OF_RANGE",
+        verificationId: "ver-clock-in",
+        earlyLeaveMinutes: 0,
+        reviewStatus: "PENDING"
+      },
+      verification: {
+        id: "ver-clock-out",
+        employeeId: "emp-ops-1",
+        method: "GPS",
+        status: "GPS_PASSED",
+        attemptedAt: "2026-07-08T17:00:00+09:00"
+      },
+      scheduledEndTime: "17:00"
+    });
+
+    expect(result).toMatchObject({
+      status: "OUT_OF_RANGE",
+      verificationId: "ver-clock-in",
+      reviewStatus: "PENDING"
+    });
   });
 });
 
@@ -94,6 +126,13 @@ describe("leave policy", () => {
 });
 
 describe("early leave and overtime policy", () => {
+  it("marks only clock-ins after the employee start time as late", () => {
+    expect(calculateLateMinutes("2026-07-08T07:59:59+09:00", "08:00")).toBe(0);
+    expect(calculateLateMinutes("2026-07-08T08:00:00+09:00", "08:00")).toBe(0);
+    expect(calculateLateMinutes("2026-07-08T08:00:01+09:00", "08:00")).toBe(1);
+    expect(calculateLateMinutes("2026-07-07T23:05:00Z", "08:00")).toBe(5);
+  });
+
   it("calculates early leave before 17:00", () => {
     expect(calculateEarlyLeaveMinutes("2026-07-08T16:35:00+09:00")).toBe(25);
   });

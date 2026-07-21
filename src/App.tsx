@@ -39,6 +39,7 @@ import {
   getAuditLogs,
   importEmployeeAccounts,
   resetEmployeeAccountPassword,
+  reviewAttendance,
   revealEmployeeSensitiveData,
   setOvertimePayApproval,
   setEmployeeAccountAccess,
@@ -83,7 +84,7 @@ import { AuditLogExplorer } from "./components/auditLogExplorer";
 import { PayrollStatementManager } from "./components/payrollStatementManager";
 import { SystemPolicyEditor } from "./components/systemPolicyEditor";
 import { WorkplaceManager } from "./components/workplaceManager";
-import type { AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod, Workplace } from "./domain/types";
+import type { AttendanceRecord, AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod, Workplace } from "./domain/types";
 import { getLeaveBalance } from "./domain/leave";
 import { isPayrollNoticeDay, payrollNoticeDate } from "./domain/payroll";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
@@ -226,6 +227,7 @@ function App() {
     afterValue: "",
     reason: ""
   });
+  const [correctionTarget, setCorrectionTarget] = useState<AttendanceRecord | null>(null);
   const [isEmployeeCardEditorOpen, setIsEmployeeCardEditorOpen] = useState(false);
   const [isSavingEmployeeCard, setIsSavingEmployeeCard] = useState(false);
   const [employeeCardError, setEmployeeCardError] = useState<string | null>(null);
@@ -340,7 +342,7 @@ function App() {
   );
   const visibleNavItems = useMemo(
     () =>
-      (erpViewModel?.navItems.filter((item) => allowedSections.includes(item.section)) ?? []).map((item) => ({
+      (erpViewModel?.navItems.filter((item) => allowedSections.includes(item.section) && !(effectiveMode === "EMPLOYEE" && item.section === "employee-card")) ?? []).map((item) => ({
         ...item,
         label: effectiveMode === "EMPLOYEE" ? employeeNavLabels[item.section] ?? item.label : item.label
       })),
@@ -800,8 +802,10 @@ function App() {
   }
 
   async function createCorrection() {
-    if (!selectedEmployee || !employeeSnapshot?.todayAttendance) {
-      setCorrectionError("보정할 오늘 출퇴근 기록이 없습니다.");
+    const targetAttendance = correctionTarget ?? employeeSnapshot?.todayAttendance;
+    const targetEmployee = employees.find((employee) => employee.id === targetAttendance?.employeeId) ?? selectedEmployee;
+    if (!targetEmployee || !targetAttendance) {
+      setCorrectionError("보정할 출퇴근 기록이 없습니다.");
       return;
     }
     if (!correctionDraft.afterValue || !correctionDraft.reason.trim()) {
@@ -814,21 +818,22 @@ function App() {
     try {
       const isClockOut = correctionDraft.type === "CLOCK_OUT_CORRECTION";
       const result = await createAttendanceCorrection({
-        attendanceId: employeeSnapshot.todayAttendance.id,
-        employeeId: selectedEmployee.id,
-        correctedById: authActorId(authSession, selectedEmployee.id),
+        attendanceId: targetAttendance.id,
+        employeeId: targetAttendance.employeeId,
+        correctedById: authActorId(authSession, targetEmployee.id),
         session: authSession ?? undefined,
         type: correctionDraft.type,
-        beforeValue: isClockOut ? employeeSnapshot.todayAttendance.clockOutAt : employeeSnapshot.todayAttendance.clockInAt,
-        afterValue: `${employeeSnapshot.todayAttendance.date}T${correctionDraft.afterValue}:00+09:00`,
+        beforeValue: isClockOut ? targetAttendance.clockOutAt : targetAttendance.clockInAt,
+        afterValue: `${targetAttendance.date}T${correctionDraft.afterValue}:00+09:00`,
         reason: correctionDraft.reason.trim(),
         createdAt: new Date().toISOString()
       });
 
-      setNotice(`${selectedEmployee.name} 보정 생성 · ${result.correction.type}`);
+      setNotice(`${targetEmployee.name} ${targetAttendance.date} 보정 완료`);
       setIsCorrectionDialogOpen(false);
+      setCorrectionTarget(null);
       setCorrectionDraft({ type: "CLOCK_IN_CORRECTION", afterValue: "", reason: "" });
-      await refresh(selectedEmployee.id);
+      await refresh(selectedEmployeeId);
     } catch (error) {
       setCorrectionError(error instanceof Error ? error.message : "근태 보정을 저장하지 못했습니다.");
     } finally {
@@ -891,8 +896,22 @@ function App() {
     await refresh(selectedEmployeeId);
   }
 
-  function openCorrectionDialog() {
+  async function reviewAttendanceRecord(attendanceId: string, action: "CONFIRM" | "REQUEST_EVIDENCE", note?: string) {
+    const result = await reviewAttendance({
+      attendanceId,
+      actorId: authActorId(authSession, selectedEmployee?.id),
+      session: authSession ?? undefined,
+      action,
+      note
+    });
+    setNotice(action === "CONFIRM" ? "근태 기록을 정상 인정했습니다." : "직원에게 근태 증빙을 요청했습니다.");
+    await refresh(selectedEmployeeId);
+    return result;
+  }
+
+  function openCorrectionDialog(attendance?: AttendanceRecord) {
     setCorrectionError(null);
+    setCorrectionTarget(attendance ?? employeeSnapshot?.todayAttendance ?? null);
     setIsCorrectionDialogOpen(true);
   }
 
@@ -1147,7 +1166,7 @@ function App() {
     <div className="app-shell">
       <ErpShell
         className={isEmployeeHome ? "employee-home-shell" : undefined}
-        mobileNavLabel={visibleNavItems.find((item) => item.section === activeSection)?.label ?? "메뉴"}
+        mobileNavLabel={visibleNavItems.find((item) => item.section === activeSection)?.label ?? employeeNavLabels[activeSection] ?? "메뉴"}
         navLabel="인트라넷 메뉴"
         sidebar={
           visibleNavItems.map((item) => (
@@ -1204,6 +1223,19 @@ function App() {
                     <button className="account-menu__action" onClick={() => changeMode(effectiveMode === "ADMIN" ? "EMPLOYEE" : "ADMIN")} type="button">
                       <ShieldCheck size={16} />
                       {effectiveMode === "ADMIN" ? "직원 화면으로 전환" : "관리자 화면으로 전환"}
+                    </button>
+                  ) : null}
+                  {effectiveMode === "EMPLOYEE" ? (
+                    <button
+                      className="account-menu__action"
+                      onClick={(event) => {
+                        setActiveSection("employee-card");
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                      }}
+                      type="button"
+                    >
+                      <UserRound size={16} />
+                      내 정보
                     </button>
                   ) : null}
                   <button className="account-menu__logout" onClick={handleLogout} type="button">
@@ -1263,6 +1295,7 @@ function App() {
               onUpdateDailyTask: updateDailyTask,
               onUpdateDailyTaskPlan: updateDailyTaskPlan,
               onCreateCorrection: openCorrectionDialog,
+              onReviewAttendance: reviewAttendanceRecord,
               onSubmitCorrectionRequest: () => {
                 setCorrectionError(null);
                 setIsCorrectionDialogOpen(true);
@@ -1418,9 +1451,11 @@ function App() {
       </FormDialog>
       <FormDialog
         busy={isSubmittingCorrection}
-        description={effectiveMode === "ADMIN" ? "원본 출퇴근 기록은 유지하고 보정 이력을 별도로 남깁니다." : "관리자 승인 전까지 대기 상태로 보관되며, 처리 결과는 정정 신청 이력에서 확인할 수 있습니다."}
+        description={effectiveMode === "ADMIN"
+          ? `${correctionTarget?.date ?? "선택 날짜"} · ${employees.find((employee) => employee.id === correctionTarget?.employeeId)?.name ?? "선택 직원"} · 원본 기록은 유지합니다.`
+          : "관리자 승인 전까지 대기 상태로 보관되며, 처리 결과는 정정 신청 이력에서 확인할 수 있습니다."}
         error={correctionError ?? undefined}
-        onClose={() => setIsCorrectionDialogOpen(false)}
+        onClose={() => { setIsCorrectionDialogOpen(false); setCorrectionTarget(null); }}
         onSubmit={(event: FormEvent<HTMLFormElement>) => {
           event.preventDefault();
           void (effectiveMode === "ADMIN" ? createCorrection() : submitCorrectionRequest());
@@ -1483,10 +1518,10 @@ function formatKoreaTime(value: string) {
 function verificationStatusLabel(status: string) {
   return {
     GPS_PASSED: "GPS 확인 완료",
-    GPS_FAILED_ALLOWED: "대체 인증 완료",
-    GPS_FAILED_QR_ALLOWED: "QR 인증 완료",
+    GPS_FAILED_ALLOWED: "대체 인증 완료 · 정상 저장",
+    GPS_FAILED_QR_ALLOWED: "QR 대체 인증 완료 · 정상 저장",
     OUT_OF_RANGE: "근무지 범위 밖",
-    MANUAL_REVIEW_REQUIRED: "관리자 확인 필요"
+    MANUAL_REVIEW_REQUIRED: "관리자 검토 필요"
   }[status] ?? status;
 }
 
@@ -1584,7 +1619,8 @@ function renderSection(props: {
   onImportEmployeeAccounts: (rows: EmployeeImportRow[]) => Promise<import("./api/types").ImportEmployeeAccountsResult>;
   onUpdateDailyTask: (task: DailyWorkTask) => void;
   onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
-  onCreateCorrection: () => void;
+  onCreateCorrection: (attendance?: AttendanceRecord) => void;
+  onReviewAttendance: (attendanceId: string, action: "CONFIRM" | "REQUEST_EVIDENCE", note?: string) => void | Promise<unknown>;
   onSubmitCorrectionRequest: () => void;
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
@@ -1934,12 +1970,17 @@ function AttendanceSection(props: {
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   systemPolicy: SystemPolicy;
-  onCreateCorrection: () => void;
+  onCreateCorrection: (attendance?: AttendanceRecord) => void;
+  onReviewAttendance: (attendanceId: string, action: "CONFIRM" | "REQUEST_EVIDENCE", note?: string) => void | Promise<unknown>;
   onSubmitCorrectionRequest: () => void;
   onCancelAttendanceCorrection: (requestId?: string) => void | Promise<void>;
 }) {
   const [dateFilter, setDateFilter] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
+  const [reviewDraft, setReviewDraft] = useState<{ action: "CONFIRM" | "REQUEST_EVIDENCE"; record: AttendanceRecord } | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [isReviewing, setIsReviewing] = useState(false);
   const attendanceRows = filterRowsForMode(props.erpViewModel.attendanceRows, props.erpViewModel.employeeSummary.name, props.canAdmin)
     .filter((row) => !dateFilter || row.meta.startsWith(dateFilter))
     .filter((row) => !employeeFilter || row.label === employeeFilter);
@@ -1947,6 +1988,58 @@ function AttendanceSection(props: {
   const correctionRequestRows = filterRowsForMode(props.erpViewModel.correctionRequestRows, props.erpViewModel.employeeSummary.name, props.canAdmin);
   const pendingCorrectionRequest = correctionRequestRows.find((row) => row.status === "PENDING");
   const attendanceRecords = props.canAdmin ? props.erpViewModel.attendanceRecords : props.employeeSnapshot.attendanceRecords;
+  const attendanceById = new Map(attendanceRecords.map((record) => [record.id, record]));
+  const attendanceColumns: DataTableColumn<ErpViewModelRow>[] = props.canAdmin
+    ? [
+        ...rowColumns,
+        {
+          key: "actions",
+          header: "처리",
+          width: "28%",
+          cell: (row) => {
+            const record = attendanceById.get(row.id);
+            if (!record) return null;
+            const needsReview = record.reviewStatus === "PENDING" || record.reviewStatus === "EVIDENCE_REQUESTED"
+              || (!record.reviewStatus && (record.status === "OUT_OF_RANGE" || record.status === "MANUAL_REVIEW_REQUIRED"));
+            return (
+              <div className="attendance-row-actions">
+                {needsReview ? (
+                  <button onClick={() => { setReviewDraft({ action: "CONFIRM", record }); setReviewNote(""); setReviewError(null); }} type="button">
+                    <Check size={14} /> 정상 인정
+                  </button>
+                ) : null}
+                {needsReview && record.reviewStatus !== "EVIDENCE_REQUESTED" ? (
+                  <button onClick={() => { setReviewDraft({ action: "REQUEST_EVIDENCE", record }); setReviewNote(""); setReviewError(null); }} type="button">
+                    <FileText size={14} /> 증빙 요청
+                  </button>
+                ) : null}
+                <button onClick={() => props.onCreateCorrection(record)} type="button">
+                  <TimerReset size={14} /> 근태 보정
+                </button>
+              </div>
+            );
+          }
+        }
+      ]
+    : rowColumns;
+
+  async function submitAttendanceReview() {
+    if (!reviewDraft || !reviewNote.trim()) {
+      setReviewError("처리 사유를 입력해 주세요.");
+      return;
+    }
+    setIsReviewing(true);
+    setReviewError(null);
+    try {
+      await props.onReviewAttendance(reviewDraft.record.id, reviewDraft.action, reviewNote.trim());
+      setReviewDraft(null);
+      setReviewNote("");
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "근태 검토를 저장하지 못했습니다.");
+    } finally {
+      setIsReviewing(false);
+    }
+  }
 
   return (
     <div className="attendance-section">
@@ -1958,14 +2051,12 @@ function AttendanceSection(props: {
       <DetailPanel
         title="출퇴근 인증 내역"
         description="GPS 실패 시 QR과 수동 클릭을 동등하게 허용하고 이력을 남깁니다."
-        actions={
+        actions={!props.canAdmin ? (
           <InlineActions>
-            <button disabled={props.isLoading} onClick={props.canAdmin ? props.onCreateCorrection : props.onSubmitCorrectionRequest}>
-              {props.canAdmin ? "인정지각 보정" : "근태 정정 신청"}
-            </button>
-            {!props.canAdmin && pendingCorrectionRequest ? <button disabled={props.isLoading} onClick={() => void props.onCancelAttendanceCorrection(pendingCorrectionRequest.id)}>대기 신청 취소</button> : null}
+            <button disabled={props.isLoading} onClick={props.onSubmitCorrectionRequest}>근태 정정 신청</button>
+            {pendingCorrectionRequest ? <button disabled={props.isLoading} onClick={() => void props.onCancelAttendanceCorrection(pendingCorrectionRequest.id)}>대기 신청 취소</button> : null}
           </InlineActions>
-        }
+        ) : undefined}
       >
         {props.canAdmin ? (
           <div className="attendance-report-filters" aria-label="근태 기록 필터">
@@ -1975,13 +2066,27 @@ function AttendanceSection(props: {
             <span className="attendance-report-filters__count">{attendanceRows.length}건</span>
           </div>
         ) : null}
-        <DataTable columns={rowColumns} rows={attendanceRows} emptyState={<EmptyState title="기록 없음" />} />
+        <DataTable columns={attendanceColumns} rows={attendanceRows} emptyState={<EmptyState title="기록 없음" />} />
       </DetailPanel>
 
       <DetailPanel title={props.canAdmin ? "보정 및 정정 신청 이력" : "나의 정정 신청 이력"} description="원본 기록은 유지하고 신청·승인·반려 결과를 함께 보존합니다.">
         <DataTable columns={rowColumns} rows={[...correctionRequestRows, ...correctionRows]} emptyState={<EmptyState title="보정 및 정정 신청 이력 없음" />} />
       </DetailPanel>
       </div>
+      <FormDialog
+        busy={isReviewing}
+        description={reviewDraft ? `${reviewDraft.record.date} · ${props.employees.find((employee) => employee.id === reviewDraft.record.employeeId)?.name ?? reviewDraft.record.employeeId}` : undefined}
+        error={reviewError ?? undefined}
+        onClose={() => { setReviewDraft(null); setReviewNote(""); setReviewError(null); }}
+        onSubmit={(event) => { event.preventDefault(); void submitAttendanceReview(); }}
+        open={reviewDraft !== null}
+        submitLabel={reviewDraft?.action === "CONFIRM" ? "정상 인정" : "증빙 요청"}
+        title={reviewDraft?.action === "CONFIRM" ? "근태 기록 정상 인정" : "근태 증빙 요청"}
+      >
+        <RequestField label="처리 사유">
+          <textarea required rows={3} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} />
+        </RequestField>
+      </FormDialog>
     </div>
   );
 }
@@ -2316,8 +2421,8 @@ function taskPlanHint(task: DailyWorkTask) {
 
 function toneForStatus(status?: string) {
   if (!status) return "neutral";
-  if (status.includes("FAILED") || status.includes("PENDING") || status === "DEFAULT") return "warning";
-  if (status.includes("APPROVED") || status === "ACTIVE" || status === "GPS_PASSED") return "success";
+  if (status.includes("FAILED") || status.includes("PENDING") || status === "DEFAULT" || status === "LATE" || status === "EVIDENCE_REQUESTED") return "warning";
+  if (status.includes("APPROVED") || status === "ACTIVE" || status === "GPS_PASSED" || status === "NORMAL" || status === "CONFIRMED" || status === "CORRECTED") return "success";
   if (status.includes("REJECTED") || status === "DELETED") return "danger";
   return "info";
 }

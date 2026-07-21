@@ -89,10 +89,10 @@ const navLabels = {
 
 const statusLabels = {
   GPS_PASSED: "GPS 정상",
-  GPS_FAILED_ALLOWED: "GPS 실패 허용",
-  GPS_FAILED_QR_ALLOWED: "GPS 실패 QR 허용",
+  GPS_FAILED_ALLOWED: "대체 인증 완료",
+  GPS_FAILED_QR_ALLOWED: "QR 대체 인증 완료",
   OUT_OF_RANGE: "근무지 반경 밖",
-  MANUAL_REVIEW_REQUIRED: "수기 검토 필요"
+  MANUAL_REVIEW_REQUIRED: "검토 필요"
 } satisfies Record<AttendanceRecord["status"], string>;
 
 const requestStatusLabels = {
@@ -127,6 +127,7 @@ export function buildErpViewModel({
   const pendingOvertimeRequests = dashboard.overtimeRequests.filter((request) => request.status === "PENDING");
   const pendingCorrectionRequests = (dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING");
   const pendingApprovalCount = dashboard.pendingLeaveRequests.length + pendingOvertimeRequests.length + pendingCorrectionRequests.length;
+  const reviewQueue = attendanceReviewQueue(dashboard);
   const selectedEmployee = employeeSnapshot.employee;
   const employeeDirectory = upsertEmployee(employees, selectedEmployee);
 
@@ -146,10 +147,10 @@ export function buildErpViewModel({
         meta: `전체 ${dashboard.employeesTotal}명`
       },
       {
-        id: "kpi-gps-failures",
-        label: "GPS 실패",
-        value: `${dashboard.gpsFailedAttendance.length}건`,
-        meta: "보조 인증 또는 관리자 확인 필요"
+        id: "kpi-attendance-review",
+        label: "근태 검토",
+        value: `${reviewQueue.length}건`,
+        meta: "반경 밖 또는 근무지 미지정 기록"
       },
       {
         id: "kpi-pending-approvals",
@@ -206,7 +207,7 @@ function buildNavItems({
   pendingApprovalCount: number;
 }) {
   const sectionCounts = {
-    overview: dashboard.pendingLeaveRequests.length + dashboard.overtimeRequests.filter((request) => request.status === "PENDING").length + dashboard.gpsFailedAttendance.length + dashboard.corrections.length + (dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING").length,
+    overview: dashboard.pendingLeaveRequests.length + dashboard.overtimeRequests.filter((request) => request.status === "PENDING").length + attendanceReviewQueue(dashboard).length + (dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING").length,
     "self-service":
       employeeSnapshot.leaveRequests.filter((request) => request.status === "PENDING").length +
       employeeSnapshot.overtimeRequests.filter((request) => request.status === "PENDING").length,
@@ -245,15 +246,10 @@ function buildWorkQueueRows(
       id: `queue-${request.id}`,
       meta: "야근 승인 대기"
     })),
-    ...dashboard.gpsFailedAttendance.map((record) => ({
+    ...attendanceReviewQueue(dashboard).map((record) => ({
       ...attendanceRow(record, employees),
       id: `queue-${record.id}`,
-      meta: "GPS 실패 확인"
-    })),
-    ...dashboard.corrections.map((correction) => ({
-      ...correctionRow(correction, employees),
-      id: `queue-${correction.id}`,
-      meta: "근태 보정 확인"
+      meta: "근태 인증 검토 대기"
     })),
     ...(dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING").map((request) => ({
       ...correctionRequestRow(request, employees),
@@ -264,13 +260,31 @@ function buildWorkQueueRows(
 }
 
 function attendanceRow(record: AttendanceRecord, employees: Employee[]): ErpViewModelRow {
+  const reviewStatus = record.reviewStatus ?? (record.status === "OUT_OF_RANGE" || record.status === "MANUAL_REVIEW_REQUIRED" ? "PENDING" : "NOT_REQUIRED");
+  const workStatus = record.workStatus ?? "NORMAL";
+  const workLabel = workStatus === "LATE" ? `지각${record.lateMinutes ? ` ${record.lateMinutes}분` : ""}` : "정상 인정";
+  const reviewLabel = ({
+    NOT_REQUIRED: "",
+    PENDING: "관리자 확인 필요",
+    CONFIRMED: "관리자 정상 인정",
+    EVIDENCE_REQUESTED: "증빙 요청",
+    CORRECTED: "보정 완료"
+  } as const)[reviewStatus];
   return {
     id: record.id,
     label: employeeName(employees, record.employeeId),
     value: `${formatTime(record.clockInAt)} / ${formatTime(record.clockOutAt)}`,
-    meta: `${record.date} · ${statusLabels[record.status]}`,
-    status: record.status
+    meta: [record.date, workLabel, statusLabels[record.status], reviewLabel].filter(Boolean).join(" · "),
+    status: reviewStatus === "PENDING" || reviewStatus === "EVIDENCE_REQUESTED" ? reviewStatus : workStatus
   };
+}
+
+function attendanceReviewQueue(dashboard: Dashboard) {
+  return dashboard.attendanceReviewQueue ?? (dashboard.attendanceRecords ?? dashboard.todayAttendance).filter((record) =>
+    record.reviewStatus === "PENDING"
+    || record.reviewStatus === "EVIDENCE_REQUESTED"
+    || (!record.reviewStatus && (record.status === "OUT_OF_RANGE" || record.status === "MANUAL_REVIEW_REQUIRED"))
+  );
 }
 
 function leaveRow(request: LeaveRequest, employees: Employee[]): ErpViewModelRow {

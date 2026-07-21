@@ -139,6 +139,20 @@ const dashboard: Dashboard = {
       earlyLeaveMinutes: 0
     }
   ],
+  attendanceReviewQueue: [
+    {
+      id: "att-review-1",
+      employeeId: "emp-ops-1",
+      date: "2026-07-08",
+      clockInAt: "2026-07-08T08:00:00+09:00",
+      status: "OUT_OF_RANGE",
+      verificationId: "ver-review-1",
+      earlyLeaveMinutes: 0,
+      workStatus: "NORMAL",
+      lateMinutes: 0,
+      reviewStatus: "PENDING"
+    }
+  ],
   activePayrollStatements: [
     {
       id: "pay-1",
@@ -249,6 +263,10 @@ describe("buildErpViewModel", () => {
         }
       ])
     );
+    expect(viewModel.workQueueRows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "queue-att-review-1", meta: "근태 인증 검토 대기" })
+    ]));
+    expect(viewModel.workQueueRows.some((row) => row.id === "queue-att-2")).toBe(false);
   });
 
   it("builds payroll rows with employee name fallback", () => {

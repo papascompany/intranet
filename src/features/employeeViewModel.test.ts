@@ -60,7 +60,20 @@ describe("buildEmployeeViewModel", () => {
 
     expect(viewModel.clockInLabel).toBe("09:05");
     expect(viewModel.clockOutLabel).toBe("18:30");
-    expect(viewModel.statusLabel).toBe("GPS 실패 - 허용");
+    expect(viewModel.statusLabel).toBe("정상 인정 · 대체 인증 완료");
+  });
+
+  it("shows the employee-specific late result with the delay duration", () => {
+    const viewModel = buildEmployeeViewModel({
+      ...baseSnapshot,
+      attendanceToday: {
+        ...baseSnapshot.attendanceToday!,
+        workStatus: "LATE",
+        lateMinutes: 5
+      }
+    });
+
+    expect(viewModel.statusLabel).toBe("지각 5분 · GPS 확인 완료");
   });
 
   it("summarizes pending leave requests", () => {

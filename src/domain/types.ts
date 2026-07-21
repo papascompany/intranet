@@ -68,6 +68,9 @@ export type VerificationStatus =
   | "OUT_OF_RANGE"
   | "MANUAL_REVIEW_REQUIRED";
 
+export type AttendanceWorkStatus = "NORMAL" | "LATE";
+export type AttendanceReviewStatus = "NOT_REQUIRED" | "PENDING" | "CONFIRMED" | "EVIDENCE_REQUESTED" | "CORRECTED";
+
 export type VerificationAttempt = {
   id: string;
   employeeId: string;
@@ -91,6 +94,12 @@ export type AttendanceRecord = {
   earlyLeaveMinutes: number;
   /** Minutes between the actual clock-out and the employee's scheduled end time. */
   recognizedWorkMinutes?: number;
+  workStatus?: AttendanceWorkStatus;
+  lateMinutes?: number;
+  reviewStatus?: AttendanceReviewStatus;
+  reviewedById?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
 };
 
 export type CorrectionType =

@@ -471,7 +471,13 @@ function attendanceFromRow(row: AttendanceRow): AttendanceRecord {
     status: row.status,
     verificationId: stringValue(row.verification_id),
     earlyLeaveMinutes: Number(row.early_leave_minutes),
-    recognizedWorkMinutes: optionalNumber(row.recognized_work_minutes) ?? Number(row.early_leave_minutes)
+    recognizedWorkMinutes: optionalNumber(row.recognized_work_minutes) ?? Number(row.early_leave_minutes),
+    workStatus: (optionalString(row.work_status) as AttendanceRecord["workStatus"]) ?? "NORMAL",
+    lateMinutes: optionalNumber(row.late_minutes) ?? 0,
+    reviewStatus: (optionalString(row.review_status) as AttendanceRecord["reviewStatus"]) ?? "NOT_REQUIRED",
+    reviewedById: optionalString(row.reviewed_by_id),
+    reviewedAt: optionalString(row.reviewed_at),
+    reviewNote: optionalString(row.review_note)
   };
 }
 
@@ -485,7 +491,13 @@ function attendanceToRow(record: AttendanceRecord): DbRow {
     status: record.status,
     verification_id: record.verificationId,
     early_leave_minutes: record.earlyLeaveMinutes,
-    recognized_work_minutes: record.recognizedWorkMinutes ?? record.earlyLeaveMinutes
+    recognized_work_minutes: record.recognizedWorkMinutes ?? record.earlyLeaveMinutes,
+    work_status: record.workStatus ?? "NORMAL",
+    late_minutes: record.lateMinutes ?? 0,
+    review_status: record.reviewStatus ?? "NOT_REQUIRED",
+    reviewed_by_id: record.reviewedById ?? null,
+    reviewed_at: record.reviewedAt ?? null,
+    review_note: record.reviewNote ?? null
   };
 }
 

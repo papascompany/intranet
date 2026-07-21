@@ -134,6 +134,8 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.setOvertimePayApproval(payload as never);
     case "createAttendanceCorrection":
       return await api.createAttendanceCorrection(payload as never);
+    case "reviewAttendance":
+      return await api.reviewAttendance(payload as never);
     case "submitAttendanceCorrectionRequest":
       return await api.submitAttendanceCorrectionRequest(payload as never);
     case "updateAttendanceCorrectionRequestStatus":

@@ -91,10 +91,17 @@ export function buildAttendanceRecord(params: {
   verification: VerificationAttempt;
   existing?: AttendanceRecord;
   now: string;
+  scheduledStartTime?: string;
   scheduledEndTime?: string;
   scheduledEndHour?: number;
-}) {
+}): AttendanceRecord {
   const date = params.now.slice(0, 10);
+  const lateMinutes = params.type === "CLOCK_IN"
+    ? calculateLateMinutes(params.now, params.scheduledStartTime)
+    : params.existing?.lateMinutes ?? 0;
+  const reviewStatus = requiresAttendanceReview(params.verification.status)
+    ? "PENDING"
+    : params.existing?.reviewStatus ?? "NOT_REQUIRED";
   const record: AttendanceRecord =
     params.existing ??
     {
@@ -103,7 +110,10 @@ export function buildAttendanceRecord(params: {
       date,
       status: params.verification.status,
       verificationId: params.verification.id,
-      earlyLeaveMinutes: 0
+      earlyLeaveMinutes: 0,
+      workStatus: lateMinutes > 0 ? "LATE" : "NORMAL",
+      lateMinutes,
+      reviewStatus
     };
 
   if (params.type === "CLOCK_IN") {
@@ -111,15 +121,35 @@ export function buildAttendanceRecord(params: {
       ...record,
       clockInAt: params.now,
       status: params.verification.status,
-      verificationId: params.verification.id
+      verificationId: params.verification.id,
+      workStatus: lateMinutes > 0 ? "LATE" : "NORMAL",
+      lateMinutes,
+      reviewStatus
     };
   }
+
+  const existingReviewIsOpen = params.existing?.reviewStatus === "PENDING"
+    || params.existing?.reviewStatus === "EVIDENCE_REQUESTED"
+    || (!params.existing?.reviewStatus && params.existing && requiresAttendanceReview(params.existing.status));
+  const incomingReviewIsOpen = requiresAttendanceReview(params.verification.status);
+  const verificationStatus = !incomingReviewIsOpen && existingReviewIsOpen
+    ? record.status
+    : params.verification.status;
+  const verificationId = !incomingReviewIsOpen && existingReviewIsOpen
+    ? record.verificationId
+    : params.verification.id;
 
   return {
     ...record,
     clockOutAt: params.now,
-    status: params.verification.status,
-    verificationId: params.verification.id,
+    status: verificationStatus,
+    verificationId,
+    workStatus: record.workStatus ?? "NORMAL",
+    lateMinutes: record.lateMinutes ?? 0,
+    reviewStatus,
+    reviewedById: incomingReviewIsOpen ? undefined : record.reviewedById,
+    reviewedAt: incomingReviewIsOpen ? undefined : record.reviewedAt,
+    reviewNote: incomingReviewIsOpen ? undefined : record.reviewNote,
     earlyLeaveMinutes: calculateRecognizedWorkMinutes(
       params.now,
       params.scheduledEndTime ?? `${String(params.scheduledEndHour ?? 17).padStart(2, "0")}:00`
@@ -136,22 +166,49 @@ export function calculateEarlyLeaveMinutes(clockOutAt: string, scheduledEndHour 
 }
 
 export function calculateRecognizedWorkMinutes(clockOutAt: string, scheduledEndTime = "17:00") {
-  const clockOut = new Date(clockOutAt);
-  const timeMatch = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(scheduledEndTime);
-  if (Number.isNaN(clockOut.getTime()) || !timeMatch) {
+  const actualSeconds = koreaTimeSeconds(clockOutAt);
+  const scheduledSeconds = parseTimeSeconds(scheduledEndTime);
+  if (actualSeconds === undefined || scheduledSeconds === undefined) {
     return 0;
   }
 
-  // All application business dates are Asia/Seoul dates. Build the target instant
-  // from the recorded date so a server running in another timezone is deterministic.
-  const date = clockOutAt.slice(0, 10);
-  const scheduledEnd = new Date(`${date}T${scheduledEndTime}:00+09:00`);
+  return Math.max(Math.ceil((scheduledSeconds - actualSeconds) / 60), 0);
+}
 
-  if (clockOut >= scheduledEnd) {
-    return 0;
-  }
+export function calculateLateMinutes(clockInAt: string, scheduledStartTime?: string) {
+  if (!scheduledStartTime) return 0;
+  const actualSeconds = koreaTimeSeconds(clockInAt);
+  const scheduledSeconds = parseTimeSeconds(scheduledStartTime);
+  if (actualSeconds === undefined || scheduledSeconds === undefined) return 0;
+  return Math.max(Math.ceil((actualSeconds - scheduledSeconds) / 60), 0);
+}
 
-  return Math.round((scheduledEnd.getTime() - clockOut.getTime()) / 60000);
+export function requiresAttendanceReview(status: VerificationStatus) {
+  return status === "OUT_OF_RANGE" || status === "MANUAL_REVIEW_REQUIRED";
+}
+
+function koreaTimeSeconds(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+  const second = Number(parts.find((part) => part.type === "second")?.value);
+  return Number.isFinite(hour) && Number.isFinite(minute) && Number.isFinite(second)
+    ? hour * 3600 + minute * 60 + second
+    : undefined;
+}
+
+function parseTimeSeconds(value: string) {
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return undefined;
+  const [hour, minute] = value.split(":").map(Number);
+  return hour * 3600 + minute * 60;
 }
 
 function toRadians(value: number) {

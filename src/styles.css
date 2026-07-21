@@ -331,6 +331,31 @@ button {
   font: 12px var(--font-inter);
 }
 
+.attendance-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attendance-row-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  padding: 0 8px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+  font: 600 11px var(--font-inter);
+}
+
+.attendance-row-actions button:hover {
+  background: var(--color-paper);
+}
+
 .my-day__content {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);

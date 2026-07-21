@@ -278,7 +278,42 @@ describe("hr api", () => {
     await hrApi.clockAttendance({ employeeId: "emp-ops-1", type: "CLOCK_IN", method: "MANUAL_CLICK", now: "2026-07-09T08:00:00+09:00", gpsError: true });
     const result = await hrApi.clockAttendance({ employeeId: "emp-ops-1", type: "CLOCK_OUT", method: "MANUAL_CLICK", now: "2026-07-09T16:00:00+09:00", gpsError: true });
 
-    expect(result.attendance).toMatchObject({ earlyLeaveMinutes: 60, recognizedWorkMinutes: 60 });
+    expect(result.attendance).toMatchObject({
+      earlyLeaveMinutes: 60,
+      recognizedWorkMinutes: 60,
+      workStatus: "NORMAL",
+      lateMinutes: 0,
+      reviewStatus: "NOT_REQUIRED"
+    });
+  });
+
+  it("uses the employee-specific start time to distinguish normal attendance from lateness", async () => {
+    const createScheduledApi = () => createHrApi(
+      new InMemoryDatabase({
+        employees: employees.map((employee) =>
+          employee.id === "emp-ops-1" ? { ...employee, workStartTime: "08:00", workEndTime: "17:00" } : employee
+        )
+      }),
+      () => fixedNow
+    );
+
+    const early = await createScheduledApi().clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      method: "MANUAL_CLICK",
+      now: "2026-07-09T07:55:00+09:00",
+      gpsError: true
+    });
+    const late = await createScheduledApi().clockAttendance({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      method: "MANUAL_CLICK",
+      now: "2026-07-09T08:05:00+09:00",
+      gpsError: true
+    });
+
+    expect(early.attendance).toMatchObject({ workStatus: "NORMAL", lateMinutes: 0, reviewStatus: "NOT_REQUIRED" });
+    expect(late.attendance).toMatchObject({ workStatus: "LATE", lateMinutes: 5, reviewStatus: "NOT_REQUIRED" });
   });
 
   it("enforces the attendance state machine for out-of-order and duplicate clicks", async () => {
@@ -349,7 +384,54 @@ describe("hr api", () => {
 
     expect(result.verification.status).toBe("GPS_FAILED_QR_ALLOWED");
     expect(result.attendance.status).toBe("GPS_FAILED_QR_ALLOWED");
+    expect(result.attendance.reviewStatus).toBe("NOT_REQUIRED");
     expect(result.verification.note).toBe("GPS수신실패");
+  });
+
+  it("lets an administrator resolve an actionable attendance review while preserving its audit trail", async () => {
+    const db = new InMemoryDatabase({
+      attendanceRecords: [{
+        id: "att-review-1",
+        employeeId: "emp-ops-1",
+        date: "2026-07-08",
+        clockInAt: "2026-07-08T08:00:00+09:00",
+        status: "OUT_OF_RANGE",
+        verificationId: "ver-review-1",
+        earlyLeaveMinutes: 0,
+        workStatus: "NORMAL",
+        lateMinutes: 0,
+        reviewStatus: "PENDING"
+      }]
+    });
+    const hrApi = createHrApi(db, () => fixedNow);
+
+    await expect(hrApi.reviewAttendance({
+      attendanceId: "att-review-1",
+      action: "CONFIRM",
+      note: "현장 근무 확인",
+      actorId: employeeSession.employeeId,
+      session: employeeSession
+    })).rejects.toThrow("Admin permission required");
+
+    const result = await hrApi.reviewAttendance({
+      attendanceId: "att-review-1",
+      action: "CONFIRM",
+      note: "현장 근무 확인",
+      actorId: adminSession.employeeId,
+      session: adminSession
+    });
+
+    expect(result.attendance).toMatchObject({
+      reviewStatus: "CONFIRMED",
+      reviewedById: adminSession.employeeId,
+      reviewedAt: fixedNow,
+      reviewNote: "현장 근무 확인"
+    });
+    expect(result.auditLog).toMatchObject({ action: "ATTENDANCE_REVIEW_CONFIRMED", targetId: "att-review-1" });
+    await expect(hrApi.getDashboard({ asOf: fixedNow, session: adminSession })).resolves.toMatchObject({
+      attendanceReviewQueue: []
+    });
+    await expect(hrApi.getAuditLogs({ action: "ATTENDANCE_REVIEW_CONFIRMED" })).resolves.toHaveLength(1);
   });
 
   it("submits leave as pending and records the write", async () => {

@@ -121,6 +121,18 @@ export type CreateAttendanceCorrectionInput = AuthenticatedInput & {
   createdAt?: string;
 };
 
+export type ReviewAttendanceInput = AuthenticatedInput & {
+  attendanceId: string;
+  actorId: string;
+  action: "CONFIRM" | "REQUEST_EVIDENCE";
+  note?: string;
+};
+
+export type ReviewAttendanceResult = {
+  attendance: AttendanceRecord;
+  auditLog: AuditLog;
+};
+
 export type SubmitAttendanceCorrectionRequestInput = AuthenticatedInput & {
   employeeId: string;
   attendanceId?: string;
@@ -385,6 +397,7 @@ export type Dashboard = {
   corrections: AttendanceCorrection[];
   correctionRequests?: AttendanceCorrectionRequest[];
   gpsFailedAttendance: AttendanceRecord[];
+  attendanceReviewQueue?: AttendanceRecord[];
   activePayrollStatements: PayrollStatement[];
   settings?: SystemPolicy;
   recentAuditLogs: AuditLog[];

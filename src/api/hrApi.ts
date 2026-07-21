@@ -1,4 +1,4 @@
-import { buildAttendanceRecord, calculateRecognizedWorkMinutes, evaluateVerification } from "../domain/attendance.js";
+import { buildAttendanceRecord, calculateLateMinutes, calculateRecognizedWorkMinutes, evaluateVerification } from "../domain/attendance.js";
 import { getLeaveBalance } from "../domain/leave.js";
 import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
 import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
@@ -54,6 +54,7 @@ import type {
   SetEmployeeAccountAccessInput,
   SoftDeletePayrollStatementInput,
   RegisterUploadedPayrollStatementInput,
+  ReviewAttendanceInput,
   RevealEmployeeSensitiveDataInput,
   ResetEmployeeAccountPasswordInput,
   SubmitLeaveRequestInput,
@@ -198,6 +199,11 @@ export class HrApi {
       corrections,
       correctionRequests,
       gpsFailedAttendance: attendance.filter((record) => record.status.includes("GPS_FAILED")),
+      attendanceReviewQueue: attendance.filter((record) =>
+        record.reviewStatus === "PENDING"
+        || record.reviewStatus === "EVIDENCE_REQUESTED"
+        || (!record.reviewStatus && (record.status === "OUT_OF_RANGE" || record.status === "MANUAL_REVIEW_REQUIRED"))
+      ),
       activePayrollStatements,
       settings,
       recentAuditLogs: this.filterAuditLogsBySession(auditLogs, session, visibleTargetIds).slice(0, 10)
@@ -685,9 +691,9 @@ export class HrApi {
       throw new Error("이미 퇴근 처리된 날짜입니다.");
     }
     const settings = await this.db.getSettings();
-    const scheduledEndTime = settings.workDays.includes(workDayCode(now))
-      ? employee.workEndTime ?? settings.workEndTime
-      : "00:00";
+    const isScheduledWorkDay = settings.workDays.includes(workDayCode(now));
+    const scheduledStartTime = isScheduledWorkDay ? employee.workStartTime ?? settings.workStartTime : undefined;
+    const scheduledEndTime = isScheduledWorkDay ? employee.workEndTime ?? settings.workEndTime : "00:00";
     const verification = evaluateVerification({
       employeeId: input.employeeId,
       workplaces: await this.workplacesWithPolicyRadius(employee.workplaceId),
@@ -705,6 +711,7 @@ export class HrApi {
         verification,
         existing,
         now,
+        scheduledStartTime,
         scheduledEndTime: input.session
           ? scheduledEndTime
           : input.scheduledEndHour === undefined
@@ -943,6 +950,36 @@ export class HrApi {
     });
 
     return { correction: saved, ...applied, auditLog };
+  }
+
+  async reviewAttendance(input: ReviewAttendanceInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    const attendance = (await this.db.listAttendanceRecords()).find((record) => record.id === input.attendanceId);
+    if (!attendance) throw new Error("Attendance record not found");
+    if (attendance.reviewStatus !== "PENDING" && attendance.reviewStatus !== "EVIDENCE_REQUESTED") {
+      throw new Error("검토 대기 중인 근태 기록만 처리할 수 있습니다.");
+    }
+    const note = normalizeOptionalText(input.note);
+    if (input.action === "REQUEST_EVIDENCE" && !note) {
+      throw new Error("증빙 요청 사유를 입력해 주세요.");
+    }
+    const reviewedAt = this.clock();
+    const saved = await this.db.upsertAttendanceRecord({
+      ...attendance,
+      reviewStatus: input.action === "CONFIRM" ? "CONFIRMED" : "EVIDENCE_REQUESTED",
+      reviewedById: actorId,
+      reviewedAt,
+      reviewNote: note ?? (input.action === "CONFIRM" ? "관리자 정상 인정" : undefined)
+    });
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: input.action === "CONFIRM" ? "ATTENDANCE_REVIEW_CONFIRMED" : "ATTENDANCE_EVIDENCE_REQUESTED",
+      targetType: "AttendanceRecord",
+      targetId: saved.id,
+      detail: saved.reviewNote ?? input.action
+    });
+    return { attendance: saved, auditLog };
   }
 
   async submitAttendanceCorrectionRequest(input: SubmitAttendanceCorrectionRequestInput) {
@@ -1194,6 +1231,12 @@ export class HrApi {
   private async createMissingAttendanceCorrection(request: AttendanceCorrectionRequest, actorId: string) {
     const requestedAt = request.requestedValue;
     const date = await this.assertMissingAttendanceAvailable(request);
+    const [settings, employee] = await Promise.all([this.db.getSettings(), this.findEmployee(request.employeeId)]);
+    const scheduledStartTime = settings.workDays.includes(workDayCode(date))
+      ? employee.workStartTime ?? settings.workStartTime
+      : undefined;
+    const createsClockOut = request.type === "CLOCK_OUT_CORRECTION" || request.type === "APPROVED_EARLY_LEAVE";
+    const lateMinutes = createsClockOut ? 0 : calculateLateMinutes(requestedAt, scheduledStartTime);
 
     const verification = {
       id: await this.db.nextId("ver"),
@@ -1204,7 +1247,6 @@ export class HrApi {
       note: "근태 정정 승인으로 누락 기록 생성"
     };
     await this.db.addVerificationAttempt(verification);
-    const createsClockOut = request.type === "CLOCK_OUT_CORRECTION" || request.type === "APPROVED_EARLY_LEAVE";
     const attendance = await this.db.upsertAttendanceRecord({
       id: `att-${date}-${request.employeeId}`,
       employeeId: request.employeeId,
@@ -1213,7 +1255,14 @@ export class HrApi {
       clockOutAt: createsClockOut ? requestedAt : undefined,
       status: verification.status,
       verificationId: verification.id,
-      earlyLeaveMinutes: 0
+      earlyLeaveMinutes: 0,
+      recognizedWorkMinutes: 0,
+      workStatus: lateMinutes > 0 ? "LATE" : "NORMAL",
+      lateMinutes,
+      reviewStatus: "CORRECTED",
+      reviewedById: actorId,
+      reviewedAt: this.clock(),
+      reviewNote: request.reason
     });
 
     return await this.db.addCorrection({
@@ -1247,14 +1296,25 @@ export class HrApi {
     const attendance: AttendanceRecord = {
       ...input.attendance,
       clockInAt: correctsClockIn ? input.requestedValue : input.attendance.clockInAt,
-      clockOutAt: correctsClockOut ? input.requestedValue : input.attendance.clockOutAt
+      clockOutAt: correctsClockOut ? input.requestedValue : input.attendance.clockOutAt,
+      reviewStatus: "CORRECTED",
+      reviewedById: actorId,
+      reviewedAt: this.clock(),
+      reviewNote: input.reason
     };
+    const settings = await this.db.getSettings();
+    const employee = await this.findEmployee(attendance.employeeId);
+    if (correctsClockIn) {
+      const scheduledStartTime = settings.workDays.includes(workDayCode(attendance.date))
+        ? employee.workStartTime ?? settings.workStartTime
+        : undefined;
+      attendance.lateMinutes = calculateLateMinutes(input.requestedValue, scheduledStartTime);
+      attendance.workStatus = attendance.lateMinutes > 0 ? "LATE" : "NORMAL";
+    }
     let earlyLeaveLedger: EarlyLeaveLedger | undefined;
     if (correctsClockOut) {
-      const settings = await this.db.getSettings();
-      const employee = await this.findEmployee(attendance.employeeId);
       const scheduledEndTime = settings.workDays.includes(workDayCode(attendance.date))
-        ? employee?.workEndTime ?? settings.workEndTime
+        ? employee.workEndTime ?? settings.workEndTime
         : "00:00";
       attendance.earlyLeaveMinutes = calculateRecognizedWorkMinutes(input.requestedValue, scheduledEndTime);
       attendance.recognizedWorkMinutes = attendance.earlyLeaveMinutes;
@@ -2034,6 +2094,7 @@ export const updateRequestStatus = defaultHrApi.updateRequestStatus.bind(default
 export const cancelRequest = defaultHrApi.cancelRequest.bind(defaultHrApi);
 export const setOvertimePayApproval = defaultHrApi.setOvertimePayApproval.bind(defaultHrApi);
 export const createAttendanceCorrection = defaultHrApi.createAttendanceCorrection.bind(defaultHrApi);
+export const reviewAttendance = defaultHrApi.reviewAttendance.bind(defaultHrApi);
 export const submitAttendanceCorrectionRequest = defaultHrApi.submitAttendanceCorrectionRequest.bind(defaultHrApi);
 export const updateAttendanceCorrectionRequestStatus = defaultHrApi.updateAttendanceCorrectionRequestStatus.bind(defaultHrApi);
 export const uploadPayrollStatement = defaultHrApi.uploadPayrollStatement.bind(defaultHrApi);
