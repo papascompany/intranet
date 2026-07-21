@@ -86,6 +86,11 @@
   .approval-queue__list-panel { border-right: 0; border-bottom: 1px solid var(--color-silver); }
 }
 
+@container erp-shell (max-width: 760px) {
+  .approval-queue__content { grid-template-columns: 1fr; }
+  .approval-queue__list-panel { border-right: 0; border-bottom: 1px solid var(--color-silver); }
+}
+
 @media (max-width: 480px) {
   .approval-queue__header { align-items: start; flex-direction: column; }
   .approval-queue__detail { padding: 16px; }

@@ -83,3 +83,8 @@
   .people-workspace { grid-template-columns: 1fr; }
   .employee-directory { min-height: 0; height: min(520px, calc(100dvh - 180px)); }
 }
+
+@container erp-shell (max-width: 820px) {
+  .people-workspace { grid-template-columns: 1fr; }
+  .employee-directory { min-height: 0; height: min(520px, calc(100dvh - 180px)); }
+}

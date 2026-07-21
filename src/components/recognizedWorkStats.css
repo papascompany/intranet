@@ -16,3 +16,10 @@
 .recognized-work-table-wrap th { color: var(--color-slate); font-size: 11px; }
 .recognized-work-empty { margin: 12px 0 0; color: var(--color-slate); font-size: 12px; }
 @media (max-width: 760px) { .recognized-work-summary, .recognized-work-tables { grid-template-columns: minmax(0, 1fr); } }
+
+@container erp-shell (max-width: 760px) {
+  .recognized-work-summary,
+  .recognized-work-tables {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
