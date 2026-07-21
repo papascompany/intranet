@@ -1,0 +1,18 @@
+.recognized-work-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.recognized-work-summary > div { display: grid; gap: 5px; border: 1px solid var(--color-silver); border-radius: 8px; padding: 14px; background: var(--color-paper); }
+.recognized-work-summary span, .recognized-work-summary small { color: var(--color-slate); font-size: 12px; }
+.recognized-work-summary strong { color: var(--color-graphite); font-family: var(--font-cal-sans); font-size: 22px; }
+.recognized-work-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.recognized-work-filters label { display: grid; gap: 5px; color: var(--color-slate); font-size: 11px; font-weight: 700; }
+.recognized-work-filters input, .recognized-work-filters select, .recognized-work-filters button { min-height: 36px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 7px 9px; color: var(--color-graphite); background: var(--color-white); font: inherit; }
+.recognized-work-filters button { cursor: pointer; font-weight: 700; }
+.recognized-work-filters button:hover { border-color: var(--color-graphite); }
+.recognized-work-tables { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.recognized-work-table-wrap { min-width: 0; overflow: auto; }
+.recognized-work-table-wrap h4 { margin: 0 0 8px; color: var(--color-graphite); font-size: 13px; }
+.recognized-work-table-wrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.recognized-work-table-wrap th, .recognized-work-table-wrap td { border-bottom: 1px solid var(--color-silver); padding: 9px 6px; text-align: left; white-space: nowrap; }
+.recognized-work-table-wrap th:last-child, .recognized-work-table-wrap td:last-child { text-align: right; }
+.recognized-work-table-wrap th { color: var(--color-slate); font-size: 11px; }
+.recognized-work-empty { margin: 12px 0 0; color: var(--color-slate); font-size: 12px; }
+@media (max-width: 760px) { .recognized-work-summary, .recognized-work-tables { grid-template-columns: minmax(0, 1fr); } }

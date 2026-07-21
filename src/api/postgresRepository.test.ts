@@ -50,6 +50,8 @@ describe("PostgresHrRepository", () => {
       hire_date: "2026-01-10",
       employee_number: "EMP-0002",
       workplace_id: "samsong-techno-valley",
+      work_start_time: "08:30:00",
+      work_end_time: "16:30:00",
       custom_admin_fields: [],
       pilot: true
     };
@@ -69,6 +71,7 @@ describe("PostgresHrRepository", () => {
     expect(calls[0].sql).toContain("workplace_id");
     expect(calls[0].params).toContain("samsong-techno-valley");
     expect(employee.workplaceId).toBe("samsong-techno-valley");
+    expect(employee).toMatchObject({ workStartTime: "08:30", workEndTime: "16:30" });
   });
 
   it("persists corrected attendance clocks and early-leave ledger status", async () => {
@@ -81,7 +84,8 @@ describe("PostgresHrRepository", () => {
         clock_out_at: "2026-07-08T17:00:00+09:00",
         status: "GPS_PASSED",
         verification_id: "ver-seed-1",
-        early_leave_minutes: 0
+        early_leave_minutes: 0,
+        recognized_work_minutes: 0
       }],
       [{
         id: "early-att-2026-07-08-emp-ops-1",
@@ -101,7 +105,8 @@ describe("PostgresHrRepository", () => {
       clockOutAt: "2026-07-08T17:00:00+09:00",
       status: "GPS_PASSED",
       verificationId: "ver-seed-1",
-      earlyLeaveMinutes: 0
+      earlyLeaveMinutes: 0,
+      recognizedWorkMinutes: 0
     });
     const ledger = await repository.upsertEarlyLeaveLedger({
       id: "early-att-2026-07-08-emp-ops-1",
@@ -115,7 +120,7 @@ describe("PostgresHrRepository", () => {
     expect(calls[0].sql).toContain("on conflict (id) do update");
     expect(calls[0].sql).toContain("clock_out_at");
     expect(calls[1].sql).toContain("early_leave_ledger");
-    expect(attendance).toMatchObject({ clockOutAt: "2026-07-08T17:00:00+09:00", earlyLeaveMinutes: 0 });
+    expect(attendance).toMatchObject({ clockOutAt: "2026-07-08T17:00:00+09:00", earlyLeaveMinutes: 0, recognizedWorkMinutes: 0 });
     expect(ledger).toMatchObject({ minutes: 0, status: "CORRECTED" });
   });
 

@@ -30,7 +30,7 @@ function normalizedCustomAdminFields(fields: Employee["customAdminFields"]): Emp
 export function buildEmployeeCardViewModel(
   employee: Employee,
   mode: EmployeeCardMode,
-  options: { revealSensitive?: boolean; workplaceName?: string } = {}
+  options: { revealSensitive?: boolean; workplaceName?: string; defaultWorkStartTime?: string; defaultWorkEndTime?: string } = {}
 ): EmployeeCardRow[] {
   const revealSensitive = mode === "ADMIN" && options.revealSensitive === true;
   const baseRows: EmployeeCardRow[] = [
@@ -43,6 +43,7 @@ export function buildEmployeeCardViewModel(
     row("hireDate", "입사일", formatDate(employee.hireDate)),
     row("terminationDate", "퇴사일", formatDate(employee.terminationDate)),
     row("workplaceAssignment", "근무지 배정", workplaceAssignment(employee, options.workplaceName)),
+    row("workSchedule", "근무시간", `${employee.workStartTime ?? options.defaultWorkStartTime ?? "-"}~${employee.workEndTime ?? options.defaultWorkEndTime ?? "-"}`),
     row("residentRegistrationNumber", "주민등록번호", revealSensitive ? employee.residentRegistrationNumber : maskResidentRegistrationNumber(employee.residentRegistrationNumber), {
       sensitive: true
     }),

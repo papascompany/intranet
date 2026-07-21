@@ -1,11 +1,13 @@
 import type { Employee, LeaveBalance, LeaveRequest } from "./types.js";
 
 export function monthsSinceHire(hireDate: string, asOf: string) {
-  const hire = new Date(hireDate);
-  const today = new Date(asOf);
-  let months = (today.getFullYear() - hire.getFullYear()) * 12 + today.getMonth() - hire.getMonth();
+  const hire = dateParts(hireDate);
+  const today = dateParts(asOf);
+  if (!hire || !today) return 0;
 
-  if (today.getDate() < hire.getDate()) {
+  let months = (today.year - hire.year) * 12 + today.month - hire.month;
+
+  if (today.day < hire.day) {
     months -= 1;
   }
 
@@ -39,13 +41,16 @@ export function getLeaveBalance(params: {
   approvedRequests: LeaveRequest[];
   policy?: { annualLeaveAutoAccrual: boolean };
 }): LeaveBalance {
-  const usedDays = params.approvedRequests
-    .filter((request) =>
-      request.employeeId === params.employee.id
-      && request.status === "APPROVED"
-      && (request.type === "ANNUAL" || request.type === "HALF_DAY")
-    )
-    .reduce((sum, request) => sum + request.days, 0);
+  const eligibleRequests = params.approvedRequests.filter((request) =>
+    request.employeeId === params.employee.id
+    && (request.type === "ANNUAL" || request.type === "HALF_DAY")
+  );
+  const approvedRequests = eligibleRequests.filter((request) => request.status === "APPROVED");
+  const pendingRequests = eligibleRequests.filter((request) => request.status === "PENDING");
+  const asOfDate = params.asOf.slice(0, 10);
+  const currentMonth = asOfDate.slice(0, 7);
+  const currentYear = asOfDate.slice(0, 4);
+  const usedDays = sumDays(approvedRequests);
 
   const autoAccrual = params.policy?.annualLeaveAutoAccrual ?? true;
   const statutoryDays = autoAccrual ? statutoryAnnualLeaveDays(params.employee.hireDate, params.asOf) : 0;
@@ -59,6 +64,20 @@ export function getLeaveBalance(params: {
     advanceGrantedDays,
     advanceUsedDays,
     availableDays: Math.max(statutoryDays + advanceGrantedDays + adjustmentDays - statutoryUsedDays - advanceUsedDays, 0),
-    pendingOffsetDays: advanceUsedDays
+    pendingOffsetDays: advanceUsedDays,
+    usedDays,
+    pendingDays: sumDays(pendingRequests),
+    currentYearUsedDays: sumDays(approvedRequests.filter((request) => request.startsOn.slice(0, 4) === currentYear)),
+    currentMonthUsedDays: sumDays(approvedRequests.filter((request) => request.startsOn.slice(0, 7) === currentMonth))
   };
+}
+
+function sumDays(requests: LeaveRequest[]) {
+  return requests.reduce((sum, request) => sum + request.days, 0);
+}
+
+function dateParts(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!match) return undefined;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
 }

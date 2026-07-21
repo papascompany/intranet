@@ -27,6 +27,8 @@ export type EmployeeCardAdminUpdate = {
   incomeDeductionDependents?: number;
   annualLeaveAdjustmentDays?: number;
   customAdminFields?: EmployeeCustomAdminFields;
+  workStartTime?: string | null;
+  workEndTime?: string | null;
 };
 
 export type EmployeeCardUpdateInput = EmployeeCardBasicUpdate & EmployeeCardAdminUpdate;
@@ -41,12 +43,17 @@ const customFieldIds = [
 
 export function applyEmployeeCardUpdate(employee: Employee, input: EmployeeCardUpdateInput): Employee {
   validateEmployeeCardUpdate(input);
-  const { workplaceId, ...otherUpdates } = input;
+  const { workplaceId, workStartTime, workEndTime, ...otherUpdates } = input;
+  const nextWorkStartTime = workStartTime === undefined ? employee.workStartTime : workStartTime ?? undefined;
+  const nextWorkEndTime = workEndTime === undefined ? employee.workEndTime : workEndTime ?? undefined;
+  validateEmployeeSchedule(nextWorkStartTime, nextWorkEndTime);
 
   return {
     ...employee,
     ...otherUpdates,
-    ...(workplaceId === undefined ? {} : { workplaceId: workplaceId ?? undefined })
+    ...(workplaceId === undefined ? {} : { workplaceId: workplaceId ?? undefined }),
+    ...(workStartTime === undefined ? {} : { workStartTime: nextWorkStartTime }),
+    ...(workEndTime === undefined ? {} : { workEndTime: nextWorkEndTime })
   };
 }
 
@@ -77,6 +84,29 @@ export function validateEmployeeCardUpdate(input: EmployeeCardUpdateInput) {
 
   if (input.customAdminFields) {
     validateCustomAdminFields(input.customAdminFields);
+  }
+
+  const hasWorkStart = input.workStartTime !== undefined;
+  const hasWorkEnd = input.workEndTime !== undefined;
+  if (hasWorkStart && input.workStartTime !== null && !validTime(input.workStartTime)) {
+    throw new Error("Work start time must be a valid time");
+  }
+  if (hasWorkEnd && input.workEndTime !== null && !validTime(input.workEndTime)) {
+    throw new Error("Work end time must be a valid time");
+  }
+  if (hasWorkStart && hasWorkEnd && input.workStartTime !== null && input.workEndTime !== null && input.workStartTime! >= input.workEndTime!) {
+    throw new Error("Work end time must be after work start time");
+  }
+}
+
+function validTime(value: string | undefined) {
+  return value !== undefined && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function validateEmployeeSchedule(workStartTime: string | undefined, workEndTime: string | undefined) {
+  if (workStartTime === undefined && workEndTime === undefined) return;
+  if (!validTime(workStartTime) || !validTime(workEndTime) || workStartTime! >= workEndTime!) {
+    throw new Error("Work end time must be after work start time");
   }
 }
 

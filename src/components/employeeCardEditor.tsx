@@ -26,6 +26,8 @@ export interface EmployeeCardEditorProps {
   onClose: () => void;
   onSubmit: (input: EmployeeCardEditorSubmit) => void | Promise<void>;
   open: boolean;
+  defaultWorkStartTime?: string;
+  defaultWorkEndTime?: string;
   workplaces?: EmployeeCardEditorWorkplace[];
 }
 
@@ -46,6 +48,8 @@ type AdminDraft = {
   severancePay: string;
   incomeDeductionDependents: string;
   annualLeaveAdjustmentDays: string;
+  workStartTime: string;
+  workEndTime: string;
   customAdminFields: EmployeeCustomAdminFields;
 };
 
@@ -88,7 +92,7 @@ function basicDraftFrom(employee: Employee): BasicDraft {
   };
 }
 
-function adminDraftFrom(employee: Employee): AdminDraft {
+function adminDraftFrom(employee: Employee, defaultWorkStartTime = "08:00", defaultWorkEndTime = "17:00"): AdminDraft {
   return {
     name: employee.name,
     employeeNumber: employee.employeeNumber ?? "",
@@ -104,6 +108,8 @@ function adminDraftFrom(employee: Employee): AdminDraft {
     severancePay: employee.severancePay === undefined ? "" : String(employee.severancePay),
     incomeDeductionDependents: employee.incomeDeductionDependents === undefined ? "" : String(employee.incomeDeductionDependents),
     annualLeaveAdjustmentDays: employee.annualLeaveAdjustmentDays === undefined ? "0" : String(employee.annualLeaveAdjustmentDays),
+    workStartTime: employee.workStartTime ?? defaultWorkStartTime,
+    workEndTime: employee.workEndTime ?? defaultWorkEndTime,
     customAdminFields: normalizedCustomFields(employee.customAdminFields)
   };
 }
@@ -116,8 +122,8 @@ function optionalNumber(value: string) {
   return value.trim() === "" ? undefined : Number(value);
 }
 
-function adminFieldsChanged(employee: Employee, draft: AdminDraft) {
-  const initial = adminDraftFrom(employee);
+function adminFieldsChanged(employee: Employee, draft: AdminDraft, defaultWorkStartTime: string, defaultWorkEndTime: string) {
+  const initial = adminDraftFrom(employee, defaultWorkStartTime, defaultWorkEndTime);
   return initial.name !== draft.name
     || initial.employeeNumber !== draft.employeeNumber
     || initial.department !== draft.department
@@ -132,6 +138,8 @@ function adminFieldsChanged(employee: Employee, draft: AdminDraft) {
     || initial.severancePay !== draft.severancePay
     || initial.incomeDeductionDependents !== draft.incomeDeductionDependents
     || initial.annualLeaveAdjustmentDays !== draft.annualLeaveAdjustmentDays
+    || initial.workStartTime !== draft.workStartTime
+    || initial.workEndTime !== draft.workEndTime
     || initial.customAdminFields.some((field, index) => field.label !== draft.customAdminFields[index]?.label || field.value !== draft.customAdminFields[index]?.value);
 }
 
@@ -140,8 +148,8 @@ function basicFieldsChanged(employee: Employee, draft: BasicDraft) {
   return (Object.keys(initial) as EditableBasicField[]).some((key) => initial[key] !== draft[key]);
 }
 
-function sensitiveAdminFieldsChanged(employee: Employee, draft: AdminDraft) {
-  const initial = adminDraftFrom(employee);
+function sensitiveAdminFieldsChanged(employee: Employee, draft: AdminDraft, defaultWorkStartTime: string, defaultWorkEndTime: string) {
+  const initial = adminDraftFrom(employee, defaultWorkStartTime, defaultWorkEndTime);
   return initial.name !== draft.name
     || initial.role !== draft.role
     || initial.employmentStatus !== draft.employmentStatus
@@ -155,7 +163,11 @@ function sensitiveAdminFieldsChanged(employee: Employee, draft: AdminDraft) {
     || initial.customAdminFields.some((field, index) => field.label !== draft.customAdminFields[index]?.label || field.value !== draft.customAdminFields[index]?.value);
 }
 
-function adminUpdateFrom(draft: AdminDraft): EmployeeCardUpdateInput {
+function adminUpdateFrom(draft: AdminDraft, employee: Employee, defaultWorkStartTime: string, defaultWorkEndTime: string): EmployeeCardUpdateInput {
+  const usesDefaultSchedule = draft.workStartTime === defaultWorkStartTime && draft.workEndTime === defaultWorkEndTime;
+  const hasExistingOverride = employee.workStartTime !== undefined || employee.workEndTime !== undefined;
+  const workStartTime = usesDefaultSchedule ? (hasExistingOverride ? null : undefined) : draft.workStartTime;
+  const workEndTime = usesDefaultSchedule ? (hasExistingOverride ? null : undefined) : draft.workEndTime;
   return {
     name: draft.name.trim(),
     employeeNumber: draft.employeeNumber.trim(),
@@ -171,6 +183,8 @@ function adminUpdateFrom(draft: AdminDraft): EmployeeCardUpdateInput {
     severancePay: optionalNumber(draft.severancePay),
     incomeDeductionDependents: optionalNumber(draft.incomeDeductionDependents),
     annualLeaveAdjustmentDays: optionalNumber(draft.annualLeaveAdjustmentDays),
+    workStartTime,
+    workEndTime,
     customAdminFields: draft.customAdminFields.map((field) => ({ ...field, label: field.label.trim(), value: field.value.trim() })) as EmployeeCustomAdminFields
   };
 }
@@ -188,32 +202,38 @@ export function EmployeeCardEditor({
   onClose,
   onSubmit,
   open,
+  defaultWorkStartTime = "08:00",
+  defaultWorkEndTime = "17:00",
   workplaces = []
 }: EmployeeCardEditorProps) {
   const [basicDraft, setBasicDraft] = useState(() => basicDraftFrom(employee));
-  const [adminDraft, setAdminDraft] = useState(() => adminDraftFrom(employee));
+  const [adminDraft, setAdminDraft] = useState(() => adminDraftFrom(employee, defaultWorkStartTime, defaultWorkEndTime));
   const [workplaceId, setWorkplaceId] = useState(() => workplaceIdFrom(employee));
   const [reason, setReason] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setBasicDraft(basicDraftFrom(employee));
-    setAdminDraft(adminDraftFrom(employee));
+    setAdminDraft(adminDraftFrom(employee, defaultWorkStartTime, defaultWorkEndTime));
     setWorkplaceId(workplaceIdFrom(employee));
     setReason("");
-  }, [employee, open]);
+  }, [defaultWorkEndTime, defaultWorkStartTime, employee, open]);
 
   const hasAdminChanges = useMemo(
-    () => canAdmin && (adminFieldsChanged(employee, adminDraft) || basicFieldsChanged(employee, basicDraft) || workplaceId !== workplaceIdFrom(employee)),
-    [adminDraft, basicDraft, canAdmin, employee, workplaceId]
+    () => canAdmin && (adminFieldsChanged(employee, adminDraft, defaultWorkStartTime, defaultWorkEndTime) || basicFieldsChanged(employee, basicDraft) || workplaceId !== workplaceIdFrom(employee)),
+    [adminDraft, basicDraft, canAdmin, defaultWorkEndTime, defaultWorkStartTime, employee, workplaceId]
   );
-  const requiresReason = canAdmin && sensitiveAdminFieldsChanged(employee, adminDraft);
+  const requiresReason = canAdmin && sensitiveAdminFieldsChanged(employee, adminDraft, defaultWorkStartTime, defaultWorkEndTime);
   const hasInvalidAdminNumbers = canAdmin && [adminDraft.annualSalary, adminDraft.severancePay]
     .some((value) => value.trim() !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0));
   const hasInvalidDependents = canAdmin
     && adminDraft.incomeDeductionDependents.trim() !== ""
     && (!Number.isInteger(Number(adminDraft.incomeDeductionDependents)) || Number(adminDraft.incomeDeductionDependents) < 0);
   const hasInvalidLeaveAdjustment = canAdmin && adminDraft.annualLeaveAdjustmentDays.trim() !== "" && !Number.isFinite(Number(adminDraft.annualLeaveAdjustmentDays));
+  const hasInvalidWorkTimes = canAdmin
+    && (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(adminDraft.workStartTime)
+      || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(adminDraft.workEndTime)
+      || adminDraft.workStartTime >= adminDraft.workEndTime);
   const hasMissingAdminRequired = canAdmin && (!adminDraft.name.trim() || !adminDraft.employeeNumber.trim() || !adminDraft.hireDate);
   const hasUnnamedCustomField = canAdmin && adminDraft.customAdminFields.some((field) => !field.label.trim());
   const hasChanges = canAdmin ? hasAdminChanges : basicFieldsChanged(employee, basicDraft);
@@ -221,6 +241,7 @@ export function EmployeeCardEditor({
     || hasInvalidAdminNumbers
     || hasInvalidDependents
     || hasInvalidLeaveAdjustment
+    || hasInvalidWorkTimes
     || hasMissingAdminRequired
     || hasUnnamedCustomField
     || (requiresReason && !reason.trim());
@@ -242,7 +263,7 @@ export function EmployeeCardEditor({
 
     const update: EmployeeCardBasicUpdate & Partial<EmployeeCardAdminUpdate> = { ...basicDraft };
     if (canAdmin) {
-      Object.assign(update, adminUpdateFrom(adminDraft));
+      Object.assign(update, adminUpdateFrom(adminDraft, employee, defaultWorkStartTime, defaultWorkEndTime));
       if (workplaceId !== workplaceIdFrom(employee)) {
         Object.assign(update, { workplaceId: workplaceId || null });
       }
@@ -305,6 +326,12 @@ export function EmployeeCardEditor({
                 </select>
               </label>
             </div>
+            <h3>근무시간</h3>
+            <p className="employee-card-editor__help">직원별 출퇴근 기준을 지정합니다. 예정 퇴근 전 퇴근한 시간은 위반이 아니라 인정근로시간으로 자동 누적됩니다.</p>
+            <div className="employee-card-editor__grid">
+              <label><span>출근시간</span><input aria-label="직원별 출근시간" onChange={(event) => updateAdmin("workStartTime", event.target.value)} type="time" value={adminDraft.workStartTime} /></label>
+              <label><span>퇴근시간</span><input aria-label="직원별 퇴근시간" onChange={(event) => updateAdmin("workEndTime", event.target.value)} type="time" value={adminDraft.workEndTime} /></label>
+            </div>
             <h3>급여 및 연차</h3>
             <div className="employee-card-editor__grid">
               <NumericField label="연봉" onChange={(value) => updateAdmin("annualSalary", value)} value={adminDraft.annualSalary} />
@@ -312,6 +339,7 @@ export function EmployeeCardEditor({
               <NumericField label="소득공제 부양가족 수" onChange={(value) => updateAdmin("incomeDeductionDependents", value)} value={adminDraft.incomeDeductionDependents} />
               <NumericField allowNegative label="연차 HR 보정" onChange={(value) => updateAdmin("annualLeaveAdjustmentDays", value)} step="0.5" value={adminDraft.annualLeaveAdjustmentDays} />
             </div>
+            <p className="employee-card-editor__help">2026년에 이미 사용한 연차를 반영할 때는 사용 일수만큼 음수로 입력하세요. 저장 즉시 잔여 연차와 HR 보정 원장에 반영됩니다.</p>
             <div className="employee-card-editor__custom-fields">
               <h4>사용자 항목</h4>
               {adminDraft.customAdminFields.map((field, index) => (
@@ -332,9 +360,9 @@ export function EmployeeCardEditor({
                 주민등록번호, 급여, 권한, 재직 상태와 같은 민감 항목을 변경하려면 관리자 변경 사유를 입력해 주세요.
               </InlineNotice>
             ) : null}
-            {hasAdminChanges && (hasInvalidAdminNumbers || hasInvalidDependents || hasInvalidLeaveAdjustment) ? (
+            {hasAdminChanges && (hasInvalidAdminNumbers || hasInvalidDependents || hasInvalidLeaveAdjustment || hasInvalidWorkTimes) ? (
               <InlineNotice className="employee-card-editor__save-hint" title="입력값을 확인해 주세요" tone="warning">
-                급여·부양가족 수·연차 보정은 숫자로 입력해야 하며, 음수는 연차 보정에만 허용됩니다.
+                급여·부양가족 수·연차 보정은 숫자로 입력하고, 근무시간은 출근시간보다 퇴근시간이 늦어야 합니다.
               </InlineNotice>
             ) : null}
             {hasAdminChanges ? (

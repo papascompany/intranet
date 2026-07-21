@@ -61,6 +61,7 @@ export type ErpViewModel = {
   kpis: ErpViewModelRow[];
   workQueueRows: ErpViewModelRow[];
   attendanceRows: ErpViewModelRow[];
+  attendanceRecords: AttendanceRecord[];
   leaveRows: ErpViewModelRow[];
   overtimeRows: ErpViewModelRow[];
   payrollRows: ErpViewModelRow[];
@@ -165,6 +166,7 @@ export function buildErpViewModel({
     ],
     workQueueRows: buildWorkQueueRows(dashboard, pendingOvertimeRequests, employeeDirectory),
     attendanceRows: (dashboard.attendanceRecords ?? dashboard.todayAttendance).map((record) => attendanceRow(record, employeeDirectory)),
+    attendanceRecords: dashboard.attendanceRecords ?? dashboard.todayAttendance,
     leaveRows: dashboard.leaveRequests.map((request) => leaveRow(request, employeeDirectory)),
     overtimeRows: dashboard.overtimeRequests.map((request) => overtimeRow(request, employeeDirectory)),
     payrollRows: dashboard.activePayrollStatements.map((statement) => payrollRow(statement, employeeDirectory)),

@@ -146,6 +146,18 @@ describe("EmployeeCardEditor", () => {
     }));
   });
 
+  it("submits both schedule endpoints when an administrator changes one time", () => {
+    const onSubmit = vi.fn();
+    render(<EmployeeCardEditor canAdmin employee={employee} onClose={vi.fn()} onSubmit={onSubmit} open />);
+
+    fireEvent.change(screen.getByLabelText("직원별 출근시간"), { target: { value: "08:30" } });
+    fireEvent.click(screen.getByRole("button", { name: "변경 저장" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ workStartTime: "08:30", workEndTime: "17:00" })
+    }));
+  });
+
   it("normalizes database timestamps for date inputs and keeps save available", () => {
     const onSubmit = vi.fn();
     const timestampEmployee = {

@@ -335,6 +335,8 @@ export class PostgresHrRepository implements HrRepository {
       customAdminFields: row.custom_admin_fields as EmployeeCustomAdminFields | undefined,
       approverId: optionalString(row.approver_id),
       workplaceId: optionalString(row.workplace_id),
+      workStartTime: optionalTimeValue(row.work_start_time),
+      workEndTime: optionalTimeValue(row.work_end_time),
       pilot: Boolean(row.pilot)
     };
   }
@@ -397,6 +399,8 @@ function employeeToRow(employee: Employee, config: PostgresRepositoryConfig): Db
     custom_admin_fields: JSON.stringify(employee.customAdminFields ?? []),
     approver_id: employee.approverId ?? null,
     workplace_id: employee.workplaceId ?? null,
+    work_start_time: employee.workStartTime ?? null,
+    work_end_time: employee.workEndTime ?? null,
     pilot: employee.pilot
   };
 }
@@ -464,7 +468,8 @@ function attendanceFromRow(row: AttendanceRow): AttendanceRecord {
     clockOutAt: optionalString(row.clock_out_at),
     status: row.status,
     verificationId: stringValue(row.verification_id),
-    earlyLeaveMinutes: Number(row.early_leave_minutes)
+    earlyLeaveMinutes: Number(row.early_leave_minutes),
+    recognizedWorkMinutes: optionalNumber(row.recognized_work_minutes) ?? Number(row.early_leave_minutes)
   };
 }
 
@@ -477,7 +482,8 @@ function attendanceToRow(record: AttendanceRecord): DbRow {
     clock_out_at: record.clockOutAt,
     status: record.status,
     verification_id: record.verificationId,
-    early_leave_minutes: record.earlyLeaveMinutes
+    early_leave_minutes: record.earlyLeaveMinutes,
+    recognized_work_minutes: record.recognizedWorkMinutes ?? record.earlyLeaveMinutes
   };
 }
 
@@ -841,4 +847,12 @@ function optionalDateValue(value: unknown) {
 
 function optionalNumber(value: unknown) {
   return value === null || value === undefined ? undefined : Number(value);
+}
+
+function optionalTimeValue(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+
+  return String(value).slice(0, 5);
 }

@@ -9,6 +9,7 @@ import type {
   PayrollStatement,
   VerificationStatus
 } from "../domain/types";
+import { buildRecognizedWorkSummary, formatRecognizedMinutes } from "./recognizedWork";
 
 type EmployeeSnapshot = Pick<Employee, "id" | "name">;
 type AttendanceTodaySnapshot = Pick<
@@ -17,7 +18,14 @@ type AttendanceTodaySnapshot = Pick<
 > | null;
 type LeaveBalanceSnapshot = Pick<
   LeaveBalance,
-  "advanceGrantedDays" | "advanceUsedDays" | "availableDays" | "pendingOffsetDays"
+  | "advanceGrantedDays"
+  | "advanceUsedDays"
+  | "availableDays"
+  | "pendingOffsetDays"
+  | "usedDays"
+  | "pendingDays"
+  | "currentYearUsedDays"
+  | "currentMonthUsedDays"
 >;
 type LeaveRequestSnapshot = Pick<LeaveRequest, "days" | "status">;
 type OvertimeRequestSnapshot = Pick<OvertimeRequest, "minutes" | "status">;
@@ -31,6 +39,8 @@ type PayrollStatementSnapshot = Pick<PayrollStatement, "deletedAt" | "filename" 
 export type EmployeeViewModelSnapshot = {
   employee: EmployeeSnapshot;
   attendanceToday: AttendanceTodaySnapshot;
+  attendanceRecords?: AttendanceRecord[];
+  asOf?: string;
   leaveBalance: LeaveBalanceSnapshot;
   leaveRequests: LeaveRequestSnapshot[];
   overtimeRequests?: OvertimeRequestSnapshot[];
@@ -53,6 +63,11 @@ export type EmployeeViewModel = {
   correctionSummary: string;
   overtimeSummary: string;
   payrollSummary: string;
+  recognizedWorkMonthLabel: string;
+  recognizedWorkCumulativeLabel: string;
+  currentMonthLeaveUsedLabel: string;
+  currentYearLeaveUsedLabel: string;
+  pendingLeaveDaysLabel: string;
 };
 
 const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
@@ -79,6 +94,7 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
   const pendingCorrectionRequests = correctionRequests.filter((request) => request.status === "PENDING");
   const activePayrollStatements = snapshot.payrollStatements.filter((statement) => !statement.deletedAt);
   const latestPayrollStatement = activePayrollStatements.sort(comparePayrollStatementsDesc)[0];
+  const recognizedWork = buildRecognizedWorkSummary(snapshot.attendanceRecords ?? [], snapshot.asOf ?? new Date().toISOString());
 
   return {
     clockInLabel: formatClockLabel(snapshot.attendanceToday?.clockInAt, "출근 기록 없음"),
@@ -105,7 +121,12 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
     overtimeSummary: formatOvertimeSummary(snapshot.overtimeOffset),
     payrollSummary: latestPayrollStatement
       ? `${latestPayrollStatement.month} 급여명세서 · ${latestPayrollStatement.filename}`
-      : "급여명세서 없음"
+      : "급여명세서 없음",
+    recognizedWorkMonthLabel: formatRecognizedMinutes(recognizedWork.monthMinutes),
+    recognizedWorkCumulativeLabel: formatRecognizedMinutes(recognizedWork.cumulativeMinutes),
+    currentMonthLeaveUsedLabel: `${formatDays(snapshot.leaveBalance.currentMonthUsedDays ?? 0)}일`,
+    currentYearLeaveUsedLabel: `${formatDays(snapshot.leaveBalance.currentYearUsedDays ?? snapshot.leaveBalance.usedDays ?? 0)}일`,
+    pendingLeaveDaysLabel: `${formatDays(snapshot.leaveBalance.pendingDays ?? 0)}일`
   };
 }
 

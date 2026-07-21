@@ -265,6 +265,22 @@ describe("hr api", () => {
     await expect(hrApi.getAuditLogs({ action: "ATTENDANCE_CLOCKED_OUT" })).resolves.toHaveLength(1);
   });
 
+  it("uses the employee-specific end time for recognized work minutes", async () => {
+    const hrApi = createHrApi(
+      new InMemoryDatabase({
+        employees: employees.map((employee) =>
+          employee.id === "emp-ops-1" ? { ...employee, workplaceId: "office-main", workStartTime: "08:00", workEndTime: "17:00" } : employee
+        )
+      }),
+      () => fixedNow
+    );
+
+    await hrApi.clockAttendance({ employeeId: "emp-ops-1", type: "CLOCK_IN", method: "MANUAL_CLICK", now: "2026-07-09T08:00:00+09:00", gpsError: true });
+    const result = await hrApi.clockAttendance({ employeeId: "emp-ops-1", type: "CLOCK_OUT", method: "MANUAL_CLICK", now: "2026-07-09T16:00:00+09:00", gpsError: true });
+
+    expect(result.attendance).toMatchObject({ earlyLeaveMinutes: 60, recognizedWorkMinutes: 60 });
+  });
+
   it("enforces the attendance state machine for out-of-order and duplicate clicks", async () => {
     const hrApi = api();
 

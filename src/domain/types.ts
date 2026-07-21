@@ -43,6 +43,9 @@ export type Employee = {
   customAdminFields?: EmployeeCustomAdminFields;
   approverId?: string;
   workplaceId?: string;
+  /** Employee-specific schedule overrides. Missing values fall back to system policy. */
+  workStartTime?: string;
+  workEndTime?: string;
   pilot: boolean;
 };
 
@@ -85,6 +88,8 @@ export type AttendanceRecord = {
   status: VerificationStatus;
   verificationId: string;
   earlyLeaveMinutes: number;
+  /** Minutes between the actual clock-out and the employee's scheduled end time. */
+  recognizedWorkMinutes?: number;
 };
 
 export type CorrectionType =
@@ -153,6 +158,11 @@ export type LeaveBalance = {
   advanceUsedDays: number;
   availableDays: number;
   pendingOffsetDays: number;
+  /** Approved annual/half-day usage, calculated from the leave request ledger. */
+  usedDays?: number;
+  pendingDays?: number;
+  currentYearUsedDays?: number;
+  currentMonthUsedDays?: number;
 };
 
 export type EarlyLeaveStatus =

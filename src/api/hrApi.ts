@@ -1,4 +1,4 @@
-import { buildAttendanceRecord, calculateEarlyLeaveMinutes, evaluateVerification } from "../domain/attendance.js";
+import { buildAttendanceRecord, calculateRecognizedWorkMinutes, evaluateVerification } from "../domain/attendance.js";
 import { getLeaveBalance } from "../domain/leave.js";
 import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
 import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
@@ -684,9 +684,9 @@ export class HrApi {
       throw new Error("이미 퇴근 처리된 날짜입니다.");
     }
     const settings = await this.db.getSettings();
-    const scheduledEndHour = settings.workDays.includes(workDayCode(now))
-      ? Number(settings.workEndTime.slice(0, 2))
-      : 0;
+    const scheduledEndTime = settings.workDays.includes(workDayCode(now))
+      ? employee.workEndTime ?? settings.workEndTime
+      : "00:00";
     const verification = evaluateVerification({
       employeeId: input.employeeId,
       workplaces: await this.workplacesWithPolicyRadius(employee.workplaceId),
@@ -704,7 +704,11 @@ export class HrApi {
         verification,
         existing,
         now,
-        scheduledEndHour: input.session ? scheduledEndHour : input.scheduledEndHour ?? scheduledEndHour
+        scheduledEndTime: input.session
+          ? scheduledEndTime
+          : input.scheduledEndHour === undefined
+            ? scheduledEndTime
+            : `${String(input.scheduledEndHour).padStart(2, "0")}:00`
       })
     );
     const earlyLeaveEntry = await this.syncEarlyLeaveLedger(attendance);
@@ -1247,10 +1251,12 @@ export class HrApi {
     let earlyLeaveLedger: EarlyLeaveLedger | undefined;
     if (correctsClockOut) {
       const settings = await this.db.getSettings();
-      const scheduledEndHour = settings.workDays.includes(workDayCode(attendance.date))
-        ? Number(settings.workEndTime.slice(0, 2))
-        : 0;
-      attendance.earlyLeaveMinutes = calculateEarlyLeaveMinutes(input.requestedValue, scheduledEndHour);
+      const employee = await this.findEmployee(attendance.employeeId);
+      const scheduledEndTime = settings.workDays.includes(workDayCode(attendance.date))
+        ? employee?.workEndTime ?? settings.workEndTime
+        : "00:00";
+      attendance.earlyLeaveMinutes = calculateRecognizedWorkMinutes(input.requestedValue, scheduledEndTime);
+      attendance.recognizedWorkMinutes = attendance.earlyLeaveMinutes;
       earlyLeaveLedger = await this.syncCorrectedEarlyLeaveLedger(
         attendance,
         input.type === "APPROVED_EARLY_LEAVE" ? "APPROVED" : "CORRECTED",

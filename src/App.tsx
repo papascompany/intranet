@@ -76,6 +76,7 @@ import { DailyWorkPlanManager, type DailyWorkPlanDraft } from "./components/dail
 import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/employeeCardEditor";
 import { EmployeeAccountManager, type EmployeeAccountCreateInput } from "./components/employeeAccountManager";
 import { EmployeeDirectory } from "./components/employeeDirectory";
+import { RecognizedWorkStats, RecognizedWorkSummary } from "./components/recognizedWorkStats";
 import { ForcePasswordChange } from "./components/forcePasswordChange";
 import { ApprovalQueue, type ApprovalQueueItem } from "./components/approvalQueue";
 import { AuditLogExplorer } from "./components/auditLogExplorer";
@@ -330,7 +331,7 @@ function App() {
     () => {
       const workplaceName = employeeSnapshot?.workplaceOptions.find((workplace) => workplace.id === selectedEmployee?.workplaceId)?.name;
       return selectedEmployee
-        ? buildEmployeeCardViewModel(selectedEmployee, effectiveMode, { revealSensitive: isEmployeeSensitiveDataRevealed, workplaceName })
+        ? buildEmployeeCardViewModel(selectedEmployee, effectiveMode, { revealSensitive: isEmployeeSensitiveDataRevealed, workplaceName, defaultWorkStartTime: dashboard?.settings?.workStartTime ?? defaultSystemPolicy.workStartTime, defaultWorkEndTime: dashboard?.settings?.workEndTime ?? defaultSystemPolicy.workEndTime })
         : [];
     },
     [effectiveMode, employeeSnapshot?.workplaceOptions, isEmployeeSensitiveDataRevealed, selectedEmployee]
@@ -1235,6 +1236,7 @@ function App() {
             ) : null}
             {renderSection({
               activeSection,
+              employeeSnapshot: employeeSnapshot!,
               employeeViewModel,
               erpViewModel,
               isLoading: isInitialLoading,
@@ -1356,6 +1358,8 @@ function App() {
           onClose={() => setIsEmployeeCardEditorOpen(false)}
           onSubmit={updateSelectedEmployeeCard}
           open={isEmployeeCardEditorOpen}
+          defaultWorkStartTime={dashboard?.settings?.workStartTime ?? defaultSystemPolicy.workStartTime}
+          defaultWorkEndTime={dashboard?.settings?.workEndTime ?? defaultSystemPolicy.workEndTime}
           workplaces={employeeSnapshot?.workplaceOptions ?? []}
         />
       ) : null}
@@ -1539,6 +1543,7 @@ function getBrowserCoordinate(): Promise<{ accuracyMeters?: number; latitude: nu
 
 function renderSection(props: {
   activeSection: ErpActiveSection;
+  employeeSnapshot: EmployeeSnapshot;
   canAdmin: boolean;
   canManageRoles: boolean;
   clockError: string | null;
@@ -1881,9 +1886,11 @@ function EmployeeCardSection(props: {
           <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
         </DetailPanel>
         <DetailPanel title="연차 현황" description="선택 직원의 발생·보정·사용 가능 일수와 최근 신청을 확인합니다.">
-          <div className="employee-leave-summary">
+            <div className="employee-leave-summary">
             <div><span>법정 발생</span><strong>{formatLeaveDays(props.leaveBalance?.statutoryDays)}</strong></div>
             <div><span>선사용 부여</span><strong>{formatLeaveDays(props.leaveBalance?.advanceGrantedDays)}</strong></div>
+            <div><span>올해 사용</span><strong>{formatLeaveDays(props.leaveBalance?.currentYearUsedDays)}</strong></div>
+            <div><span>이번 달 사용</span><strong>{formatLeaveDays(props.leaveBalance?.currentMonthUsedDays)}</strong></div>
             <div><span>HR 보정</span><strong>{formatLeaveDays(props.employees.find((employee) => employee.id === props.selectedEmployeeId)?.annualLeaveAdjustmentDays ?? 0)}</strong></div>
             <div className="is-primary"><span>사용 가능</span><strong>{formatLeaveDays(props.leaveBalance?.availableDays)}</strong></div>
           </div>
@@ -1899,8 +1906,12 @@ function EmployeeCardSection(props: {
 
 function AttendanceSection(props: {
   canAdmin: boolean;
+  employeeSnapshot: EmployeeSnapshot;
+  employeeViewModel: EmployeeViewModel | null;
+  employees: Employee[];
   erpViewModel: ErpViewModel;
   isLoading: boolean;
+  systemPolicy: SystemPolicy;
   onCreateCorrection: () => void;
   onSubmitCorrectionRequest: () => void;
   onCancelAttendanceCorrection: (requestId?: string) => void | Promise<void>;
@@ -1913,9 +1924,15 @@ function AttendanceSection(props: {
   const correctionRows = filterRowsForMode(props.erpViewModel.correctionRows, props.erpViewModel.employeeSummary.name, props.canAdmin);
   const correctionRequestRows = filterRowsForMode(props.erpViewModel.correctionRequestRows, props.erpViewModel.employeeSummary.name, props.canAdmin);
   const pendingCorrectionRequest = correctionRequestRows.find((row) => row.status === "PENDING");
+  const attendanceRecords = props.canAdmin ? props.erpViewModel.attendanceRecords : props.employeeSnapshot.attendanceRecords;
 
   return (
-    <div className="erp-two-column">
+    <div className="attendance-section">
+      {!props.canAdmin && props.employeeViewModel ? (
+        <RecognizedWorkSummary monthLabel={props.employeeViewModel.recognizedWorkMonthLabel} cumulativeLabel={props.employeeViewModel.recognizedWorkCumulativeLabel} />
+      ) : null}
+      {props.canAdmin ? <RecognizedWorkStats asOf={props.employeeSnapshot.asOf} employees={props.employees} records={attendanceRecords} /> : null}
+      <div className="erp-two-column">
       <DetailPanel
         title="출퇴근 인증 내역"
         description="GPS 실패 시 QR과 수동 클릭을 동등하게 허용하고 이력을 남깁니다."
@@ -1942,6 +1959,7 @@ function AttendanceSection(props: {
       <DetailPanel title={props.canAdmin ? "보정 및 정정 신청 이력" : "나의 정정 신청 이력"} description="원본 기록은 유지하고 신청·승인·반려 결과를 함께 보존합니다.">
         <DataTable columns={rowColumns} rows={[...correctionRequestRows, ...correctionRows]} emptyState={<EmptyState title="보정 및 정정 신청 이력 없음" />} />
       </DetailPanel>
+      </div>
     </div>
   );
 }
@@ -2015,8 +2033,9 @@ function LeaveSection(props: {
       {!props.canAdmin ? (
         <div className="employee-balance-strip">
           <div className="is-primary"><span>현재 잔여</span><strong>{props.employeeViewModel?.leaveAvailableLabel ?? "연차 확인 중"}</strong></div>
-          <div><span>선사용</span><strong>{props.employeeViewModel?.advanceLeaveLabel ?? "-"}</strong></div>
-          <div><span>승인 대기</span><strong>{props.employeeViewModel?.pendingLeaveSummary ?? "-"}</strong></div>
+          <div><span>이번 달 사용</span><strong>{props.employeeViewModel?.currentMonthLeaveUsedLabel ?? "-"}</strong></div>
+          <div><span>올해 사용</span><strong>{props.employeeViewModel?.currentYearLeaveUsedLabel ?? "-"}</strong></div>
+          <div><span>승인 대기</span><strong>{props.employeeViewModel?.pendingLeaveDaysLabel ?? props.employeeViewModel?.pendingLeaveSummary ?? "-"}</strong></div>
         </div>
       ) : null}
       <DetailPanel
@@ -2191,6 +2210,8 @@ function toEmployeeViewModelSnapshot(snapshot: EmployeeSnapshot) {
   return {
     employee: snapshot.employee,
     attendanceToday: snapshot.todayAttendance ?? null,
+    attendanceRecords: snapshot.attendanceRecords,
+    asOf: snapshot.asOf,
     leaveBalance: snapshot.leaveBalance,
     leaveRequests: snapshot.leaveRequests,
     overtimeRequests: snapshot.overtimeRequests,

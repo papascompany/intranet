@@ -53,6 +53,12 @@ describe("applyEmployeeCardUpdate", () => {
     );
   });
 
+  it("stores and validates an employee-specific work schedule", () => {
+    const updated = applyEmployeeCardUpdate(employee, { workStartTime: "08:00", workEndTime: "17:00" });
+    expect(updated).toMatchObject({ workStartTime: "08:00", workEndTime: "17:00" });
+    expect(() => applyEmployeeCardUpdate(employee, { workStartTime: "18:00", workEndTime: "17:00" })).toThrow("Work end time");
+  });
+
   it("requires exactly five ordered custom admin fields", () => {
     expect(() =>
       applyEmployeeCardUpdate(employee, {

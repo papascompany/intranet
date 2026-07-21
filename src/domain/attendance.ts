@@ -91,6 +91,7 @@ export function buildAttendanceRecord(params: {
   verification: VerificationAttempt;
   existing?: AttendanceRecord;
   now: string;
+  scheduledEndTime?: string;
   scheduledEndHour?: number;
 }) {
   const date = params.now.slice(0, 10);
@@ -119,14 +120,32 @@ export function buildAttendanceRecord(params: {
     clockOutAt: params.now,
     status: params.verification.status,
     verificationId: params.verification.id,
-    earlyLeaveMinutes: calculateEarlyLeaveMinutes(params.now, params.scheduledEndHour ?? 17)
+    earlyLeaveMinutes: calculateRecognizedWorkMinutes(
+      params.now,
+      params.scheduledEndTime ?? `${String(params.scheduledEndHour ?? 17).padStart(2, "0")}:00`
+    ),
+    recognizedWorkMinutes: calculateRecognizedWorkMinutes(
+      params.now,
+      params.scheduledEndTime ?? `${String(params.scheduledEndHour ?? 17).padStart(2, "0")}:00`
+    )
   };
 }
 
 export function calculateEarlyLeaveMinutes(clockOutAt: string, scheduledEndHour = 17) {
+  return calculateRecognizedWorkMinutes(clockOutAt, `${String(scheduledEndHour).padStart(2, "0")}:00`);
+}
+
+export function calculateRecognizedWorkMinutes(clockOutAt: string, scheduledEndTime = "17:00") {
   const clockOut = new Date(clockOutAt);
-  const scheduledEnd = new Date(clockOutAt);
-  scheduledEnd.setHours(scheduledEndHour, 0, 0, 0);
+  const timeMatch = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(scheduledEndTime);
+  if (Number.isNaN(clockOut.getTime()) || !timeMatch) {
+    return 0;
+  }
+
+  // All application business dates are Asia/Seoul dates. Build the target instant
+  // from the recorded date so a server running in another timezone is deterministic.
+  const date = clockOutAt.slice(0, 10);
+  const scheduledEnd = new Date(`${date}T${scheduledEndTime}:00+09:00`);
 
   if (clockOut >= scheduledEnd) {
     return 0;
