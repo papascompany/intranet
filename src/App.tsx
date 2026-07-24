@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   BadgeCheck,
   CalendarDays,
@@ -73,17 +73,11 @@ import {
   type DataTableColumn
 } from "./components/erp";
 import { FormDialog, InlineNotice } from "./components/operational";
-import { DailyWorkPlanManager, type DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
+import type { DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
 import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/employeeCardEditor";
-import { EmployeeAccountManager, type EmployeeAccountCreateInput } from "./components/employeeAccountManager";
-import { EmployeeDirectory } from "./components/employeeDirectory";
-import { RecognizedWorkStats, RecognizedWorkSummary } from "./components/recognizedWorkStats";
+import type { EmployeeAccountCreateInput } from "./components/employeeAccountManager";
 import { ForcePasswordChange } from "./components/forcePasswordChange";
-import { ApprovalQueue, type ApprovalQueueItem } from "./components/approvalQueue";
-import { AuditLogExplorer } from "./components/auditLogExplorer";
-import { PayrollStatementManager } from "./components/payrollStatementManager";
-import { SystemPolicyEditor } from "./components/systemPolicyEditor";
-import { WorkplaceManager } from "./components/workplaceManager";
+import type { ApprovalQueueItem } from "./components/approvalQueue";
 import type { AttendanceRecord, AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod, Workplace } from "./domain/types";
 import { getLeaveBalance } from "./domain/leave";
 import { isPayrollNoticeDay, payrollNoticeDate } from "./domain/payroll";
@@ -99,7 +93,20 @@ import {
   type ErpViewModelRow
 } from "./features/erpViewModel";
 
+const ApprovalQueue = lazy(() => import("./components/approvalQueue").then((module) => ({ default: module.ApprovalQueue })));
+const AuditLogExplorer = lazy(() => import("./components/auditLogExplorer").then((module) => ({ default: module.AuditLogExplorer })));
+const DailyWorkPlanManager = lazy(() => import("./components/dailyWorkPlanManager").then((module) => ({ default: module.DailyWorkPlanManager })));
+const EmployeeAccountManager = lazy(() => import("./components/employeeAccountManager").then((module) => ({ default: module.EmployeeAccountManager })));
+const EmployeeDirectory = lazy(() => import("./components/employeeDirectory").then((module) => ({ default: module.EmployeeDirectory })));
+const PayrollStatementManager = lazy(() => import("./components/payrollStatementManager").then((module) => ({ default: module.PayrollStatementManager })));
+const RecognizedWorkStats = lazy(() => import("./components/recognizedWorkStats").then((module) => ({ default: module.RecognizedWorkStats })));
+const RecognizedWorkSummary = lazy(() => import("./components/recognizedWorkStats").then((module) => ({ default: module.RecognizedWorkSummary })));
+const SystemPolicyEditor = lazy(() => import("./components/systemPolicyEditor").then((module) => ({ default: module.SystemPolicyEditor })));
+const WorkplaceManager = lazy(() => import("./components/workplaceManager").then((module) => ({ default: module.WorkplaceManager })));
+
 const today = koreaTimestamp();
+const EMPLOYEE_SNAPSHOT_CACHE_MS = 30_000;
+const AUDIT_CACHE_MS = 60_000;
 
 const navIcons: Record<ErpActiveSection, React.ReactNode> = {
   overview: <LayoutDashboard size={16} />,
@@ -156,6 +163,36 @@ const employeeNavLabels: Partial<Record<ErpActiveSection, string>> = {
   payroll: "급여",
   history: "처리 이력"
 };
+
+function preloadSection(section: ErpActiveSection) {
+  switch (section) {
+    case "employee-card":
+      void import("./components/employeeDirectory");
+      break;
+    case "attendance":
+      void import("./components/recognizedWorkStats");
+      break;
+    case "approvals":
+      void Promise.all([import("./components/approvalQueue"), import("./components/dailyWorkPlanManager")]);
+      break;
+    case "payroll":
+      void import("./components/payrollStatementManager");
+      break;
+    case "settings":
+      void Promise.all([
+        import("./components/employeeAccountManager"),
+        import("./components/systemPolicyEditor"),
+        import("./components/workplaceManager")
+      ]);
+      break;
+    case "history":
+    case "audit":
+      void import("./components/auditLogExplorer");
+      break;
+    default:
+      break;
+  }
+}
 
 const rowColumns: DataTableColumn<ErpViewModelRow>[] = [
   { key: "label", header: "대상", value: "label", width: "22%" },
@@ -229,6 +266,7 @@ function App() {
   });
   const [correctionTarget, setCorrectionTarget] = useState<AttendanceRecord | null>(null);
   const [isEmployeeCardEditorOpen, setIsEmployeeCardEditorOpen] = useState(false);
+  const [isEmployeeDetailLoading, setIsEmployeeDetailLoading] = useState(false);
   const [isSavingEmployeeCard, setIsSavingEmployeeCard] = useState(false);
   const [employeeCardError, setEmployeeCardError] = useState<string | null>(null);
   const [isRevealingEmployeeSensitiveData, setIsRevealingEmployeeSensitiveData] = useState(false);
@@ -238,6 +276,10 @@ function App() {
   const [isUploadingPayroll, setIsUploadingPayroll] = useState(false);
   const [payrollUploadError, setPayrollUploadError] = useState<string | null>(null);
   const [payrollUploadDraft, setPayrollUploadDraft] = useState<PayrollUploadDraft>({ file: null, month: today.slice(0, 7) });
+  const employeeSnapshotCacheRef = useRef(new Map<string, { cachedAt: number; snapshot: EmployeeSnapshot }>());
+  const employeeSnapshotRequestRef = useRef(0);
+  const bootstrapRequestRef = useRef(0);
+  const auditLoadedAtRef = useRef(0);
 
   const refresh = useCallback(
     async (employeeId: string) => {
@@ -245,17 +287,24 @@ function App() {
         setIsLoading(false);
         return;
       }
+      const requestId = ++bootstrapRequestRef.current;
+      employeeSnapshotRequestRef.current += 1;
       setIsLoading(true);
       setLoadError(null);
       try {
         const session = authSession;
         const snapshotEmployeeId = !isAdminSession(session) ? session.employeeId : employeeId;
         const bootstrap = await getAppBootstrap(snapshotEmployeeId, today, session);
+        if (requestId !== bootstrapRequestRef.current) return;
 
         setEmployees(bootstrap.employees);
         setSelectedEmployeeId(snapshotEmployeeId);
         setDashboard(bootstrap.dashboard);
         setEmployeeSnapshot(bootstrap.employeeSnapshot);
+        employeeSnapshotCacheRef.current.set(snapshotEmployeeId, {
+          cachedAt: Date.now(),
+          snapshot: bootstrap.employeeSnapshot
+        });
         setEmployeeAccountStates(bootstrap.employeeAccountStates);
         setIsEmployeeSensitiveDataRevealed(false);
         setRevealedEmployee(null);
@@ -264,7 +313,7 @@ function App() {
         setLoadError(message);
         setNotice("데이터 동기화에 실패했습니다. 다시 시도해 주세요.");
       } finally {
-        setIsLoading(false);
+        if (requestId === bootstrapRequestRef.current) setIsLoading(false);
       }
     },
     [authSession, isLoggedIn]
@@ -302,6 +351,7 @@ function App() {
     ? employeeSnapshot.employee
     : employees.find((employee) => employee.id === selectedEmployeeId);
   const selectedEmployee = revealedEmployee?.id === baseSelectedEmployee?.id ? revealedEmployee : baseSelectedEmployee;
+  const signedInEmployee = employees.find((employee) => employee.id === authSession?.employeeId) ?? selectedEmployee;
   const requestedLeaveDays = Number(leaveDraft.days);
   const pendingAnnualLeaveDays = employeeSnapshot?.leaveRequests
     .filter((request) => request.status === "PENDING" && (request.type === "ANNUAL" || request.type === "HALF_DAY"))
@@ -338,7 +388,14 @@ function App() {
         ? buildEmployeeCardViewModel(selectedEmployee, effectiveMode, { revealSensitive: isEmployeeSensitiveDataRevealed, workplaceName, defaultWorkStartTime: dashboard?.settings?.workStartTime ?? defaultSystemPolicy.workStartTime, defaultWorkEndTime: dashboard?.settings?.workEndTime ?? defaultSystemPolicy.workEndTime })
         : [];
     },
-    [effectiveMode, employeeSnapshot?.workplaceOptions, isEmployeeSensitiveDataRevealed, selectedEmployee]
+    [
+      dashboard?.settings?.workEndTime,
+      dashboard?.settings?.workStartTime,
+      effectiveMode,
+      employeeSnapshot?.workplaceOptions,
+      isEmployeeSensitiveDataRevealed,
+      selectedEmployee
+    ]
   );
   const visibleNavItems = useMemo(
     () =>
@@ -369,15 +426,19 @@ function App() {
   }, [activeSection]);
 
   useEffect(() => {
-    if (!isLoggedIn || !authSession || authSession.passwordChangeRequired || !["audit", "history", "employee-card"].includes(activeSection)) {
+    if (!isLoggedIn || !authSession || authSession.passwordChangeRequired || !["audit", "history"].includes(activeSection)) {
       return;
     }
+    if (Date.now() - auditLoadedAtRef.current < AUDIT_CACHE_MS) return;
 
     let active = true;
     setIsAuditLoading(true);
     void getAuditLogs({ session: authSession, limit: 500 })
       .then((logs) => {
-        if (active) setAuditLogs(logs);
+        if (active) {
+          setAuditLogs(logs);
+          auditLoadedAtRef.current = Date.now();
+        }
       })
       .catch((error) => {
         if (active) setLoadError(error instanceof Error ? error.message : "처리 이력을 불러오지 못했습니다.");
@@ -411,23 +472,40 @@ function App() {
       return;
     }
 
-    setSelectedEmployeeId(employeeId);
-    setEmployeeSnapshot((current) => buildAdminSelectionSnapshot(nextEmployee, dashboard, current?.workplaceOptions ?? []));
+    const cached = employeeSnapshotCacheRef.current.get(employeeId);
+    const optimisticSnapshot = cached?.snapshot ?? buildAdminSelectionSnapshot(nextEmployee, dashboard, employeeSnapshot?.workplaceOptions ?? []);
+    startTransition(() => {
+      setSelectedEmployeeId(employeeId);
+      setEmployeeSnapshot(optimisticSnapshot);
+    });
     setIsEmployeeSensitiveDataRevealed(false);
     setRevealedEmployee(null);
     setClockFeedback(null);
     setLoadError(null);
-    void getEmployeeSnapshot(employeeId, dashboard.asOf, authSession ?? undefined)
-      .then((snapshot) => {
-        setEmployeeSnapshot((current) => current?.employee.id === employeeId ? snapshot : current);
-      })
-      .catch((error) => {
-        setLoadError(error instanceof Error ? error.message : "선택한 직원의 상세 정보를 불러오지 못했습니다.");
-        setNotice("직원 요약은 표시되지만 상세 정보 동기화에 실패했습니다. 다시 시도해 주세요.");
-      });
     if (rememberLogin) {
       localStorage.setItem("intranet:employee-id", employeeId);
     }
+    if (cached && Date.now() - cached.cachedAt < EMPLOYEE_SNAPSHOT_CACHE_MS) {
+      setIsEmployeeDetailLoading(false);
+      return;
+    }
+    const requestId = ++employeeSnapshotRequestRef.current;
+    setIsEmployeeDetailLoading(true);
+    void getEmployeeSnapshot(employeeId, dashboard.asOf, authSession ?? undefined)
+      .then((snapshot) => {
+        employeeSnapshotCacheRef.current.set(employeeId, { cachedAt: Date.now(), snapshot });
+        if (requestId === employeeSnapshotRequestRef.current) {
+          setEmployeeSnapshot((current) => current?.employee.id === employeeId ? snapshot : current);
+        }
+      })
+      .catch((error) => {
+        if (requestId !== employeeSnapshotRequestRef.current) return;
+        setLoadError(error instanceof Error ? error.message : "선택한 직원의 상세 정보를 불러오지 못했습니다.");
+        setNotice("직원 요약은 표시되지만 상세 정보 동기화에 실패했습니다. 다시 시도해 주세요.");
+      })
+      .finally(() => {
+        if (requestId === employeeSnapshotRequestRef.current) setIsEmployeeDetailLoading(false);
+      });
   }
 
   async function handleLogin(loginId: string, password: string) {
@@ -473,8 +551,10 @@ function App() {
       return;
     }
 
-    setUserMode(nextMode);
-    setActiveSection(nextMode === "ADMIN" ? "overview" : "self-service");
+    startTransition(() => {
+      setUserMode(nextMode);
+      setActiveSection(nextMode === "ADMIN" ? "overview" : "self-service");
+    });
     setNotice(nextMode === "ADMIN" ? "관리자모드로 전환했습니다." : "직원모드로 전환했습니다.");
   }
 
@@ -508,11 +588,16 @@ function App() {
 
       const fallbackNotice = method === "GPS" && verificationFailed ? " · 위치 확인 실패로 대체 인증 처리" : "";
       const recordedAt = type === "CLOCK_IN" ? result.attendance.clockInAt : result.attendance.clockOutAt;
-      setEmployeeSnapshot((current) => current && current.employee.id === selectedEmployee.id ? {
-        ...current,
-        todayAttendance: result.attendance,
-        attendanceRecords: upsertRecord(current.attendanceRecords, result.attendance)
-      } : current);
+      setEmployeeSnapshot((current) => {
+        if (!current || current.employee.id !== selectedEmployee.id) return current;
+        const next = {
+          ...current,
+          todayAttendance: result.attendance,
+          attendanceRecords: upsertRecord(current.attendanceRecords, result.attendance)
+        };
+        employeeSnapshotCacheRef.current.set(next.employee.id, { cachedAt: Date.now(), snapshot: next });
+        return next;
+      });
       setDashboard((current) => current ? {
         ...current,
         todayAttendance: upsertRecord(current.todayAttendance, result.attendance)
@@ -546,10 +631,15 @@ function App() {
       });
 
       setNotice(nextStatus === "DONE" ? `작업 완료 · ${result.task.title}` : `완료 취소 · ${result.task.title}`);
-      setEmployeeSnapshot((current) => current ? {
-        ...current,
-        dailyWorkTasks: upsertRecord(current.dailyWorkTasks, result.task)
-      } : current);
+      setEmployeeSnapshot((current) => {
+        if (!current) return current;
+        const next = {
+          ...current,
+          dailyWorkTasks: upsertRecord(current.dailyWorkTasks, result.task)
+        };
+        employeeSnapshotCacheRef.current.set(next.employee.id, { cachedAt: Date.now(), snapshot: next });
+        return next;
+      });
     } catch (error) {
       setTaskUpdateError(error instanceof Error ? error.message : "작업 상태를 저장하지 못했습니다. 다시 시도해 주세요.");
     } finally {
@@ -1165,6 +1255,7 @@ function App() {
   return (
     <div className="app-shell">
       <ErpShell
+        aria-busy={isRefreshing || undefined}
         className={isEmployeeHome ? "employee-home-shell" : undefined}
         mobileNavLabel={visibleNavItems.find((item) => item.section === activeSection)?.label ?? employeeNavLabels[activeSection] ?? "메뉴"}
         navLabel="인트라넷 메뉴"
@@ -1175,7 +1266,10 @@ function App() {
               badge={item.count}
               icon={navIcons[item.section]}
               key={item.section}
-              onClick={() => setActiveSection(item.section)}
+              onFocus={() => preloadSection(item.section)}
+              onMouseEnter={() => preloadSection(item.section)}
+              onPointerDown={() => preloadSection(item.section)}
+              onClick={() => startTransition(() => setActiveSection(item.section))}
             >
               {item.label}
             </ErpNavItem>
@@ -1196,27 +1290,30 @@ function App() {
               {isAdminAccount && effectiveMode === "ADMIN" ? (
                 <label className="select-label select-label--compact">
                   조회 대상
-                  <select value={selectedEmployeeId} onChange={(event) => void handleEmployeeChange(event.target.value)}>
-                    {employees.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name} · {employee.department}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="select-label__control">
+                    <select value={selectedEmployeeId} onChange={(event) => void handleEmployeeChange(event.target.value)}>
+                      {employees.map((employee) => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name} · {employee.department}
+                        </option>
+                      ))}
+                    </select>
+                    {isEmployeeDetailLoading ? <RefreshCw aria-label="직원 상세정보 동기화 중" className="is-spinning select-label__loading" size={14} /> : null}
+                  </span>
                 </label>
               ) : null}
               <details className="account-menu">
-                <summary aria-label={`${selectedEmployee?.name ?? "직원"} 계정 메뉴 열기`}>
+                <summary aria-label={`${signedInEmployee?.name ?? "직원"} 계정 메뉴 열기`}>
                   <span className="account-menu__avatar" aria-hidden="true"><UserRound size={16} /></span>
                   <span className="signed-in-identity">
-                    <strong>{selectedEmployee?.name ?? "직원"}</strong>
-                    <span>{selectedEmployee?.department ?? ""}</span>
+                    <strong>{signedInEmployee?.name ?? "직원"}</strong>
+                    <span>{signedInEmployee?.department ?? ""}</span>
                   </span>
                   <ChevronDown size={15} aria-hidden="true" />
                 </summary>
                 <div className="account-menu__popover">
                   <div className="account-menu__context">
-                    <strong>{selectedEmployee?.name ?? "직원"}</strong>
+                    <strong>{signedInEmployee?.name ?? "직원"}</strong>
                     <span>{isAdminAccount ? "관리자 계정" : "직원 계정"}</span>
                   </div>
                   {isAdminAccount ? (
@@ -1229,9 +1326,11 @@ function App() {
                     <button
                       className="account-menu__action"
                       onClick={(event) => {
-                        setActiveSection("employee-card");
+                        startTransition(() => setActiveSection("employee-card"));
                         event.currentTarget.closest("details")?.removeAttribute("open");
                       }}
+                      onFocus={() => preloadSection("employee-card")}
+                      onMouseEnter={() => preloadSection("employee-card")}
                       type="button"
                     >
                       <UserRound size={16} />
@@ -1277,77 +1376,80 @@ function App() {
                 ))}
               </KpiGrid>
             ) : null}
-            {renderSection({
-              activeSection,
-              employeeSnapshot: employeeSnapshot!,
-              employeeViewModel,
-              erpViewModel,
-              isLoading: isInitialLoading,
-              onApproveLeave: approveLeave,
-              onApproveOvertime: approveOvertime,
-              onRetryOvertimePayApproval: retryOvertimePayApproval,
-              onApproveAttendanceCorrection: approveAttendanceCorrection,
-              onCancelLeave: (requestId) => void cancelEmployeeRequest("LeaveRequest", requestId),
-              onCancelOvertime: (requestId) => void cancelEmployeeRequest("OvertimeRequest", requestId),
-              onCancelAttendanceCorrection: (requestId) => void cancelEmployeeRequest("AttendanceCorrectionRequest", requestId),
-              onCreateDailyTaskPlan: createDailyTaskPlan,
-              onClock: clock,
-              onUpdateDailyTask: updateDailyTask,
-              onUpdateDailyTaskPlan: updateDailyTaskPlan,
-              onCreateCorrection: openCorrectionDialog,
-              onReviewAttendance: reviewAttendanceRecord,
-              onSubmitCorrectionRequest: () => {
-                setCorrectionError(null);
-                setIsCorrectionDialogOpen(true);
-              },
-              onDownloadPayroll: downloadPayroll,
-              onDeletePayroll: deletePayroll,
-              onUpdateEmployeeCard: () => void openEmployeeCardEditor(),
-              onToggleEmployeeSensitiveData: toggleEmployeeSensitiveData,
-              onCreateEmployeeAccount: createManagedEmployeeAccount,
-              onImportEmployeeAccounts: importManagedEmployeeAccounts,
-              onResetEmployeePassword: resetManagedEmployeePassword,
-              onSetEmployeeAccountAccess: setManagedEmployeeAccountAccess,
-              onUpdateSystemPolicy: updateSystemPolicy,
-              onCreateWorkplace: createManagedWorkplace,
-              onUpdateWorkplace: updateManagedWorkplace,
-              onDeleteWorkplace: deleteManagedWorkplace,
-              onSubmitLeave: () => openRequestDialog("leave"),
-              onSubmitOvertime: () => openRequestDialog("overtime"),
-              onUploadPayroll: openPayrollUpload,
-              canAdmin: effectiveMode === "ADMIN",
-              canManageRoles: authSession?.role === "SYSTEM_ADMIN",
-              clockError,
-              clockFeedback,
-              clockingType,
-              employeeAccountStates,
-              employeeCardRows,
-              employees,
-              selectedEmployeeId,
-              onSelectEmployee: handleEmployeeChange,
-              dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
-              leaveRequests: dashboard?.leaveRequests ?? [],
-              correctionRequests: dashboard?.correctionRequests ?? [],
-              leaveBalance: employeeSnapshot?.leaveBalance,
-              leaveBalanceAdjustments: employeeSnapshot?.leaveBalanceAdjustments ?? [],
-              overtimeRequests: dashboard?.overtimeRequests ?? [],
-              payrollStatements: effectiveMode === "ADMIN"
-                ? dashboard?.activePayrollStatements ?? []
-                : employeeSnapshot?.payrollStatements ?? [],
-              systemPolicy: dashboard?.settings ?? defaultSystemPolicy,
-              workplaces: employeeSnapshot?.workplaceOptions ?? [],
-              auditLogs: auditLogs.length ? auditLogs : dashboard?.recentAuditLogs ?? [],
-              isAuditLoading,
-              isSavingTaskPlan,
-              taskUpdateError,
-              updatingTaskId,
-              isRevealingEmployeeSensitiveData,
-              isEmployeeSensitiveDataRevealed,
-              taskPlanError
-            })}
+            <Suspense fallback={<SectionSkeleton />}>
+              {renderSection({
+                activeSection,
+                employeeSnapshot: employeeSnapshot!,
+                employeeViewModel,
+                erpViewModel,
+                isLoading: isInitialLoading,
+                isEmployeeDetailLoading,
+                onApproveLeave: approveLeave,
+                onApproveOvertime: approveOvertime,
+                onRetryOvertimePayApproval: retryOvertimePayApproval,
+                onApproveAttendanceCorrection: approveAttendanceCorrection,
+                onCancelLeave: (requestId) => void cancelEmployeeRequest("LeaveRequest", requestId),
+                onCancelOvertime: (requestId) => void cancelEmployeeRequest("OvertimeRequest", requestId),
+                onCancelAttendanceCorrection: (requestId) => void cancelEmployeeRequest("AttendanceCorrectionRequest", requestId),
+                onCreateDailyTaskPlan: createDailyTaskPlan,
+                onClock: clock,
+                onUpdateDailyTask: updateDailyTask,
+                onUpdateDailyTaskPlan: updateDailyTaskPlan,
+                onCreateCorrection: openCorrectionDialog,
+                onReviewAttendance: reviewAttendanceRecord,
+                onSubmitCorrectionRequest: () => {
+                  setCorrectionError(null);
+                  setIsCorrectionDialogOpen(true);
+                },
+                onDownloadPayroll: downloadPayroll,
+                onDeletePayroll: deletePayroll,
+                onUpdateEmployeeCard: () => void openEmployeeCardEditor(),
+                onToggleEmployeeSensitiveData: toggleEmployeeSensitiveData,
+                onCreateEmployeeAccount: createManagedEmployeeAccount,
+                onImportEmployeeAccounts: importManagedEmployeeAccounts,
+                onResetEmployeePassword: resetManagedEmployeePassword,
+                onSetEmployeeAccountAccess: setManagedEmployeeAccountAccess,
+                onUpdateSystemPolicy: updateSystemPolicy,
+                onCreateWorkplace: createManagedWorkplace,
+                onUpdateWorkplace: updateManagedWorkplace,
+                onDeleteWorkplace: deleteManagedWorkplace,
+                onSubmitLeave: () => openRequestDialog("leave"),
+                onSubmitOvertime: () => openRequestDialog("overtime"),
+                onUploadPayroll: openPayrollUpload,
+                canAdmin: effectiveMode === "ADMIN",
+                canManageRoles: authSession?.role === "SYSTEM_ADMIN",
+                clockError,
+                clockFeedback,
+                clockingType,
+                employeeAccountStates,
+                employeeCardRows,
+                employees,
+                selectedEmployeeId,
+                onSelectEmployee: handleEmployeeChange,
+                dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
+                leaveRequests: dashboard?.leaveRequests ?? [],
+                correctionRequests: dashboard?.correctionRequests ?? [],
+                leaveBalance: employeeSnapshot?.leaveBalance,
+                leaveBalanceAdjustments: employeeSnapshot?.leaveBalanceAdjustments ?? [],
+                overtimeRequests: dashboard?.overtimeRequests ?? [],
+                payrollStatements: effectiveMode === "ADMIN"
+                  ? dashboard?.activePayrollStatements ?? []
+                  : employeeSnapshot?.payrollStatements ?? [],
+                systemPolicy: dashboard?.settings ?? defaultSystemPolicy,
+                workplaces: employeeSnapshot?.workplaceOptions ?? [],
+                auditLogs: auditLogs.length ? auditLogs : dashboard?.recentAuditLogs ?? [],
+                isAuditLoading,
+                isSavingTaskPlan,
+                taskUpdateError,
+                updatingTaskId,
+                isRevealingEmployeeSensitiveData,
+                isEmployeeSensitiveDataRevealed,
+                taskPlanError
+              })}
+            </Suspense>
           </>
         ) : (
-          <EmptyState title="데이터를 불러오는 중" description="API/DB 계층에서 파일럿 데이터를 동기화하고 있습니다." />
+          <SectionSkeleton />
         )}
       </ErpShell>
       <FormDialog
@@ -1483,6 +1585,25 @@ function RequestField({ children, label }: { children: ReactNode; label: string 
   return <label className="request-field"><span>{label}</span>{children}</label>;
 }
 
+function SectionSkeleton() {
+  return (
+    <div aria-label="화면을 불러오는 중" aria-live="polite" className="section-skeleton" role="status">
+      <span className="sr-only">화면을 불러오는 중입니다.</span>
+      <div className="section-skeleton__summary" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="section-skeleton__panel" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+    </div>
+  );
+}
+
 function koreaTimestamp(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Seoul",
@@ -1544,7 +1665,7 @@ function buildAdminSelectionSnapshot(
   dashboard: Dashboard,
   workplaceOptions: EmployeeSnapshot["workplaceOptions"]
 ): EmployeeSnapshot {
-  const attendanceRecords = dashboard.todayAttendance.filter((record) => record.employeeId === employee.id);
+  const attendanceRecords = (dashboard.attendanceRecords ?? dashboard.todayAttendance).filter((record) => record.employeeId === employee.id);
   const leaveRequests = dashboard.leaveRequests.filter((request) => request.employeeId === employee.id);
   const overtimeRequests = dashboard.overtimeRequests.filter((request) => request.employeeId === employee.id);
 
@@ -1583,7 +1704,7 @@ function getBrowserCoordinate(): Promise<{ accuracyMeters?: number; latitude: nu
         accuracyMeters: position.coords.accuracy
       }),
       reject,
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 10_000 }
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 5_000 }
     );
   });
 }
@@ -1604,6 +1725,7 @@ function renderSection(props: {
   employeeViewModel: EmployeeViewModel | null;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
+  isEmployeeDetailLoading: boolean;
   taskUpdateError: string | null;
   updatingTaskId: string | null;
   onApproveLeave: (requestId?: string, status?: "APPROVED" | "REJECTED") => void;
@@ -1657,7 +1779,7 @@ function renderSection(props: {
     case "self-service":
       return <SelfServiceSection {...props} />;
     case "employee-card":
-      return <EmployeeCardSection {...props} />;
+      return <EmployeeCardSection {...props} isLoading={props.isLoading || props.isEmployeeDetailLoading} />;
     case "attendance":
       return <AttendanceSection {...props} />;
     case "approvals":

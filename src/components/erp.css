@@ -311,6 +311,8 @@
   display: grid;
   gap: 12px;
   padding: 16px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 260px;
 }
 
 .erp-detail-panel__head {
@@ -468,16 +470,6 @@
   max-width: 420px;
 }
 
-.erp-shell__sidebar:hover,
-.erp-shell__topbar:hover,
-.erp-detail-panel:hover,
-.erp-data-table:hover,
-.erp-kpi-tile:hover,
-.erp-toolbar:hover,
-.erp-empty-state:hover {
-  box-shadow: var(--shadow-hover);
-}
-
 @media (max-width: 860px) {
   .erp-shell {
     grid-template-columns: 1fr;
@@ -541,6 +533,10 @@
     gap: 4px;
     min-width: 0;
     padding: 6px;
+    max-height: min(70dvh, 520px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
   }
 
   .erp-shell__mobile-nav .erp-nav-item {
@@ -564,6 +560,10 @@
 }
 
 @media (max-width: 640px) {
+  .section-skeleton__summary {
+    grid-template-columns: 1fr;
+  }
+
   .erp-kpi-grid {
     grid-template-columns: 1fr;
   }

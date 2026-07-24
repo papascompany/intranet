@@ -50,6 +50,29 @@ describe("hrHttpClient", () => {
     expect(employees).toEqual([{ id: "emp-ops-1", name: "김운영" }]);
   });
 
+  it("coalesces identical read requests that are already in flight", async () => {
+    let resolveResponse!: (response: Response) => void;
+    const fetch = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    }));
+    globalThis.fetch = fetch as typeof globalThis.fetch;
+    const input = { asOf: "2026-07-24T09:00:00+09:00" };
+
+    const first = getDashboard(input);
+    const second = getDashboard(input);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    resolveResponse(new Response(JSON.stringify({ asOf: input.asOf }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    }));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { asOf: input.asOf },
+      { asOf: input.asOf }
+    ]);
+  });
+
   it("throws server API errors", async () => {
     mockFetch(400, { error: "Admin permission required" });
 

@@ -60,23 +60,23 @@ type HrHttpError = {
 };
 
 export async function getEmployees() {
-  return await post<Employee[]>("getEmployees");
+  return await readPost<Employee[]>("getEmployees");
 }
 
 export async function getEmployeeDirectory(input: { session?: AuthSession } = {}) {
-  return await post<Employee[]>("getEmployeeDirectory", input);
+  return await readPost<Employee[]>("getEmployeeDirectory", input);
 }
 
 export async function getAppBootstrap(employeeId: string, asOf?: string, session?: AuthSession) {
-  return await post<AppBootstrap>("getAppBootstrap", { employeeId, asOf, session });
+  return await readPost<AppBootstrap>("getAppBootstrap", { employeeId, asOf, session });
 }
 
 export async function getDashboard(input: string | DashboardInput) {
-  return await post<Dashboard>("getDashboard", input);
+  return await readPost<Dashboard>("getDashboard", input);
 }
 
 export async function getEmployeeSnapshot(employeeId: string, asOf?: string, session?: AuthSession) {
-  return await post<EmployeeSnapshot>("getEmployeeSnapshot", {
+  return await readPost<EmployeeSnapshot>("getEmployeeSnapshot", {
     employeeId,
     asOf,
     session
@@ -84,7 +84,7 @@ export async function getEmployeeSnapshot(employeeId: string, asOf?: string, ses
 }
 
 export async function getDailyWorkTasks(input: GetDailyWorkTasksInput) {
-  return await post<DailyWorkTask[]>("getDailyWorkTasks", input);
+  return await readPost<DailyWorkTask[]>("getDailyWorkTasks", input);
 }
 
 export async function updateDailyWorkTaskStatus(input: UpdateDailyWorkTaskStatusInput) {
@@ -100,11 +100,11 @@ export async function updateDailyWorkTaskPlan(input: UpdateDailyWorkTaskPlanInpu
 }
 
 export async function getSettings(input: { session?: AuthSession } = {}) {
-  return await post<SystemPolicy>("getSettings", input);
+  return await readPost<SystemPolicy>("getSettings", input);
 }
 
 export async function getSystemStatus() {
-  return await post<PersistenceStatus>("getSystemStatus");
+  return await readPost<PersistenceStatus>("getSystemStatus");
 }
 
 export async function updateSettings(input: UpdateSettingsInput) {
@@ -188,7 +188,7 @@ export async function setEmployeeAccountAccess(employeeId: string, enabled: bool
 }
 
 export async function getEmployeeAccountStates() {
-  return await post<EmployeeAccountState[]>("getEmployeeAccountStates");
+  return await readPost<EmployeeAccountState[]>("getEmployeeAccountStates");
 }
 
 export async function uploadPayrollStatement(input: UploadPayrollStatementInput) {
@@ -208,17 +208,51 @@ export async function softDeletePayrollStatement(input: SoftDeletePayrollStateme
 }
 
 export async function getAuditLogs(input: AuditLogFilter = {}) {
-  return await post<AuditLog[]>("getAuditLogs", input);
+  return await readPost<AuditLog[]>("getAuditLogs", input);
+}
+
+const inFlightReadRequests = new Map<string, Promise<unknown>>();
+
+async function readPost<T>(action: string, payload?: unknown) {
+  const key = `${action}:${JSON.stringify(payload ?? null)}`;
+  const existing = inFlightReadRequests.get(key);
+  if (existing) return await existing as T;
+
+  const request = post<T>(action, payload);
+  inFlightReadRequests.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (inFlightReadRequests.get(key) === request) {
+      inFlightReadRequests.delete(key);
+    }
+  }
 }
 
 async function post<T>(action: string, payload?: unknown) {
-  const response = await fetch("/api/hr", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ action, payload })
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    action === "uploadPayrollStatement" ? 120_000 : 20_000
+  );
+  let response: Response;
+  try {
+    response = await fetch("/api/hr", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ action, payload }),
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const viteEnv = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env;
   if (response.status === 404 && viteEnv?.DEV) {
     return await postToLocalDemoApi<T>(action, payload);
