@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "더스토리지 인트라넷",
+  "short_name": "더스토리지",
+  "description": "더스토리지 사내 근태 및 인사관리",
+  "lang": "ko-KR",
+  "start_url": "/?source=home-screen",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#101010",
+  "icons": [
+    {
+      "src": "/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

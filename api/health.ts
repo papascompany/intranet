@@ -16,6 +16,7 @@ export type ProductionHealth = {
     session: "ok" | "missing";
     encryption: "ok" | "missing" | "not-required";
     blob: "ok" | "missing";
+    push: "ok" | "missing";
   };
   repository: ReturnType<typeof getPersistenceStatusFromEnv>;
 };
@@ -44,7 +45,8 @@ export async function checkProductionHealth(
     encryption: persistent && env.NODE_ENV === "production" ? "missing" : "not-required",
     // The `blob` key is kept for wire compatibility; it reports whichever
     // payroll storage backend is configured (local disk or Vercel Blob).
-    blob: await checkPayrollStorage(env)
+    blob: await checkPayrollStorage(env),
+    push: env.WEB_PUSH_VAPID_PUBLIC_KEY && env.WEB_PUSH_VAPID_PRIVATE_KEY && env.WEB_PUSH_SUBJECT ? "ok" : "missing"
   };
 
   if (env.SESSION_SECRET) {
@@ -63,11 +65,18 @@ export async function checkProductionHealth(
   if (env.DATABASE_URL) {
     try {
       const databaseQuery = query ?? createDatabaseQuery(env.DATABASE_URL);
-      const rows = await databaseQuery<{ employees_table?: string | null }>(
-        "select 1 as ok, to_regclass('public.employees') as employees_table"
+      const rows = await databaseQuery<{
+        employees_table?: string | null;
+        push_deliveries_table?: string | null;
+        push_subscriptions_table?: string | null;
+      }>(
+        `select
+           to_regclass('public.employees') as employees_table,
+           to_regclass('public.web_push_subscriptions') as push_subscriptions_table,
+           to_regclass('public.web_push_deliveries') as push_deliveries_table`
       );
       checks.database = "ok";
-      checks.schema = rows[0]?.employees_table ? "ok" : "missing";
+      checks.schema = rows[0]?.employees_table && rows[0]?.push_subscriptions_table && rows[0]?.push_deliveries_table ? "ok" : "missing";
     } catch {
       checks.database = "unreachable";
     }
@@ -77,7 +86,8 @@ export async function checkProductionHealth(
     && checks.schema === "ok"
     && checks.session === "ok"
     && checks.encryption !== "missing"
-    && checks.blob === "ok";
+    && checks.blob === "ok"
+    && checks.push === "ok";
 
   return { release: "self-hosted-2026-07-20", ok, checks, repository: getPersistenceStatusFromEnv(env) };
 }

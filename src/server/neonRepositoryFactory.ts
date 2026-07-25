@@ -22,6 +22,9 @@ export type HrServerEnv = {
   PAYROLL_STORAGE_DIR?: string;
   EMPLOYEE_DATA_ENCRYPTION_KEY?: string;
   NODE_ENV?: string;
+  WEB_PUSH_SUBJECT?: string;
+  WEB_PUSH_VAPID_PRIVATE_KEY?: string;
+  WEB_PUSH_VAPID_PUBLIC_KEY?: string;
 };
 
 export type HrRepositoryFactoryOptions = {

@@ -7,6 +7,8 @@ import authHandler from "./api/auth.js";
 import healthHandler from "./api/health.js";
 import hrHandler from "./api/hr.js";
 import payrollHandler from "./api/payroll.js";
+import pushHandler from "./api/push.js";
+import { startWebPushWorker } from "./src/server/webPush.js";
 
 // Self-hosted entry point. Reproduces the two Vercel Node runtime behaviors the
 // api/ handlers rely on — parsed URL query on request.query and the raw body on
@@ -24,7 +26,8 @@ const API_ROUTES: Record<string, ApiHandler> = {
   "/api/auth": authHandler,
   "/api/health": healthHandler,
   "/api/hr": hrHandler,
-  "/api/payroll": payrollHandler
+  "/api/payroll": payrollHandler,
+  "/api/push": pushHandler
 };
 
 // Payroll PDFs upload through /api/hr as base64 JSON (10MB PDF ≈ 13.4MB
@@ -140,6 +143,8 @@ async function serveStatic(pathname: string, response: ServerResponse, method: s
         // Vite emits content-hashed filenames under assets/.
         if (decoded.startsWith("/assets/")) {
           response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else if (decoded === "/push-sw.js" || decoded === "/manifest.webmanifest") {
+          response.setHeader("Cache-Control", "no-cache");
         }
         response.end(method === "HEAD" ? undefined : await fs.readFile(candidate));
         return;
@@ -225,12 +230,14 @@ if (process.env.PAYROLL_STORAGE_DIR) {
 }
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+const stopWebPushWorker = startWebPushWorker(process.env);
 server.listen(port, "0.0.0.0", () => {
   console.log(`[server] listening on 0.0.0.0:${port}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    stopWebPushWorker();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   });

@@ -1,6 +1,7 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   BadgeCheck,
+  Bell,
   CalendarDays,
   Check,
   CircleCheck,
@@ -99,6 +100,7 @@ const DailyWorkPlanManager = lazy(() => import("./components/dailyWorkPlanManage
 const EmployeeAccountManager = lazy(() => import("./components/employeeAccountManager").then((module) => ({ default: module.EmployeeAccountManager })));
 const EmployeeDirectory = lazy(() => import("./components/employeeDirectory").then((module) => ({ default: module.EmployeeDirectory })));
 const PayrollStatementManager = lazy(() => import("./components/payrollStatementManager").then((module) => ({ default: module.PayrollStatementManager })));
+const PushNotificationSettings = lazy(() => import("./components/pushNotificationSettings").then((module) => ({ default: module.PushNotificationSettings })));
 const RecognizedWorkStats = lazy(() => import("./components/recognizedWorkStats").then((module) => ({ default: module.RecognizedWorkStats })));
 const RecognizedWorkSummary = lazy(() => import("./components/recognizedWorkStats").then((module) => ({ default: module.RecognizedWorkSummary })));
 const SystemPolicyEditor = lazy(() => import("./components/systemPolicyEditor").then((module) => ({ default: module.SystemPolicyEditor })));
@@ -273,6 +275,7 @@ function App() {
   const [isEmployeeSensitiveDataRevealed, setIsEmployeeSensitiveDataRevealed] = useState(false);
   const [revealedEmployee, setRevealedEmployee] = useState<Employee | null>(null);
   const [isPayrollUploadOpen, setIsPayrollUploadOpen] = useState(false);
+  const [isPushSettingsOpen, setIsPushSettingsOpen] = useState(false);
   const [isUploadingPayroll, setIsUploadingPayroll] = useState(false);
   const [payrollUploadError, setPayrollUploadError] = useState<string | null>(null);
   const [payrollUploadDraft, setPayrollUploadDraft] = useState<PayrollUploadDraft>({ file: null, month: today.slice(0, 7) });
@@ -1322,6 +1325,21 @@ function App() {
                       {effectiveMode === "ADMIN" ? "직원 화면으로 전환" : "관리자 화면으로 전환"}
                     </button>
                   ) : null}
+                  {isAdminAccount ? (
+                    <button
+                      className="account-menu__action"
+                      onClick={(event) => {
+                        setIsPushSettingsOpen(true);
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                      }}
+                      onFocus={() => void import("./components/pushNotificationSettings")}
+                      onMouseEnter={() => void import("./components/pushNotificationSettings")}
+                      type="button"
+                    >
+                      <Bell size={16} />
+                      알림 설정
+                    </button>
+                  ) : null}
                   {effectiveMode === "EMPLOYEE" ? (
                     <button
                       className="account-menu__action"
@@ -1577,6 +1595,11 @@ function App() {
         <RequestField label="보정 시각"><input required type="time" value={correctionDraft.afterValue} onChange={(event) => setCorrectionDraft((current) => ({ ...current, afterValue: event.target.value }))} /></RequestField>
         <RequestField label="보정 사유"><textarea required rows={3} value={correctionDraft.reason} onChange={(event) => setCorrectionDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
       </FormDialog>
+      {isAdminAccount ? (
+        <Suspense fallback={null}>
+          <PushNotificationSettings onClose={() => setIsPushSettingsOpen(false)} open={isPushSettingsOpen} />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

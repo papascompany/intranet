@@ -32,7 +32,7 @@ interface OperationalDialogProps {
   title: ReactNode;
 }
 
-function OperationalDialog({ busy = false, children, className, description, onClose, open, title }: OperationalDialogProps) {
+export function OperationalDialog({ busy = false, children, className, description, onClose, open, title }: OperationalDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
