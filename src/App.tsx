@@ -89,6 +89,7 @@ import type { EmployeeImportRow } from "./features/employeeCsv";
 import { MAX_PAYROLL_FILE_BYTES } from "./api/payrollFileStorage";
 import storigeLogo from "./assets/storige-logo.png";
 import {
+  activateErpSection,
   buildErpViewModel,
   type ErpActiveSection,
   type ErpViewModel,
@@ -379,12 +380,16 @@ function App() {
     () => (employeeSnapshot ? buildEmployeeViewModel(toEmployeeViewModelSnapshot(employeeSnapshot)) : null),
     [employeeSnapshot]
   );
-  const erpViewModel = useMemo(
+  const erpViewModelBase = useMemo(
     () =>
       dashboard && employeeSnapshot
-        ? buildErpViewModel({ dashboard, employeeSnapshot, employees, activeSection })
+        ? buildErpViewModel({ dashboard, employeeSnapshot, employees, activeSection: "self-service" })
         : null,
-    [dashboard, employeeSnapshot, employees, activeSection]
+    [dashboard, employeeSnapshot, employees]
+  );
+  const erpViewModel = useMemo(
+    () => erpViewModelBase ? activateErpSection(erpViewModelBase, activeSection) : null,
+    [activeSection, erpViewModelBase]
   );
   const employeeCardRows = useMemo(
     () => {
@@ -416,6 +421,23 @@ function App() {
       setActiveSection(allowedSections[0]);
     }
   }, [activeSection, allowedSections]);
+
+  useEffect(() => {
+    if (!hasLoadedData || !isLoggedIn || authSession?.passwordChangeRequired) return;
+
+    const preloadVisibleSections = () => allowedSections.forEach(preloadSection);
+    const idleWindow = window as Window & {
+      cancelIdleCallback?: (handle: number) => void;
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const idleId = idleWindow.requestIdleCallback(preloadVisibleSections, { timeout: 1_500 });
+      return () => idleWindow.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = window.setTimeout(preloadVisibleSections, 600);
+    return () => window.clearTimeout(timeoutId);
+  }, [allowedSections, authSession?.passwordChangeRequired, hasLoadedData, isLoggedIn]);
 
   useEffect(() => {
     const handlePopState = () => setActiveSection(sectionFromLocation());
@@ -556,10 +578,8 @@ function App() {
       return;
     }
 
-    startTransition(() => {
-      setUserMode(nextMode);
-      setActiveSection(nextMode === "ADMIN" ? "overview" : "self-service");
-    });
+    setUserMode(nextMode);
+    setActiveSection(nextMode === "ADMIN" ? "overview" : "self-service");
     setNotice(nextMode === "ADMIN" ? "관리자모드로 전환했습니다." : "직원모드로 전환했습니다.");
   }
 
@@ -1278,7 +1298,7 @@ function App() {
               onFocus={() => preloadSection(item.section)}
               onMouseEnter={() => preloadSection(item.section)}
               onPointerDown={() => preloadSection(item.section)}
-              onClick={() => startTransition(() => setActiveSection(item.section))}
+              onClick={() => setActiveSection(item.section)}
             >
               {item.label}
             </ErpNavItem>
@@ -1350,7 +1370,7 @@ function App() {
                     <button
                       className="account-menu__action"
                       onClick={(event) => {
-                        startTransition(() => setActiveSection("employee-card"));
+                        setActiveSection("employee-card");
                         event.currentTarget.closest("details")?.removeAttribute("open");
                       }}
                       onFocus={() => preloadSection("employee-card")}

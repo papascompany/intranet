@@ -16,40 +16,40 @@ type Filters = {
 };
 
 const initialFilters: Filters = { actor: "", action: "", target: "" };
+const createdAtFormatter = new Intl.DateTimeFormat("ko-KR", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
 
 function includesText(value: string, query: string) {
   return value.toLocaleLowerCase("ko-KR").includes(query.trim().toLocaleLowerCase("ko-KR"));
-}
-
-function formatActor(log: AuditLog, employees: AuditLogExplorerProps["employees"]) {
-  const employee = employees.find((candidate) => candidate.id === log.actorId);
-  return employee ? `${employee.name} · ${employee.department}` : log.actorId;
 }
 
 function formatCreatedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat("ko-KR", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).format(date);
+  return createdAtFormatter.format(date);
 }
 
 export function AuditLogExplorer({ auditLogs, employees, variant = "audit" }: AuditLogExplorerProps) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  const employeeLabels = useMemo(
+    () => new Map(employees.map((employee) => [employee.id, `${employee.name} · ${employee.department}`])),
+    [employees]
+  );
   const filteredLogs = useMemo(() => auditLogs.filter((log) => {
-    const actor = formatActor(log, employees);
+    const actor = employeeLabels.get(log.actorId) ?? log.actorId;
     const target = `${log.targetType} ${log.targetId} ${log.detail}`;
 
     return includesText(actor, filters.actor)
       && includesText(log.action, filters.action)
       && includesText(target, filters.target);
-  }), [auditLogs, employees, filters]);
+  }), [auditLogs, employeeLabels, filters]);
   const hasFilters = Boolean(filters.actor || filters.action || filters.target);
 
   const updateFilter = (field: keyof Filters, value: string) => {
@@ -100,7 +100,7 @@ export function AuditLogExplorer({ auditLogs, employees, variant = "audit" }: Au
               {filteredLogs.map((log) => (
                 <tr key={log.id}>
                   <td><time dateTime={log.createdAt}>{formatCreatedAt(log.createdAt)}</time></td>
-                  <td>{formatActor(log, employees)}</td>
+                  <td>{employeeLabels.get(log.actorId) ?? log.actorId}</td>
                   <td><code>{variant === "history" ? humanizeAction(log.action) : log.action}</code></td>
                   <td><span>{log.targetType}</span><small>{log.targetId}</small></td>
                   <td>{log.detail}</td>

@@ -247,7 +247,7 @@ export function DataTable<Row extends object>({
         <tbody>
           {hasGeneratedRows
             ? rows.map((row, rowIndex) => (
-                <tr key={getRowKey ? getRowKey(row, rowIndex) : rowIndex}>
+                <tr key={getRowKey ? getRowKey(row, rowIndex) : inferRowKey(row, rowIndex)}>
                   {columns.map((column) => (
                     <td
                       className={cx(column.align && `is-${column.align}`, column.className)}
@@ -265,6 +265,13 @@ export function DataTable<Row extends object>({
       {!children && !hasGeneratedRows ? <div className="erp-data-table__empty">{emptyState ?? "No records"}</div> : null}
     </div>
   );
+}
+
+function inferRowKey<Row extends object>(row: Row, rowIndex: number): string | number {
+  if ("id" in row && (typeof row.id === "string" || typeof row.id === "number")) {
+    return row.id;
+  }
+  return rowIndex;
 }
 
 function resolveCell<Row extends object>(column: DataTableColumn<Row>, row: Row, rowIndex: number): ReactNode {

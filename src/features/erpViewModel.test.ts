@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Dashboard, EmployeeSnapshot } from "../api/types";
 import type { Employee } from "../domain/types";
-import { buildErpViewModel, type ErpActiveSection } from "./erpViewModel";
+import { activateErpSection, buildErpViewModel, type ErpActiveSection } from "./erpViewModel";
 
 const employees: Employee[] = [
   {
@@ -240,6 +240,16 @@ describe("buildErpViewModel", () => {
       isActive: true
     });
     expect(viewModel.navItems.find((item) => item.section === "payroll")?.count).toBe(2);
+  });
+
+  it("changes only navigation state when switching sections", () => {
+    const base = buildViewModel("self-service");
+    const next = activateErpSection(base, "attendance");
+
+    expect(next.attendanceRows).toBe(base.attendanceRows);
+    expect(next.leaveRows).toBe(base.leaveRows);
+    expect(next.navItems.find((item) => item.section === "self-service")?.isActive).toBe(false);
+    expect(next.navItems.find((item) => item.section === "attendance")?.isActive).toBe(true);
   });
 
   it("builds the approval work queue", () => {

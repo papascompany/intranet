@@ -193,6 +193,16 @@ export function buildErpViewModel({
   };
 }
 
+export function activateErpSection(viewModel: ErpViewModel, activeSection: ErpActiveSection): ErpViewModel {
+  return {
+    ...viewModel,
+    navItems: viewModel.navItems.map((item) => ({
+      ...item,
+      isActive: item.section === activeSection
+    }))
+  };
+}
+
 function buildNavItems({
   dashboard,
   employeeSnapshot,
