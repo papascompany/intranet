@@ -275,6 +275,40 @@ button {
   background: #f0fdf4;
 }
 
+.attendance-message {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  border-left: 3px solid var(--color-yellow);
+  border-radius: 6px;
+  padding: 11px 12px;
+  color: var(--color-graphite);
+  background: #fff9dd;
+}
+
+.attendance-message > svg {
+  margin-top: 2px;
+  color: #a36f00;
+}
+
+.attendance-message > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.attendance-message span {
+  color: #806000;
+  font: 600 11px var(--font-inter);
+}
+
+.attendance-message blockquote {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font: 600 13px/1.5 var(--font-inter);
+}
+
 .attendance-alternatives {
   display: flex;
   align-items: center;

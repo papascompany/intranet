@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   MapPin,
   QrCode,
+  Quote,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -148,6 +149,7 @@ type PayrollUploadDraft = {
 };
 
 type ClockFeedback = {
+  encouragement?: string;
   label: string;
   status: string;
   time: string;
@@ -591,6 +593,9 @@ function App() {
 
       const fallbackNotice = method === "GPS" && verificationFailed ? " · 위치 확인 실패로 대체 인증 처리" : "";
       const recordedAt = type === "CLOCK_IN" ? result.attendance.clockInAt : result.attendance.clockOutAt;
+      const encouragement = type === "CLOCK_IN"
+        ? (await import("./content/attendanceMessages")).pickAttendanceMessage()
+        : undefined;
       setEmployeeSnapshot((current) => {
         if (!current || current.employee.id !== selectedEmployee.id) return current;
         const next = {
@@ -606,6 +611,7 @@ function App() {
         todayAttendance: upsertRecord(current.todayAttendance, result.attendance)
       } : current);
       setClockFeedback({
+        ...(encouragement ? { encouragement } : {}),
         label: type === "CLOCK_IN" ? "출근 완료" : "퇴근 완료",
         status: verificationStatusLabel(result.verification.status),
         time: formatKoreaTime(recordedAt ?? now)
@@ -1925,7 +1931,9 @@ function SelfServiceSection(props: {
             <button
               className="attendance-check"
               disabled={props.isLoading || props.clockingType !== null}
+              onFocus={() => void import("./content/attendanceMessages")}
               onClick={() => props.onClock(nextClockAction.type, "GPS")}
+              onMouseEnter={() => void import("./content/attendanceMessages")}
             >
               <CircleCheck size={24} />
               <span>{props.clockingType ? "위치와 시간을 확인하는 중" : nextClockAction.label}</span>
@@ -1933,6 +1941,15 @@ function SelfServiceSection(props: {
           ) : (
             <div className="attendance-complete"><Check size={20} /> 오늘 근태 완료</div>
           )}
+          {props.clockFeedback?.encouragement ? (
+            <div className="attendance-message">
+              <Quote aria-hidden="true" size={18} />
+              <div>
+                <span>오늘의 한 문장</span>
+                <blockquote>{props.clockFeedback.encouragement}</blockquote>
+              </div>
+            </div>
+          ) : null}
           {nextClockAction ? (
             <div className="attendance-alternatives">
               <span>GPS가 어렵다면</span>
