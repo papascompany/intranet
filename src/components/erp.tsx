@@ -326,13 +326,14 @@ export function InlineActions({ align = "end", className, ...props }: InlineActi
 export interface StatusPillProps extends HTMLAttributes<HTMLSpanElement> {
   dot?: boolean;
   tone?: StatusTone;
+  variant?: "pill" | "detail";
 }
 
-export function StatusPill({ children, className, dot = true, tone = "neutral", ...props }: StatusPillProps) {
+export function StatusPill({ children, className, dot = true, tone = "neutral", variant = "pill", ...props }: StatusPillProps) {
   return (
-    <span className={cx("erp-status-pill", `is-${tone}`, className)} {...props}>
+    <span className={cx("erp-status-pill", `is-${tone}`, variant === "detail" && "is-detail", className)} {...props}>
       {dot ? <span className="erp-status-pill__dot" aria-hidden="true" /> : null}
-      {children}
+      <span className="erp-status-pill__label">{children}</span>
     </span>
   );
 }

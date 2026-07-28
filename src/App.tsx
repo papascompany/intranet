@@ -201,8 +201,14 @@ function preloadSection(section: ErpActiveSection) {
 
 const rowColumns: DataTableColumn<ErpViewModelRow>[] = [
   { key: "label", header: "대상", value: "label", width: "22%" },
-  { key: "value", header: "내용", value: "value" },
-  { key: "meta", header: "상태/메모", cell: (row) => <StatusPill tone={toneForStatus(row.status)}>{row.meta}</StatusPill>, width: "28%" }
+  { key: "value", header: "내용", value: "value", width: "26%" },
+  {
+    key: "meta",
+    className: "erp-data-table__status-cell",
+    header: "상태/메모",
+    cell: (row) => <StatusPill tone={toneForStatus(row.status)} variant="detail">{row.meta}</StatusPill>,
+    width: "52%"
+  }
 ];
 
 const employeeCardColumns: DataTableColumn<EmployeeCardRow>[] = [

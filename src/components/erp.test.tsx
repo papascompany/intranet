@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ErpNavItem, ErpShell } from "./erp";
+import { ErpNavItem, ErpShell, StatusPill } from "./erp";
 
 describe("ErpShell", () => {
   afterEach(cleanup);
@@ -25,5 +25,16 @@ describe("ErpShell", () => {
 
     expect(onNavigate).toHaveBeenCalledTimes(1);
     expect(mobileMenu).not.toHaveAttribute("open");
+  });
+});
+
+describe("StatusPill", () => {
+  afterEach(cleanup);
+
+  it("uses the readable detail treatment for long status descriptions", () => {
+    render(<StatusPill tone="warning" variant="detail">2026-07-21 · 지각 342분 · 검토 필요</StatusPill>);
+
+    expect(screen.getByText("2026-07-21 · 지각 342분 · 검토 필요").closest(".erp-status-pill"))
+      .toHaveClass("is-warning", "is-detail");
   });
 });
