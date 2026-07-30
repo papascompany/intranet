@@ -101,9 +101,7 @@ export function buildEmployeeViewModel(snapshot: EmployeeViewModelSnapshot): Emp
     clockOutLabel: formatClockLabel(snapshot.attendanceToday?.clockOutAt, "퇴근 기록 없음"),
     statusLabel: snapshot.attendanceToday ? attendanceStatusLabel(snapshot.attendanceToday) : "근태 기록 없음",
     leaveAvailableLabel: `사용 가능 연차 ${formatDays(snapshot.leaveBalance.availableDays)}일`,
-    advanceLeaveLabel: `선사용 연차 ${formatDays(snapshot.leaveBalance.advanceUsedDays)}일 / ${formatDays(
-      snapshot.leaveBalance.advanceGrantedDays
-    )}일`,
+    advanceLeaveLabel: `현재 주기 사용 ${formatDays(snapshot.leaveBalance.usedDays ?? 0)}일`,
     earlyLeaveLabel: `조퇴 누적 ${formatMinutes(snapshot.earlyLeaveTotalMinutes)}`,
     offsetLabel: formatOffsetLabel(snapshot.overtimeOffset),
     pendingLeaveSummary:

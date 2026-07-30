@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildAttendanceRecord, calculateEarlyLeaveMinutes, calculateLateMinutes, calculateRecognizedWorkMinutes, evaluateVerification } from "./attendance";
-import { advanceLeaveGrantedDays, getLeaveBalance, monthsSinceHire, statutoryAnnualLeaveDays } from "./leave";
+import { annualLeaveCycle, getLeaveBalance, monthsSinceHire, statutoryAnnualLeaveDays } from "./leave";
 import { offsetOvertimeWithEarlyLeave } from "./overtime";
 import { workplaces } from "./seed";
 
@@ -69,9 +69,9 @@ describe("attendance verification policy", () => {
 });
 
 describe("leave policy", () => {
-  it("grants advance leave monthly after three months", () => {
-    expect(advanceLeaveGrantedDays("2026-01-10", "2026-04-10")).toBe(1);
-    expect(advanceLeaveGrantedDays("2026-01-10", "2026-05-10")).toBe(2);
+  it("grants one day per completed month during the first year", () => {
+    expect(statutoryAnnualLeaveDays("2026-01-10", "2026-04-09")).toBe(2);
+    expect(statutoryAnnualLeaveDays("2026-01-10", "2026-04-10")).toBe(3);
   });
 
   it("caps statutory leave at 25 days", () => {
@@ -83,6 +83,16 @@ describe("leave policy", () => {
     expect(monthsSinceHire("2025-07-21", "2026-07-21T00:00:00+09:00")).toBe(12);
     expect(statutoryAnnualLeaveDays("2025-07-21", "2026-07-21T00:00:00+09:00")).toBe(15);
     expect(statutoryAnnualLeaveDays("2023-07-21", "2026-07-21T00:00:00+09:00")).toBe(16);
+  });
+
+  it("uses a hire-date-based cycle and clamps leap-day anniversaries", () => {
+    expect(annualLeaveCycle("2025-07-21", "2026-07-30")).toEqual({
+      startsOn: "2026-07-21",
+      endsOn: "2027-07-20",
+      completedYears: 1
+    });
+    expect(monthsSinceHire("2024-02-29", "2025-02-28")).toBe(12);
+    expect(annualLeaveCycle("2024-02-29", "2025-02-28")).toMatchObject({ startsOn: "2025-02-28", completedYears: 1 });
   });
 
   it("updates used, pending, current-year, and current-month leave immediately from the request ledger", () => {
@@ -97,7 +107,8 @@ describe("leave policy", () => {
     });
 
     expect(balance).toMatchObject({ usedDays: 1.5, pendingDays: 1, currentYearUsedDays: 1.5, currentMonthUsedDays: 1 });
-    expect(balance.availableDays).toBe(8.5);
+    expect(balance).toMatchObject({ cycleStartsOn: "2026-01-01", cycleEndsOn: "2026-12-31" });
+    expect(balance.availableDays).toBe(4.5);
   });
 
   it("does not carry a prior-year manual correction into the current year's accrual", () => {
@@ -107,7 +118,7 @@ describe("leave policy", () => {
       approvedRequests: []
     });
 
-    expect(balance.availableDays).toBe(30);
+    expect(balance.availableDays).toBe(15);
   });
 
   it("does not carry prior-year approved leave into the current year's balance", () => {
@@ -121,7 +132,20 @@ describe("leave policy", () => {
     });
 
     expect(balance).toMatchObject({ usedDays: 1, currentYearUsedDays: 1, currentMonthUsedDays: 1 });
-    expect(balance.availableDays).toBe(29);
+    expect(balance.availableDays).toBe(14);
+  });
+
+  it("does not deduct first-year usage again after the first anniversary grant", () => {
+    const balance = getLeaveBalance({
+      employee: { id: "emp-1", name: "직원", role: "EMPLOYEE", department: "운영팀", hireDate: "2025-07-21", pilot: false },
+      asOf: "2026-07-30T09:00:00+09:00",
+      approvedRequests: [
+        { id: "leave-before", employeeId: "emp-1", type: "ANNUAL", startsOn: "2026-07-20", endsOn: "2026-07-20", days: 1, reason: "첫해 사용", status: "APPROVED" },
+        { id: "leave-after", employeeId: "emp-1", type: "ANNUAL", startsOn: "2026-07-25", endsOn: "2026-07-25", days: 1, reason: "새 주기 사용", status: "APPROVED" }
+      ]
+    });
+
+    expect(balance).toMatchObject({ statutoryDays: 15, usedDays: 1, currentYearUsedDays: 2, availableDays: 14 });
   });
 });
 

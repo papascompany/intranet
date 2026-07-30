@@ -40,6 +40,7 @@ import {
   getEmployeeSnapshot,
   getAuditLogs,
   importEmployeeAccounts,
+  recordHistoricalLeaveUsage,
   resetEmployeeAccountPassword,
   reviewAttendance,
   revealEmployeeSensitiveData,
@@ -147,6 +148,12 @@ type OvertimeDraft = {
 type PayrollUploadDraft = {
   file: File | null;
   month: string;
+};
+
+type HistoricalLeaveDraft = {
+  days: "0.5" | "1";
+  reason: string;
+  usedOn: string;
 };
 
 type ClockFeedback = {
@@ -288,6 +295,14 @@ function App() {
   const [isUploadingPayroll, setIsUploadingPayroll] = useState(false);
   const [payrollUploadError, setPayrollUploadError] = useState<string | null>(null);
   const [payrollUploadDraft, setPayrollUploadDraft] = useState<PayrollUploadDraft>({ file: null, month: today.slice(0, 7) });
+  const [isHistoricalLeaveOpen, setIsHistoricalLeaveOpen] = useState(false);
+  const [isRecordingHistoricalLeave, setIsRecordingHistoricalLeave] = useState(false);
+  const [historicalLeaveError, setHistoricalLeaveError] = useState<string | null>(null);
+  const [historicalLeaveDraft, setHistoricalLeaveDraft] = useState<HistoricalLeaveDraft>({
+    usedOn: "",
+    days: "1",
+    reason: "2026년 1~7월 기초 사용 등록"
+  });
   const employeeSnapshotCacheRef = useRef(new Map<string, { cachedAt: number; snapshot: EmployeeSnapshot }>());
   const employeeSnapshotRequestRef = useRef(0);
   const bootstrapRequestRef = useRef(0);
@@ -365,9 +380,7 @@ function App() {
   const selectedEmployee = revealedEmployee?.id === baseSelectedEmployee?.id ? revealedEmployee : baseSelectedEmployee;
   const signedInEmployee = employees.find((employee) => employee.id === authSession?.employeeId) ?? selectedEmployee;
   const requestedLeaveDays = Number(leaveDraft.days);
-  const pendingAnnualLeaveDays = employeeSnapshot?.leaveRequests
-    .filter((request) => request.status === "PENDING" && (request.type === "ANNUAL" || request.type === "HALF_DAY"))
-    .reduce((sum, request) => sum + request.days, 0) ?? 0;
+  const pendingAnnualLeaveDays = employeeSnapshot?.leaveBalance.pendingDays ?? 0;
   const requestableLeaveDays = Math.max((employeeSnapshot?.leaveBalance.availableDays ?? 0) - pendingAnnualLeaveDays, 0);
   const checksLeaveBalance = leaveDraft.type === "ANNUAL" || leaveDraft.type === "HALF_DAY";
   const leaveBalanceInsufficient = checksLeaveBalance
@@ -772,6 +785,34 @@ function App() {
       setRequestError(humanizeLeaveError(error, requestableLeaveDays));
     } finally {
       setIsSubmittingRequest(false);
+    }
+  }
+
+  async function recordSelectedEmployeeHistoricalLeave() {
+    if (!selectedEmployee || !historicalLeaveDraft.usedOn || !historicalLeaveDraft.reason.trim()) {
+      setHistoricalLeaveError("사용일, 사용 일수와 등록 사유를 입력해 주세요.");
+      return;
+    }
+
+    setIsRecordingHistoricalLeave(true);
+    setHistoricalLeaveError(null);
+    try {
+      const result = await recordHistoricalLeaveUsage({
+        employeeId: selectedEmployee.id,
+        actorId: authActorId(authSession, selectedEmployee.id),
+        session: authSession ?? undefined,
+        usedOn: historicalLeaveDraft.usedOn,
+        days: Number(historicalLeaveDraft.days) as 0.5 | 1,
+        reason: historicalLeaveDraft.reason.trim()
+      });
+      setNotice(`${selectedEmployee.name} 기존 연차 사용 ${formatLeaveDays(result.request.days)} 등록 완료`);
+      setIsHistoricalLeaveOpen(false);
+      setHistoricalLeaveDraft({ usedOn: "", days: "1", reason: "2026년 1~7월 기초 사용 등록" });
+      await refresh(selectedEmployee.id);
+    } catch (error) {
+      setHistoricalLeaveError(humanizeHistoricalLeaveError(error));
+    } finally {
+      setIsRecordingHistoricalLeave(false);
     }
   }
 
@@ -1454,6 +1495,11 @@ function App() {
                 onDownloadPayroll: downloadPayroll,
                 onDeletePayroll: deletePayroll,
                 onUpdateEmployeeCard: () => void openEmployeeCardEditor(),
+                onRecordHistoricalLeave: () => {
+                  setHistoricalLeaveError(null);
+                  setHistoricalLeaveDraft({ usedOn: "", days: "1", reason: "2026년 1~7월 기초 사용 등록" });
+                  setIsHistoricalLeaveOpen(true);
+                },
                 onToggleEmployeeSensitiveData: toggleEmployeeSensitiveData,
                 onCreateEmployeeAccount: createManagedEmployeeAccount,
                 onImportEmployeeAccounts: importManagedEmployeeAccounts,
@@ -1560,6 +1606,36 @@ function App() {
           workplaces={employeeSnapshot?.workplaceOptions ?? []}
         />
       ) : null}
+      <FormDialog
+        busy={isRecordingHistoricalLeave}
+        description="2026년 1~7월에 실제 사용한 연차를 사용일별로 등록합니다. 승인 완료 이력으로 즉시 차감되며 감사 로그에 남습니다."
+        error={historicalLeaveError ?? undefined}
+        onClose={() => setIsHistoricalLeaveOpen(false)}
+        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          void recordSelectedEmployeeHistoricalLeave();
+        }}
+        open={isHistoricalLeaveOpen}
+        submitDisabled={!historicalLeaveDraft.usedOn || !historicalLeaveDraft.reason.trim()}
+        submitLabel="사용 처리"
+        title="기존 연차 사용 등록"
+      >
+        <InlineNotice title={selectedEmployee ? `${selectedEmployee.name} · 현재 사용 가능 ${formatLeaveDays(employeeSnapshot?.leaveBalance.availableDays)}` : "직원을 선택해 주세요."} tone="info">
+          반차는 0.5일, 연차는 1일씩 등록하세요. 여러 날을 사용했다면 실제 사용일마다 반복 등록합니다.
+        </InlineNotice>
+        <RequestField label="실제 사용일">
+          <input max={today.slice(0, 10)} min={selectedEmployee?.hireDate} onChange={(event) => setHistoricalLeaveDraft((current) => ({ ...current, usedOn: event.target.value }))} required type="date" value={historicalLeaveDraft.usedOn} />
+        </RequestField>
+        <RequestField label="사용 일수">
+          <select onChange={(event) => setHistoricalLeaveDraft((current) => ({ ...current, days: event.target.value as HistoricalLeaveDraft["days"] }))} value={historicalLeaveDraft.days}>
+            <option value="1">연차 1일</option>
+            <option disabled={!dashboard?.settings?.partialLeaveAllowed} value="0.5">반차 0.5일</option>
+          </select>
+        </RequestField>
+        <RequestField label="등록 사유">
+          <textarea onChange={(event) => setHistoricalLeaveDraft((current) => ({ ...current, reason: event.target.value }))} required rows={3} value={historicalLeaveDraft.reason} />
+        </RequestField>
+      </FormDialog>
       <FormDialog
         busy={isUploadingPayroll}
         description="PDF 급여명세서는 직원별로 비공개 보관되며, 직원은 본인 파일만 열람할 수 있습니다."
@@ -1712,7 +1788,30 @@ function humanizeLeaveError(error: unknown, availableDays: number) {
   if (message.includes("Leave must be requested in")) {
     return "관리자가 설정한 연차 사용 단위에 맞춰 일수를 입력해 주세요.";
   }
+  if (message.includes("cannot span two hire-date leave cycles")) {
+    return "입사기념일을 지나 연차 주기가 바뀝니다. 주기별로 나누어 신청해 주세요.";
+  }
+  if (message.includes("overlaps an existing annual leave request")) {
+    return "같은 날짜에 이미 승인되었거나 승인 대기 중인 연차 신청이 있습니다.";
+  }
+  if (message.includes("Past leave usage must be recorded")) {
+    return "지난 연차 사용분은 관리자가 직원 인사카드에서 등록해야 합니다.";
+  }
   return message || "휴가 신청을 처리하지 못했습니다.";
+}
+
+function humanizeHistoricalLeaveError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("exceeds the available balance")) {
+    return "해당 사용일 기준으로 사용 가능한 연차가 부족합니다. 사용일과 기존 등록 이력을 확인해 주세요.";
+  }
+  if (message.includes("cannot be in the future")) {
+    return "오늘 이후 날짜는 기존 사용 이력으로 등록할 수 없습니다.";
+  }
+  if (message.includes("before the hire date")) {
+    return "입사일 이전 날짜는 연차 사용 이력으로 등록할 수 없습니다.";
+  }
+  return message || "기존 연차 사용 이력을 등록하지 못했습니다.";
 }
 
 function buildAdminSelectionSnapshot(
@@ -1802,6 +1901,7 @@ function renderSection(props: {
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
   onUpdateEmployeeCard: () => void;
+  onRecordHistoricalLeave: () => void;
   onToggleEmployeeSensitiveData: () => void;
   onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
@@ -2087,6 +2187,7 @@ function EmployeeCardSection(props: {
   isLoading: boolean;
   onSelectEmployee: (employeeId: string) => void | Promise<void>;
   onUpdateEmployeeCard: () => void;
+  onRecordHistoricalLeave: () => void;
   onToggleEmployeeSensitiveData: () => void;
   isRevealingEmployeeSensitiveData: boolean;
   isEmployeeSensitiveDataRevealed: boolean;
@@ -2131,18 +2232,31 @@ function EmployeeCardSection(props: {
         >
           <DataTable columns={employeeCardColumns} rows={props.employeeCardRows} emptyState={<EmptyState title="직원카드 없음" />} />
         </DetailPanel>
-        <DetailPanel title="연차 현황" description="선택 직원의 발생·보정·사용 가능 일수와 최근 신청을 확인합니다.">
+        <DetailPanel
+          title="연차 현황"
+          description={props.leaveBalance?.cycleStartsOn && props.leaveBalance.cycleEndsOn
+            ? `현재 연차 주기 ${props.leaveBalance.cycleStartsOn} ~ ${props.leaveBalance.cycleEndsOn} · 입사일과 승인 원장에서 자동 계산합니다.`
+            : "입사일과 승인 원장에서 발생·사용 가능 일수를 자동 계산합니다."}
+          actions={props.canAdmin ? (
+            <InlineActions>
+              <button disabled={props.isLoading} onClick={props.onRecordHistoricalLeave} type="button">
+                <CalendarDays size={14} /> 기존 사용 등록
+              </button>
+            </InlineActions>
+          ) : undefined}
+        >
             <div className="employee-leave-summary">
-            <div><span>법정 발생</span><strong>{formatLeaveDays(props.leaveBalance?.statutoryDays)}</strong></div>
-            <div><span>선사용 부여</span><strong>{formatLeaveDays(props.leaveBalance?.advanceGrantedDays)}</strong></div>
-            <div><span>올해 사용</span><strong>{formatLeaveDays(props.leaveBalance?.currentYearUsedDays)}</strong></div>
+            <div><span>현재 주기 발생</span><strong>{formatLeaveDays(props.leaveBalance?.statutoryDays)}</strong></div>
+            <div><span>현재 주기 사용</span><strong>{formatLeaveDays(props.leaveBalance?.usedDays)}</strong></div>
+            <div><span>올해 승인 사용</span><strong>{formatLeaveDays(props.leaveBalance?.currentYearUsedDays)}</strong></div>
             <div><span>이번 달 사용</span><strong>{formatLeaveDays(props.leaveBalance?.currentMonthUsedDays)}</strong></div>
+            <div><span>승인 대기</span><strong>{formatLeaveDays(props.leaveBalance?.pendingDays)}</strong></div>
             <div><span>HR 보정</span><strong>{formatLeaveDays(props.employees.find((employee) => employee.id === props.selectedEmployeeId)?.annualLeaveAdjustmentDays ?? 0)}</strong></div>
             <div className="is-primary"><span>사용 가능</span><strong>{formatLeaveDays(props.leaveBalance?.availableDays)}</strong></div>
           </div>
           <DataTable columns={rowColumns} rows={props.erpViewModel.leaveRows.filter((row) => row.label === props.erpViewModel.employeeSummary.name).slice(0, 8)} emptyState={<EmptyState title="휴가 신청 이력 없음" />} />
         </DetailPanel>
-        <DetailPanel title="연차 보정 처리 이력" description="직원카드에서 변경한 HR 보정의 처리 사유와 시각을 다시 확인합니다.">
+        <DetailPanel title="연차 보정 처리 이력" description="예외적인 HR 보정의 처리 사유와 시각을 확인합니다. 실제 사용분은 위의 기존 사용 등록으로 처리합니다.">
           <DataTable columns={rowColumns} rows={leaveAdjustmentRows} emptyState={<EmptyState title="연차 보정 이력 없음" />} />
         </DetailPanel>
       </div>

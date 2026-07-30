@@ -181,6 +181,32 @@ describe("hrHttpHandler", () => {
     });
   });
 
+  it("routes administrator historical leave usage to the approved leave ledger", async () => {
+    const response = await handleHrHttpRequest(
+      {
+        method: "POST",
+        body: {
+          action: "recordHistoricalLeaveUsage",
+          payload: {
+            employeeId: "emp-ops-1",
+            actorId: "untrusted-client-actor",
+            usedOn: "2026-07-10",
+            days: 1,
+            reason: "1~7월 기초 사용 등록"
+          }
+        },
+        serverSession: adminSession
+      },
+      api()
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      request: { status: "APPROVED", decidedBy: adminSession.employeeId },
+      auditLog: { action: "HISTORICAL_LEAVE_USAGE_RECORDED", actorId: adminSession.employeeId }
+    });
+  });
+
   it("routes admin employee account and Blob payroll registration actions with the trusted actor", async () => {
     const hrApi = api();
     const created = await handleHrHttpRequest(

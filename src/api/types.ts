@@ -61,6 +61,14 @@ export type SubmitLeaveRequestInput = AuthenticatedInput & {
   status?: Extract<RequestStatus, "DRAFT" | "PENDING">;
 };
 
+export type RecordHistoricalLeaveUsageInput = AuthenticatedInput & {
+  employeeId: string;
+  actorId: string;
+  usedOn: string;
+  days: 0.5 | 1;
+  reason: string;
+};
+
 export type SubmitOvertimeRequestInput = AuthenticatedInput & {
   employeeId: string;
   date: string;

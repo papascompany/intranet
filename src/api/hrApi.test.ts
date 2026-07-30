@@ -453,6 +453,51 @@ describe("hr api", () => {
     );
   });
 
+  it("lets an administrator record past leave usage as an approved ledger entry", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({ leaveRequests: [] }), () => fixedNow);
+
+    const result = await hrApi.recordHistoricalLeaveUsage({
+      employeeId: employeeSession.employeeId,
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      usedOn: "2026-07-03",
+      days: 0.5,
+      reason: "2026년 1~7월 기초 사용 등록"
+    });
+
+    expect(result.request).toMatchObject({
+      employeeId: employeeSession.employeeId,
+      type: "HALF_DAY",
+      startsOn: "2026-07-03",
+      days: 0.5,
+      status: "APPROVED",
+      decidedBy: adminSession.employeeId
+    });
+    expect(result.leaveBalance).toMatchObject({ usedDays: 0.5, currentYearUsedDays: 0.5 });
+    expect(result.auditLog.action).toBe("HISTORICAL_LEAVE_USAGE_RECORDED");
+  });
+
+  it("blocks employees, future dates, and usage beyond the historical leave balance", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({ leaveRequests: [] }), () => fixedNow);
+    const input = {
+      employeeId: employeeSession.employeeId,
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      usedOn: "2026-07-03",
+      days: 1 as const,
+      reason: "기초 사용 등록"
+    };
+
+    await expect(hrApi.recordHistoricalLeaveUsage({ ...input, actorId: employeeSession.employeeId, session: employeeSession }))
+      .rejects.toThrow("Admin permission required");
+    await expect(hrApi.recordHistoricalLeaveUsage({ ...input, usedOn: "2026-07-09" }))
+      .rejects.toThrow("cannot be in the future");
+
+    const noBalanceApi = createHrApi(new InMemoryDatabase({ leaveRequests: [] }), () => "2026-01-15T09:00:00+09:00");
+    await expect(noBalanceApi.recordHistoricalLeaveUsage({ ...input, usedOn: "2026-01-15" }))
+      .rejects.toThrow("exceeds the available balance");
+  });
+
   it("rejects leave requests whose days do not match the selected date range", async () => {
     const hrApi = api();
 
@@ -629,6 +674,34 @@ describe("hr api", () => {
     expect(approved.request.status).toBe("APPROVED");
     expect(dashboard.leaveRequests.map((request) => request.id)).toContain(submitted.request.id);
     expect(dashboard.pendingLeaveRequests.map((request) => request.id)).not.toContain(submitted.request.id);
+  });
+
+  it("re-checks the available balance when a pending annual leave request is approved", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({ leaveRequests: [] }), () => fixedNow);
+    const submitted = await hrApi.submitLeaveRequest({
+      employeeId: employeeSession.employeeId,
+      type: "ANNUAL",
+      startsOn: "2026-07-20",
+      endsOn: "2026-07-20",
+      days: 1,
+      reason: "승인 시 잔여 재검증",
+      session: employeeSession
+    });
+    await hrApi.updateEmployeeCard({
+      employeeId: employeeSession.employeeId,
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { annualLeaveAdjustmentDays: -6, annualLeaveAdjustmentYear: 2026 },
+      reason: "출근율 예외 보정"
+    });
+
+    await expect(hrApi.updateRequestStatus({
+      targetType: "LeaveRequest",
+      requestId: submitted.request.id,
+      status: "APPROVED",
+      actorId: adminSession.employeeId,
+      session: adminSession
+    })).rejects.toThrow("Leave approval exceeds the available balance");
   });
 
   it("submits overtime as pending with pay approval off and records the write", async () => {

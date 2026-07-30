@@ -349,7 +349,7 @@ export function EmployeeCardEditor({
               <NumericField allowNegative label="연차 HR 보정" onChange={(value) => updateAdmin("annualLeaveAdjustmentDays", value)} step="0.5" value={adminDraft.annualLeaveAdjustmentDays} />
               <NumericField label="연차 HR 보정 기준연도" onChange={(value) => updateAdmin("annualLeaveAdjustmentYear", value)} step="1" value={adminDraft.annualLeaveAdjustmentYear} />
             </div>
-            <p className="employee-card-editor__help">2026년에 이미 사용한 연차를 반영할 때는 사용 일수만큼 음수로 입력하세요. 저장 즉시 잔여 연차와 HR 보정 원장에 반영됩니다.</p>
+            <p className="employee-card-editor__help">HR 보정은 출근율 예외나 별도 부여처럼 연차 원장으로 처리할 수 없는 경우에만 사용합니다. 실제 사용분은 직원 인사카드의 연차 현황에서 사용일별로 등록하세요.</p>
             <div className="employee-card-editor__custom-fields">
               <h4>사용자 항목</h4>
               {adminDraft.customAdminFields.map((field, index) => (

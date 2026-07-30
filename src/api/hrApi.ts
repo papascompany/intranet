@@ -1,5 +1,5 @@
 import { buildAttendanceRecord, calculateLateMinutes, calculateRecognizedWorkMinutes, evaluateVerification } from "../domain/attendance.js";
-import { getLeaveBalance } from "../domain/leave.js";
+import { annualLeaveCycle, getLeaveBalance } from "../domain/leave.js";
 import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
 import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
 import type {
@@ -54,6 +54,7 @@ import type {
   SetEmployeeAccountAccessInput,
   SoftDeletePayrollStatementInput,
   RegisterUploadedPayrollStatementInput,
+  RecordHistoricalLeaveUsageInput,
   ReviewAttendanceInput,
   RevealEmployeeSensitiveDataInput,
   ResetEmployeeAccountPasswordInput,
@@ -770,6 +771,80 @@ export class HrApi {
     return { request: saved, auditLog };
   }
 
+  async recordHistoricalLeaveUsage(input: RecordHistoricalLeaveUsageInput) {
+    const actorId = this.resolveActorId(input, input.actorId);
+    await this.assertAdmin(actorId, input.session);
+    const employee = await this.findEmployee(input.employeeId);
+    const usedOn = normalizeDateOnly(input.usedOn, "사용일", true)!;
+    const today = this.clock().slice(0, 10);
+    if (usedOn > today) {
+      throw new Error("Historical leave usage date cannot be in the future");
+    }
+    if (usedOn < employee.hireDate) {
+      throw new Error("Historical leave usage date cannot be before the hire date");
+    }
+
+    const settings = await this.db.getSettings();
+    if (input.days !== 0.5 && input.days !== 1) {
+      throw new Error("Historical leave usage must be 0.5 or 1 day");
+    }
+    if (input.days === 0.5 && !settings.partialLeaveAllowed) {
+      throw new Error("Half-day leave is not allowed by the current policy");
+    }
+    const reason = requiredText(input.reason, "Historical leave usage reason");
+    const leaveRequests = await this.db.listLeaveRequests();
+    const recordedOnDate = leaveRequests
+      .filter((request) => request.employeeId === employee.id
+        && request.startsOn === usedOn
+        && request.status === "APPROVED"
+        && (request.type === "ANNUAL" || request.type === "HALF_DAY"))
+      .reduce((sum, request) => sum + request.days, 0);
+    if (recordedOnDate + input.days > 1) {
+      throw new Error("Historical leave usage for one date cannot exceed 1 day");
+    }
+    const balance = getLeaveBalance({
+      employee,
+      asOf: `${usedOn}T23:59:59+09:00`,
+      approvedRequests: leaveRequests,
+      policy: settings
+    });
+    if (!settings.annualLeaveOveruseAllowed && input.days > balance.availableDays - (balance.pendingDays ?? 0)) {
+      throw new Error("Historical leave usage exceeds the available balance");
+    }
+
+    const request: LeaveRequest = {
+      id: await this.db.nextId("leave"),
+      employeeId: input.employeeId,
+      type: input.days === 0.5 ? "HALF_DAY" : "ANNUAL",
+      startsOn: usedOn,
+      endsOn: usedOn,
+      days: input.days,
+      reason,
+      status: "APPROVED",
+      decidedBy: actorId,
+      decidedAt: this.clock()
+    };
+    const saved = await this.db.addLeaveRequest(request);
+    const auditLog = await this.addAuditLog({
+      actorId,
+      action: "HISTORICAL_LEAVE_USAGE_RECORDED",
+      targetType: "LeaveRequest",
+      targetId: saved.id,
+      detail: `${employee.name} ${usedOn} ${input.days} days · ${reason}`
+    });
+
+    return {
+      request: saved,
+      leaveBalance: getLeaveBalance({
+        employee,
+        asOf: this.clock(),
+        approvedRequests: [...leaveRequests, saved],
+        policy: settings
+      }),
+      auditLog
+    };
+  }
+
   async submitOvertimeRequest(input: SubmitOvertimeRequestInput) {
     const employee = await this.findEmployee(input.employeeId);
     await this.assertCanReadEmployee(input.employeeId, input.session);
@@ -809,6 +884,21 @@ export class HrApi {
       const request = await this.findLeaveRequest(input.requestId);
       await this.assertCanApprove(actorId, input.session, request.employeeId);
       assertPendingRequest(request.status);
+      if (input.status === "APPROVED" && (request.type === "ANNUAL" || request.type === "HALF_DAY")) {
+        const employee = await this.findEmployee(request.employeeId);
+        const settings = await this.db.getSettings();
+        if (!settings.annualLeaveOveruseAllowed) {
+          const balance = getLeaveBalance({
+            employee,
+            asOf: `${request.startsOn}T23:59:59+09:00`,
+            approvedRequests: await this.db.listLeaveRequests(),
+            policy: settings
+          });
+          if (request.days > balance.availableDays) {
+            throw new Error("Leave approval exceeds the available balance");
+          }
+        }
+      }
       const saved = await this.db.updateLeaveRequest({
         ...request,
         status: input.status,
@@ -1764,6 +1854,8 @@ export class HrApi {
     const startsOn = normalizeDateOnly(input.startsOn, "휴가 시작일", true)!;
     const endsOn = normalizeDateOnly(input.endsOn, "휴가 종료일", true)!;
     if (endsOn < startsOn) throw new Error("Leave period is invalid");
+    if (startsOn < employee.hireDate) throw new Error("Leave date cannot be before the hire date");
+    if (startsOn < this.clock().slice(0, 10)) throw new Error("Past leave usage must be recorded by an administrator");
     requiredText(input.reason, "Leave request reason");
     if (!Number.isFinite(input.days) || input.days <= 0) {
       throw new Error("Leave days must be greater than zero");
@@ -1781,11 +1873,25 @@ export class HrApi {
     }
     if ((input.type !== "ANNUAL" && input.type !== "HALF_DAY") || settings.annualLeaveOveruseAllowed) return;
 
-    const balance = getLeaveBalance({ employee, asOf: this.clock(), approvedRequests: requests, policy: settings });
-    const pendingDays = requests
-      .filter((request) => request.employeeId === employee.id && request.status === "PENDING" && (request.type === "ANNUAL" || request.type === "HALF_DAY"))
-      .reduce((sum, request) => sum + request.days, 0);
-    if (input.days > balance.availableDays - pendingDays) {
+    const overlapsExistingRequest = requests.some((request) =>
+      request.employeeId === employee.id
+      && (request.type === "ANNUAL" || request.type === "HALF_DAY")
+      && (request.status === "PENDING" || request.status === "APPROVED")
+      && request.startsOn <= endsOn
+      && request.endsOn >= startsOn
+    );
+    if (overlapsExistingRequest) {
+      throw new Error("Leave request overlaps an existing annual leave request");
+    }
+
+    const startCycle = annualLeaveCycle(employee.hireDate, startsOn);
+    const endCycle = annualLeaveCycle(employee.hireDate, endsOn);
+    if (startCycle.startsOn !== endCycle.startsOn) {
+      throw new Error("Leave requests cannot span two hire-date leave cycles");
+    }
+
+    const balance = getLeaveBalance({ employee, asOf: `${startsOn}T23:59:59+09:00`, approvedRequests: requests, policy: settings });
+    if (input.days > balance.availableDays - (balance.pendingDays ?? 0)) {
       throw new Error("Requested leave exceeds the available balance");
     }
   }
@@ -2089,6 +2195,7 @@ export const updateWorkplace = defaultHrApi.updateWorkplace.bind(defaultHrApi);
 export const deleteWorkplace = defaultHrApi.deleteWorkplace.bind(defaultHrApi);
 export const clockAttendance = defaultHrApi.clockAttendance.bind(defaultHrApi);
 export const submitLeaveRequest = defaultHrApi.submitLeaveRequest.bind(defaultHrApi);
+export const recordHistoricalLeaveUsage = defaultHrApi.recordHistoricalLeaveUsage.bind(defaultHrApi);
 export const submitOvertimeRequest = defaultHrApi.submitOvertimeRequest.bind(defaultHrApi);
 export const updateRequestStatus = defaultHrApi.updateRequestStatus.bind(defaultHrApi);
 export const cancelRequest = defaultHrApi.cancelRequest.bind(defaultHrApi);

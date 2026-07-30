@@ -124,6 +124,8 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.clockAttendance(payload as never);
     case "submitLeaveRequest":
       return await api.submitLeaveRequest(payload as never);
+    case "recordHistoricalLeaveUsage":
+      return await api.recordHistoricalLeaveUsage(payload as never);
     case "submitOvertimeRequest":
       return await api.submitOvertimeRequest(payload as never);
     case "updateRequestStatus":

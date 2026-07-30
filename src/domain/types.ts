@@ -169,6 +169,9 @@ export type LeaveBalance = {
   advanceUsedDays: number;
   availableDays: number;
   pendingOffsetDays: number;
+  /** Hire-date-based leave cycle containing `asOf`. */
+  cycleStartsOn?: string;
+  cycleEndsOn?: string;
   /** Approved annual/half-day usage in the current leave year, calculated from the leave request ledger. */
   usedDays?: number;
   pendingDays?: number;

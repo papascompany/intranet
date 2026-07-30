@@ -21,6 +21,7 @@ import type {
   EmployeeAccountState,
   GetDailyWorkTasksInput,
   RegisterUploadedPayrollStatementInput,
+  RecordHistoricalLeaveUsageInput,
   RevealEmployeeSensitiveDataInput,
   ResetEmployeeAccountPasswordInput,
   SetEmployeeAccountAccessInput,
@@ -117,6 +118,10 @@ export async function clockAttendance(input: ClockAttendanceInput) {
 
 export async function submitLeaveRequest(input: SubmitLeaveRequestInput) {
   return await post<{ request: LeaveRequest; auditLog: AuditLog }>("submitLeaveRequest", input);
+}
+
+export async function recordHistoricalLeaveUsage(input: RecordHistoricalLeaveUsageInput) {
+  return await post<{ request: LeaveRequest; leaveBalance: import("../domain/types").LeaveBalance; auditLog: AuditLog }>("recordHistoricalLeaveUsage", input);
 }
 
 export async function submitOvertimeRequest(input: SubmitOvertimeRequestInput) {
@@ -320,6 +325,8 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.clockAttendance(payload as never)) as T;
     case "submitLeaveRequest":
       return (await api.submitLeaveRequest(payload as never)) as T;
+    case "recordHistoricalLeaveUsage":
+      return (await api.recordHistoricalLeaveUsage(payload as never)) as T;
     case "submitOvertimeRequest":
       return (await api.submitOvertimeRequest(payload as never)) as T;
     case "updateRequestStatus":
