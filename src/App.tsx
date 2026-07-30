@@ -1438,7 +1438,7 @@ function App() {
           </>
         }
       >
-        {!isEmployeeHome ? (
+        {effectiveMode === "ADMIN" ? (
           <Toolbar
             title={sectionTitle(activeSection)}
             description={notice}
@@ -1451,7 +1451,9 @@ function App() {
               </InlineActions>
             }
           />
-        ) : null}
+        ) : (
+          <p aria-live="polite" className="sr-only">{notice}</p>
+        )}
         {loadError ? (
           <InlineNotice onDismiss={() => setLoadError(null)} title="동기화 오류" tone="danger">
             {loadError}
