@@ -44,5 +44,7 @@ describe("web push delivery worker", () => {
       env
     );
     expect(query).toHaveBeenCalledWith(expect.stringContaining("set status = 'SENT'"), ["11"]);
+    expect(query).toHaveBeenNthCalledWith(1, expect.not.stringContaining("subscriptions.alert_clock_in"));
+    expect(query).toHaveBeenNthCalledWith(1, expect.not.stringContaining("subscriptions.alert_clock_out"));
   });
 });

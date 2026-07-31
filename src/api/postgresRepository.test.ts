@@ -85,7 +85,10 @@ describe("PostgresHrRepository", () => {
         status: "GPS_PASSED",
         verification_id: "ver-seed-1",
         early_leave_minutes: 0,
-        recognized_work_minutes: 0
+        recognized_work_minutes: 0,
+        review_status: "EVIDENCE_SUBMITTED",
+        evidence_response: "현장 출근 확인 자료",
+        evidence_submitted_at: "2026-07-08T18:00:00+09:00"
       }],
       [{
         id: "early-att-2026-07-08-emp-ops-1",
@@ -106,7 +109,10 @@ describe("PostgresHrRepository", () => {
       status: "GPS_PASSED",
       verificationId: "ver-seed-1",
       earlyLeaveMinutes: 0,
-      recognizedWorkMinutes: 0
+      recognizedWorkMinutes: 0,
+      reviewStatus: "EVIDENCE_SUBMITTED",
+      evidenceResponse: "현장 출근 확인 자료",
+      evidenceSubmittedAt: "2026-07-08T18:00:00+09:00"
     });
     const ledger = await repository.upsertEarlyLeaveLedger({
       id: "early-att-2026-07-08-emp-ops-1",
@@ -119,9 +125,41 @@ describe("PostgresHrRepository", () => {
 
     expect(calls[0].sql).toContain("on conflict (id) do update");
     expect(calls[0].sql).toContain("clock_out_at");
+    expect(calls[0].sql).toContain("evidence_response");
     expect(calls[1].sql).toContain("early_leave_ledger");
-    expect(attendance).toMatchObject({ clockOutAt: "2026-07-08T17:00:00+09:00", earlyLeaveMinutes: 0, recognizedWorkMinutes: 0 });
+    expect(attendance).toMatchObject({ clockOutAt: "2026-07-08T17:00:00+09:00", earlyLeaveMinutes: 0, recognizedWorkMinutes: 0, reviewStatus: "EVIDENCE_SUBMITTED", evidenceResponse: "현장 출근 확인 자료" });
     expect(ledger).toMatchObject({ minutes: 0, status: "CORRECTED" });
+  });
+
+  it("persists the selected half-day period with a leave request", async () => {
+    const row = {
+      id: "leave-half-1",
+      employee_id: "emp-ops-1",
+      type: "HALF_DAY",
+      starts_on: "2026-07-31",
+      ends_on: "2026-07-31",
+      days: 0.5,
+      half_day_period: "PM",
+      reason: "오후 일정",
+      status: "PENDING"
+    };
+    const { calls, repository } = repositoryWithRows([[row]]);
+
+    const saved = await repository.addLeaveRequest({
+      id: "leave-half-1",
+      employeeId: "emp-ops-1",
+      type: "HALF_DAY",
+      startsOn: "2026-07-31",
+      endsOn: "2026-07-31",
+      days: 0.5,
+      halfDayPeriod: "PM",
+      reason: "오후 일정",
+      status: "PENDING"
+    });
+
+    expect(calls[0].sql).toContain("half_day_period");
+    expect(calls[0].params).toContain("PM");
+    expect(saved).toMatchObject({ type: "HALF_DAY", days: 0.5, halfDayPeriod: "PM" });
   });
 
   it("persists an unassigned employee workplace as null", async () => {

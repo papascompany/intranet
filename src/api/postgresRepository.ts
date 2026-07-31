@@ -477,7 +477,9 @@ function attendanceFromRow(row: AttendanceRow): AttendanceRecord {
     reviewStatus: (optionalString(row.review_status) as AttendanceRecord["reviewStatus"]) ?? "NOT_REQUIRED",
     reviewedById: optionalString(row.reviewed_by_id),
     reviewedAt: optionalString(row.reviewed_at),
-    reviewNote: optionalString(row.review_note)
+    reviewNote: optionalString(row.review_note),
+    evidenceResponse: optionalString(row.evidence_response),
+    evidenceSubmittedAt: optionalString(row.evidence_submitted_at)
   };
 }
 
@@ -497,7 +499,9 @@ function attendanceToRow(record: AttendanceRecord): DbRow {
     review_status: record.reviewStatus ?? "NOT_REQUIRED",
     reviewed_by_id: record.reviewedById ?? null,
     reviewed_at: record.reviewedAt ?? null,
-    review_note: record.reviewNote ?? null
+    review_note: record.reviewNote ?? null,
+    evidence_response: record.evidenceResponse ?? null,
+    evidence_submitted_at: record.evidenceSubmittedAt ?? null
   };
 }
 
@@ -537,6 +541,7 @@ function leaveRequestFromRow(row: LeaveRequestRow): LeaveRequest {
     startsOn: dateValue(row.starts_on),
     endsOn: dateValue(row.ends_on),
     days: Number(row.days),
+    halfDayPeriod: optionalString(row.half_day_period) as LeaveRequest["halfDayPeriod"],
     reason: stringValue(row.reason),
     status: row.status,
     decidedBy: optionalString(row.decided_by),
@@ -552,6 +557,7 @@ function leaveRequestToRow(request: LeaveRequest): DbRow {
     starts_on: request.startsOn,
     ends_on: request.endsOn,
     days: request.days,
+    half_day_period: request.halfDayPeriod ?? null,
     reason: request.reason,
     status: request.status,
     decided_by: request.decidedBy,

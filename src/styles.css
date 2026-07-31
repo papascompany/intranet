@@ -466,6 +466,11 @@ button {
   background: var(--color-paper);
 }
 
+.attendance-row-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .my-day__content {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
@@ -671,6 +676,18 @@ button {
   font-family: var(--font-inter);
   font-size: 13px;
   font-weight: 600;
+}
+
+.request-field--fieldset {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.request-field--fieldset legend {
+  margin-bottom: 6px;
+  padding: 0;
 }
 
 .request-field > input,
@@ -1433,6 +1450,17 @@ select {
 }
 
 @media (max-width: 520px) {
+  .attendance-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .attendance-row-actions button {
+    width: 100%;
+    min-height: 36px;
+  }
+
   .employee-home-shell .signed-in-identity {
     display: none;
   }

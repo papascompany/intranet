@@ -25,11 +25,20 @@ export type PushDevice = {
   preferences: PushAlertPreferences;
 };
 
+export type PushAdministratorRecipient = {
+  employeeId: string;
+  enabledDeviceCount: number;
+  lastSuccessAt?: string;
+  name: string;
+  role: "HR_ADMIN" | "SYSTEM_ADMIN";
+};
+
 export type PushConfiguration = {
   configured: boolean;
   currentDeviceId?: string;
   devices: PushDevice[];
   publicKey?: string;
+  recipients: PushAdministratorRecipient[];
 };
 
 export type PushNotificationPayload = {

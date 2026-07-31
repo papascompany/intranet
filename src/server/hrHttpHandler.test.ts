@@ -164,6 +164,7 @@ describe("hrHttpHandler", () => {
             startsOn: "2026-07-20",
             endsOn: "2026-07-20",
             days: 0.5,
+            halfDayPeriod: "PM",
             reason: "오후 개인 일정"
           }
         },

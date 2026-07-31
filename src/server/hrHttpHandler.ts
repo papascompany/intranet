@@ -60,7 +60,7 @@ export async function handleHrHttpRequest(
 
 function isClientApiError(error: unknown) {
   if (!(error instanceof Error)) return false;
-  return /required|permission|denied|not found|already|invalid|must|exceeds|only pending|cannot|not allowed|active employment|unsupported/i.test(error.message);
+  return /required|permission|denied|not found|already|invalid|must|exceeds|only pending|cannot|not allowed|active employment|unsupported|할 수 없|입력해 주세요|찾지 못|일치하지 않|근무일이 없/i.test(error.message);
 }
 
 async function handleGet(request: HrHttpRequest, api: HrApi, persistenceStatus: PersistenceStatus) {
@@ -138,6 +138,8 @@ async function handlePost(request: HrHttpRequest, api: HrApi, persistenceStatus:
       return await api.createAttendanceCorrection(payload as never);
     case "reviewAttendance":
       return await api.reviewAttendance(payload as never);
+    case "submitAttendanceEvidence":
+      return await api.submitAttendanceEvidence(payload as never);
     case "submitAttendanceCorrectionRequest":
       return await api.submitAttendanceCorrectionRequest(payload as never);
     case "updateAttendanceCorrectionRequestStatus":

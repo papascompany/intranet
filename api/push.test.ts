@@ -48,7 +48,7 @@ describe("push notification API", () => {
   });
 
   it("returns the current administrator device", async () => {
-    const query = vi.fn(async () => [{
+    const device = {
       id: "7",
       endpoint: "https://push.example/device",
       p256dh: "p".repeat(65),
@@ -59,7 +59,10 @@ describe("push notification API", () => {
       enabled: true,
       created_at: "2026-07-24T00:00:00.000Z",
       last_success_at: null
-    }]) as unknown as PostgresQuery;
+    };
+    const query = vi.fn(async (sql: string) => sql.includes("from employees administrators")
+      ? [{ employee_id: "admin-1", enabled_device_count: 1, last_success_at: null, name: "더스토리지", role: "SYSTEM_ADMIN" }]
+      : [device]) as unknown as PostgresQuery;
 
     const result = await handlePushHttpRequest(
       { ...baseRequest, body: { action: "status", currentEndpoint: "https://push.example/device" } },
@@ -72,12 +75,13 @@ describe("push notification API", () => {
       body: {
         configured: true,
         currentDeviceId: "7",
-        devices: [{ id: "7", deviceLabel: "iPhone", preferences: { clockIn: true, clockOut: false } }]
+        devices: [{ id: "7", deviceLabel: "iPhone", preferences: { clockIn: true, clockOut: false } }],
+        recipients: [{ employeeId: "admin-1", enabledDeviceCount: 1, name: "더스토리지", role: "SYSTEM_ADMIN" }]
       }
     });
   });
 
-  it("registers a validated iPhone subscription", async () => {
+  it("registers a validated iPhone subscription with mandatory clock-in and clock-out alerts", async () => {
     const row = {
       id: "8",
       endpoint: "https://push.example/new-device",
@@ -90,7 +94,12 @@ describe("push notification API", () => {
       created_at: "2026-07-24T00:00:00.000Z",
       last_success_at: null
     };
-    const query = vi.fn(async (sql: string) => sql.includes("insert into web_push_subscriptions") ? [row] : [row]) as unknown as PostgresQuery;
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("from employees administrators")) {
+        return [{ employee_id: "admin-1", enabled_device_count: 1, last_success_at: null, name: "더스토리지", role: "SYSTEM_ADMIN" }];
+      }
+      return [row];
+    }) as unknown as PostgresQuery;
 
     const result = await handlePushHttpRequest(
       {
@@ -101,7 +110,7 @@ describe("push notification API", () => {
             deviceLabel: "iPhone",
             endpoint: row.endpoint,
             keys: { p256dh: row.p256dh, auth: row.auth_secret },
-            preferences: { clockIn: true, clockOut: true }
+            preferences: { clockIn: false, clockOut: false }
           }
         }
       },
@@ -110,6 +119,12 @@ describe("push notification API", () => {
     );
 
     expect(result.status).toBe(200);
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("insert into web_push_subscriptions"), expect.arrayContaining(["admin-1", row.endpoint]));
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("values ($1, $2, $3, $4, $5, true, true"), [
+      "admin-1",
+      row.endpoint,
+      row.p256dh,
+      row.auth_secret,
+      "iPhone"
+    ]);
   });
 });

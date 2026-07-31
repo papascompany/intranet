@@ -144,10 +144,6 @@ export async function deliverAttendancePushes(
      where audit_logs.action in ('ATTENDANCE_CLOCKED_IN', 'ATTENDANCE_CLOCKED_OUT')
        and audit_logs.created_at >= subscriptions.deliver_from
        and deliveries.id is null
-       and (
-         (audit_logs.action = 'ATTENDANCE_CLOCKED_IN' and subscriptions.alert_clock_in = true)
-         or (audit_logs.action = 'ATTENDANCE_CLOCKED_OUT' and subscriptions.alert_clock_out = true)
-       )
      order by audit_logs.created_at asc
      limit 50`
   );

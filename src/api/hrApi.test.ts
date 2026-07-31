@@ -285,6 +285,11 @@ describe("hr api", () => {
       lateMinutes: 0,
       reviewStatus: "NOT_REQUIRED"
     });
+    expect(result.earlyLeaveLedger).toMatchObject({
+      minutes: 60,
+      status: "FLEX_ALLOWED",
+      reason: "개인별 근무시간 정책 자동 인정"
+    });
   });
 
   it("uses the employee-specific start time to distinguish normal attendance from lateness", async () => {
@@ -462,6 +467,7 @@ describe("hr api", () => {
       session: adminSession,
       usedOn: "2026-07-03",
       days: 0.5,
+      halfDayPeriod: "PM",
       reason: "2026년 1~7월 기초 사용 등록"
     });
 
@@ -470,6 +476,7 @@ describe("hr api", () => {
       type: "HALF_DAY",
       startsOn: "2026-07-03",
       days: 0.5,
+      halfDayPeriod: "PM",
       status: "APPROVED",
       decidedBy: adminSession.employeeId
     });
@@ -509,7 +516,7 @@ describe("hr api", () => {
       days: 1,
       reason: "기간 불일치 검증",
       session: employeeSession
-    })).rejects.toThrow("Leave days must match the selected date range");
+    })).rejects.toThrow("근무일·공휴일 기준 자동 계산 결과");
   });
 
   it("allows employees to cancel only their own pending leave request", async () => {
@@ -517,8 +524,8 @@ describe("hr api", () => {
     const submitted = await hrApi.submitLeaveRequest({
       employeeId: employeeSession.employeeId,
       type: "ANNUAL",
-      startsOn: "2026-07-25",
-      endsOn: "2026-07-25",
+      startsOn: "2026-07-27",
+      endsOn: "2026-07-27",
       days: 1,
       reason: "일정 변경",
       session: employeeSession
@@ -613,7 +620,7 @@ describe("hr api", () => {
     await expect(hrApi.submitLeaveRequest({ ...leaveInput, type: "HALF_DAY", days: 0.5 }))
       .rejects.toThrow("Half-day leave is not allowed by the current policy");
     await expect(hrApi.submitLeaveRequest({ ...leaveInput, type: "ANNUAL", days: 0.5 }))
-      .rejects.toThrow("Leave must be requested in 1-day units");
+      .rejects.toThrow("근무일·공휴일 기준 자동 계산 결과");
     await expect(hrApi.submitLeaveRequest({ ...leaveInput, type: "ANNUAL", days: 1 }))
       .rejects.toThrow("Requested leave exceeds the available balance");
 
@@ -1830,5 +1837,112 @@ describe("hr api", () => {
 
     expect(beforeDelete.payrollStatements.map((statement) => statement.id)).toContain(upload.statement.id);
     expect(afterDelete.payrollStatements.map((statement) => statement.id)).not.toContain(upload.statement.id);
+  });
+
+  it("separates employee self-service writes from administrator and approver read scope", async () => {
+    const hrApi = api();
+
+    await expect(hrApi.clockAttendance({
+      employeeId: employeeSession.employeeId,
+      type: "CLOCK_IN",
+      method: "MANUAL_CLICK",
+      session: adminSession
+    })).rejects.toThrow("Self-service permission denied");
+    await expect(hrApi.submitLeaveRequest({
+      employeeId: "emp-prod-1",
+      type: "ANNUAL",
+      startsOn: "2026-07-20",
+      endsOn: "2026-07-20",
+      reason: "승인자 대리 신청 차단",
+      session: approverSession
+    })).rejects.toThrow("Self-service permission denied");
+  });
+
+  it("calculates charged leave from workdays and holidays and persists half-day periods", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({
+      leaveRequests: [],
+      settings: { ...defaultSystemPolicy, payrollHolidayDates: ["2026-07-20"] }
+    }), () => fixedNow);
+
+    const range = await hrApi.submitLeaveRequest({
+      employeeId: employeeSession.employeeId,
+      type: "ANNUAL",
+      startsOn: "2026-07-17",
+      endsOn: "2026-07-21",
+      days: 2,
+      reason: "주말과 회사 휴일 제외",
+      session: employeeSession
+    });
+    const halfDay = await hrApi.submitLeaveRequest({
+      employeeId: employeeSession.employeeId,
+      type: "HALF_DAY",
+      startsOn: "2026-07-22",
+      endsOn: "2026-07-22",
+      halfDayPeriod: "PM",
+      reason: "오후 일정",
+      session: employeeSession
+    });
+
+    expect(range.request.days).toBe(2);
+    expect(halfDay.request).toMatchObject({ days: 0.5, halfDayPeriod: "PM" });
+  });
+
+  it("tracks employee evidence submission through administrator re-review", async () => {
+    const db = new InMemoryDatabase({
+      attendanceRecords: [{
+        id: "att-evidence-1",
+        employeeId: employeeSession.employeeId,
+        date: "2026-07-08",
+        clockInAt: "2026-07-08T08:05:00+09:00",
+        clockOutAt: "2026-07-08T17:00:00+09:00",
+        status: "OUT_OF_RANGE",
+        verificationId: "ver-evidence-1",
+        earlyLeaveMinutes: 0,
+        reviewStatus: "EVIDENCE_REQUESTED",
+        reviewNote: "외근 여부를 확인해 주세요."
+      }]
+    });
+    const hrApi = createHrApi(db, () => fixedNow);
+
+    const submitted = await hrApi.submitAttendanceEvidence({
+      attendanceId: "att-evidence-1",
+      employeeId: employeeSession.employeeId,
+      response: "거래처 방문 후 현장에서 출근했습니다.",
+      session: employeeSession
+    });
+    expect(submitted.attendance).toMatchObject({ reviewStatus: "EVIDENCE_SUBMITTED", evidenceResponse: "거래처 방문 후 현장에서 출근했습니다." });
+    await expect(hrApi.getDashboard({ asOf: fixedNow, session: adminSession })).resolves.toMatchObject({
+      attendanceReviewQueue: [expect.objectContaining({ id: "att-evidence-1", reviewStatus: "EVIDENCE_SUBMITTED" })]
+    });
+
+    const reviewed = await hrApi.reviewAttendance({
+      attendanceId: "att-evidence-1",
+      action: "CONFIRM",
+      note: "외근 일정 확인 완료",
+      actorId: adminSession.employeeId,
+      session: adminSession
+    });
+    expect(reviewed.attendance.reviewStatus).toBe("CONFIRMED");
+  });
+
+  it("adds past records without checkout to both administrator and employee queues", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({
+      attendanceRecords: [{
+        id: "att-missing-out",
+        employeeId: employeeSession.employeeId,
+        date: "2026-07-07",
+        clockInAt: "2026-07-07T08:00:00+09:00",
+        status: "GPS_PASSED",
+        verificationId: "ver-missing-out",
+        earlyLeaveMinutes: 0,
+        reviewStatus: "NOT_REQUIRED"
+      }]
+    }), () => fixedNow);
+
+    const dashboard = await hrApi.getDashboard({ asOf: fixedNow, session: adminSession });
+    const snapshot = await hrApi.getEmployeeSnapshot(employeeSession.employeeId, fixedNow, employeeSession);
+
+    expect(dashboard.attendanceReviewQueue).toEqual([expect.objectContaining({ id: "att-missing-out", attentionReason: "MISSING_CLOCK_OUT" })]);
+    expect(snapshot.attendanceRecords).toEqual([expect.objectContaining({ id: "att-missing-out", attentionReason: "MISSING_CLOCK_OUT" })]);
   });
 });

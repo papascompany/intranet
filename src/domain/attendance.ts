@@ -130,6 +130,7 @@ export function buildAttendanceRecord(params: {
 
   const existingReviewIsOpen = params.existing?.reviewStatus === "PENDING"
     || params.existing?.reviewStatus === "EVIDENCE_REQUESTED"
+    || params.existing?.reviewStatus === "EVIDENCE_SUBMITTED"
     || (!params.existing?.reviewStatus && params.existing && requiresAttendanceReview(params.existing.status));
   const incomingReviewIsOpen = requiresAttendanceReview(params.verification.status);
   const verificationStatus = !incomingReviewIsOpen && existingReviewIsOpen
@@ -187,6 +188,20 @@ export function requiresAttendanceReview(status: VerificationStatus) {
   return status === "OUT_OF_RANGE" || status === "MANUAL_REVIEW_REQUIRED";
 }
 
+export function isMissingClockOut(params: {
+  record: AttendanceRecord;
+  asOf: string;
+  scheduledEndTime: string;
+  isScheduledWorkDay: boolean;
+}) {
+  if (!params.record.clockInAt || params.record.clockOutAt || !params.isScheduledWorkDay) return false;
+  const now = koreaDateTimeParts(params.asOf);
+  if (!now) return false;
+  if (params.record.date < now.date) return true;
+  if (params.record.date > now.date) return false;
+  return now.time >= params.scheduledEndTime;
+}
+
 function koreaTimeSeconds(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return undefined;
@@ -203,6 +218,28 @@ function koreaTimeSeconds(value: string) {
   return Number.isFinite(hour) && Number.isFinite(minute) && Number.isFinite(second)
     ? hour * 3600 + minute * 60 + second
     : undefined;
+}
+
+function koreaDateTimeParts(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value;
+  const year = part("year");
+  const month = part("month");
+  const day = part("day");
+  const hour = part("hour");
+  const minute = part("minute");
+  if (!year || !month || !day || !hour || !minute) return undefined;
+  return { date: `${year}-${month}-${day}`, time: `${hour}:${minute}` };
 }
 
 function parseTimeSeconds(value: string) {

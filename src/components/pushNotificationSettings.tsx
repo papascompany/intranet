@@ -5,10 +5,9 @@ import {
   getPushConfiguration,
   registerPushDevice,
   sendPushTest,
-  unregisterPushDevice,
-  updatePushDevice
+  unregisterPushDevice
 } from "../api/pushHttpClient";
-import type { PushAlertPreferences, PushConfiguration } from "../api/pushTypes";
+import type { PushConfiguration } from "../api/pushTypes";
 import { InlineNotice, OperationalDialog } from "./operational";
 import "./pushNotificationSettings.css";
 
@@ -17,13 +16,12 @@ type PushNotificationSettingsProps = {
   open: boolean;
 };
 
-const defaultPreferences: PushAlertPreferences = { clockIn: true, clockOut: true };
+const mandatoryPreferences = { clockIn: true, clockOut: true } as const;
 
 export function PushNotificationSettings({ onClose, open }: PushNotificationSettingsProps) {
   const [configuration, setConfiguration] = useState<PushConfiguration | null>(null);
-  const [preferences, setPreferences] = useState(defaultPreferences);
   const [isLoading, setIsLoading] = useState(false);
-  const [action, setAction] = useState<"register" | "save" | "test" | "remove" | null>(null);
+  const [action, setAction] = useState<"register" | "test" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [browserSubscription, setBrowserSubscription] = useState<PushSubscription | null>(null);
@@ -42,8 +40,6 @@ export function PushNotificationSettings({ onClose, open }: PushNotificationSett
         if (!active) return;
         setConfiguration(nextConfiguration);
         setBrowserSubscription(subscription);
-        const device = nextConfiguration.devices.find((item) => item.id === nextConfiguration.currentDeviceId);
-        setPreferences(device?.preferences ?? defaultPreferences);
       })
       .catch((loadError) => {
         if (active) setError(toErrorMessage(loadError));
@@ -85,7 +81,7 @@ export function PushNotificationSettings({ onClose, open }: PushNotificationSett
         endpoint: subscription.endpoint,
         expirationTime: subscription.expirationTime,
         keys: { auth: keys.auth, p256dh: keys.p256dh },
-        preferences
+        preferences: mandatoryPreferences
       });
       setBrowserSubscription(subscription);
       setConfiguration(nextConfiguration);
@@ -93,25 +89,6 @@ export function PushNotificationSettings({ onClose, open }: PushNotificationSett
       void registration.update();
     } catch (registerError) {
       setError(toErrorMessage(registerError));
-    } finally {
-      setAction(null);
-    }
-  }
-
-  async function savePreferences() {
-    if (!currentDevice) return;
-    setAction("save");
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await updatePushDevice(currentDevice.id, preferences);
-      setConfiguration((current) => current ? {
-        ...current,
-        devices: current.devices.map((device) => device.id === result.device.id ? result.device : device)
-      } : current);
-      setMessage("알림 종류를 저장했습니다.");
-    } catch (saveError) {
-      setError(toErrorMessage(saveError));
     } finally {
       setAction(null);
     }
@@ -192,22 +169,38 @@ export function PushNotificationSettings({ onClose, open }: PushNotificationSett
           </div>
         ) : null}
 
+        {configuration?.recipients.length ? (
+          <section className="push-settings__recipients" aria-label="관리자 알림 수신 준비 현황">
+            <div className="push-settings__recipients-heading">
+              <div><strong>관리자 수신 준비</strong><span>활성 관리자 계정별 등록 현황입니다.</span></div>
+              <b>{configuration.recipients.filter((recipient) => recipient.enabledDeviceCount > 0).length}/{configuration.recipients.length}명</b>
+            </div>
+            <div className="push-settings__recipient-list">
+              {configuration.recipients.map((recipient) => (
+                <div key={recipient.employeeId}>
+                  <span><strong>{recipient.name}</strong><small>{recipient.role === "SYSTEM_ADMIN" ? "시스템 관리자" : "인사 관리자"}</small></span>
+                  <em className={recipient.enabledDeviceCount > 0 ? "is-ready" : "is-missing"}>
+                    {recipient.enabledDeviceCount > 0 ? `iPhone ${recipient.enabledDeviceCount}대` : "iPhone 등록 필요"}
+                  </em>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {currentDevice ? (
           <>
             <div className="push-settings__device-status">
               <span className="push-settings__device-icon"><Smartphone aria-hidden="true" /></span>
               <div><strong>{currentDevice.deviceLabel}</strong><span><Check aria-hidden="true" /> 알림 수신 중</span></div>
             </div>
-            <fieldset className="push-settings__preferences">
-              <legend>받을 알림</legend>
-              <label><input checked={preferences.clockIn} onChange={(event) => setPreferences((current) => ({ ...current, clockIn: event.target.checked }))} type="checkbox" />출근 처리</label>
-              <label><input checked={preferences.clockOut} onChange={(event) => setPreferences((current) => ({ ...current, clockOut: event.target.checked }))} type="checkbox" />퇴근 처리</label>
-            </fieldset>
+            <div className="push-settings__preferences">
+              <strong>필수 수신 항목</strong>
+              <span><Check aria-hidden="true" />출근 처리</span>
+              <span><Check aria-hidden="true" />퇴근 처리</span>
+              <small>관리자 업무 알림은 계정별로 해제할 수 없습니다.</small>
+            </div>
             <div className="push-settings__actions">
-              <button disabled={Boolean(action)} onClick={savePreferences} type="button">
-                {action === "save" ? <LoaderCircle className="is-spinning" /> : <Check />}
-                설정 저장
-              </button>
               <button disabled={Boolean(action)} onClick={testCurrentDevice} type="button">
                 {action === "test" ? <LoaderCircle className="is-spinning" /> : <Send />}
                 테스트 알림

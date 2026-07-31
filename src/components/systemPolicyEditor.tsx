@@ -105,10 +105,10 @@ export function SystemPolicyEditor({ busy = false, error, onSave, settings }: Sy
             <PolicyToggle checked={draft.annualLeaveOveruseAllowed} label="연차 초과 사용 허용" onChange={(checked) => update("annualLeaveOveruseAllowed", checked)} />
           </div>
           <label className="system-policy-editor__holiday-field">
-            <span>추가 공휴일</span>
-            <small>음력 명절·임시공휴일 등 급여 알림을 앞당길 날짜를 YYYY-MM-DD로 입력하세요. 여러 날짜는 줄바꿈 또는 쉼표로 구분합니다.</small>
+            <span>회사 휴일</span>
+            <small>공휴일·임시휴무일을 YYYY-MM-DD로 입력하세요. 휴가 차감일에서 제외되고 급여 알림일 계산에도 반영됩니다.</small>
             <textarea
-              aria-label="추가 공휴일"
+              aria-label="회사 휴일"
               onChange={(event) => update("payrollHolidayDates", parseHolidayDates(event.target.value))}
               rows={3}
               value={draft.payrollHolidayDates.join("\n")}

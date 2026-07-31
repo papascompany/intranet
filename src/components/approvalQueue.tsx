@@ -45,8 +45,9 @@ function requestTitle(item: ApprovalQueueItem) {
 
 function requestSummary(item: ApprovalQueueItem) {
   if (item.kind === "leave") {
-    const { endsOn, startsOn, days } = item.request;
-    return `${startsOn}${startsOn === endsOn ? "" : ` ~ ${endsOn}`} · ${formatDays(days)}`;
+    const { endsOn, startsOn, days, halfDayPeriod } = item.request;
+    const halfDay = halfDayPeriod ? ` · ${halfDayPeriod === "AM" ? "오전" : "오후"}` : "";
+    return `${startsOn}${startsOn === endsOn ? "" : ` ~ ${endsOn}`} · ${formatDays(days)}${halfDay}`;
   }
 
   if (item.kind === "overtime") return `${item.request.date} · ${formatMinutes(item.request.minutes)}`;
@@ -187,6 +188,7 @@ export function ApprovalQueue({
                 {selectedItem.kind === "leave" ? (
                   <>
                     <div><dt>휴가 유형</dt><dd>{leaveTypeLabel(selectedItem.request.type)}</dd></div>
+                    {selectedItem.request.halfDayPeriod ? <div><dt>반차 시간대</dt><dd>{selectedItem.request.halfDayPeriod === "AM" ? "오전" : "오후"}</dd></div> : null}
                     <div><dt>휴가 일수</dt><dd>{formatDays(selectedItem.request.days)}</dd></div>
                   </>
                 ) : selectedItem.kind === "overtime" ? (

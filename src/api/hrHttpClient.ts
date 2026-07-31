@@ -10,6 +10,8 @@ import type {
   CreateAttendanceCorrectionInput,
   ReviewAttendanceInput,
   ReviewAttendanceResult,
+  SubmitAttendanceEvidenceInput,
+  SubmitAttendanceEvidenceResult,
   CreateWorkplaceInput,
   ImportEmployeeAccountsInput,
   ImportEmployeeAccountsResult,
@@ -158,6 +160,10 @@ export async function createAttendanceCorrection(input: CreateAttendanceCorrecti
 
 export async function reviewAttendance(input: ReviewAttendanceInput) {
   return await post<ReviewAttendanceResult>("reviewAttendance", input);
+}
+
+export async function submitAttendanceEvidence(input: SubmitAttendanceEvidenceInput) {
+  return await post<SubmitAttendanceEvidenceResult>("submitAttendanceEvidence", input);
 }
 
 export async function submitAttendanceCorrectionRequest(input: SubmitAttendanceCorrectionRequestInput) {
@@ -339,6 +345,8 @@ async function postToLocalDemoApi<T>(action: string, payload?: unknown) {
       return (await api.createAttendanceCorrection(payload as never)) as T;
     case "reviewAttendance":
       return (await api.reviewAttendance(payload as never)) as T;
+    case "submitAttendanceEvidence":
+      return (await api.submitAttendanceEvidence(payload as never)) as T;
     case "submitAttendanceCorrectionRequest":
       return (await api.submitAttendanceCorrectionRequest(payload as never)) as T;
     case "updateAttendanceCorrectionRequestStatus":

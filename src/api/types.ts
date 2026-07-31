@@ -7,6 +7,7 @@ import type {
   CorrectionType,
   EarlyLeaveLedger,
   Employee,
+  HalfDayPeriod,
   LeaveBalance,
   LeaveBalanceAdjustment,
   LeaveRequest,
@@ -55,7 +56,9 @@ export type SubmitLeaveRequestInput = AuthenticatedInput & {
   type: LeaveType;
   startsOn: string;
   endsOn: string;
-  days: number;
+  /** Optional legacy hint. The server always calculates the charged days from policy. */
+  days?: number;
+  halfDayPeriod?: HalfDayPeriod;
   reason: string;
   actorId?: string;
   status?: Extract<RequestStatus, "DRAFT" | "PENDING">;
@@ -66,6 +69,7 @@ export type RecordHistoricalLeaveUsageInput = AuthenticatedInput & {
   actorId: string;
   usedOn: string;
   days: 0.5 | 1;
+  halfDayPeriod?: HalfDayPeriod;
   reason: string;
 };
 
@@ -137,6 +141,17 @@ export type ReviewAttendanceInput = AuthenticatedInput & {
 };
 
 export type ReviewAttendanceResult = {
+  attendance: AttendanceRecord;
+  auditLog: AuditLog;
+};
+
+export type SubmitAttendanceEvidenceInput = AuthenticatedInput & {
+  attendanceId: string;
+  employeeId: string;
+  response: string;
+};
+
+export type SubmitAttendanceEvidenceResult = {
   attendance: AttendanceRecord;
   auditLog: AuditLog;
 };

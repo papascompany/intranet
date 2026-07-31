@@ -43,6 +43,7 @@ import {
   recordHistoricalLeaveUsage,
   resetEmployeeAccountPassword,
   reviewAttendance,
+  submitAttendanceEvidence,
   revealEmployeeSensitiveData,
   setOvertimePayApproval,
   setEmployeeAccountAccess,
@@ -81,8 +82,8 @@ import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/
 import type { EmployeeAccountCreateInput } from "./components/employeeAccountManager";
 import { ForcePasswordChange } from "./components/forcePasswordChange";
 import type { ApprovalQueueItem } from "./components/approvalQueue";
-import type { AttendanceRecord, AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod, Workplace } from "./domain/types";
-import { getLeaveBalance } from "./domain/leave";
+import type { AttendanceRecord, AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, HalfDayPeriod, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod, Workplace } from "./domain/types";
+import { calculateLeaveDays, getLeaveBalance } from "./domain/leave";
 import { isPayrollNoticeDay, payrollNoticeDate } from "./domain/payroll";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
 import { buildEmployeeCardViewModel, type EmployeeCardRow } from "./features/employeeCardViewModel";
@@ -131,8 +132,8 @@ type UserMode = "EMPLOYEE" | "ADMIN";
 type RequestDialog = "leave" | "overtime" | null;
 
 type LeaveDraft = {
-  days: string;
   endsOn: string;
+  halfDayPeriod: HalfDayPeriod;
   reason: string;
   startsOn: string;
   type: LeaveType;
@@ -152,6 +153,7 @@ type PayrollUploadDraft = {
 
 type HistoricalLeaveDraft = {
   days: "0.5" | "1";
+  halfDayPeriod: HalfDayPeriod;
   reason: string;
   usedOn: string;
 };
@@ -259,7 +261,7 @@ function App() {
     type: "ANNUAL",
     startsOn: "",
     endsOn: "",
-    days: "1",
+    halfDayPeriod: "AM",
     reason: ""
   });
   const [overtimeDraft, setOvertimeDraft] = useState<OvertimeDraft>({
@@ -283,6 +285,10 @@ function App() {
     reason: ""
   });
   const [correctionTarget, setCorrectionTarget] = useState<AttendanceRecord | null>(null);
+  const [evidenceTarget, setEvidenceTarget] = useState<AttendanceRecord | null>(null);
+  const [evidenceResponse, setEvidenceResponse] = useState("");
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [isSubmittingEvidence, setIsSubmittingEvidence] = useState(false);
   const [isEmployeeCardEditorOpen, setIsEmployeeCardEditorOpen] = useState(false);
   const [isEmployeeDetailLoading, setIsEmployeeDetailLoading] = useState(false);
   const [isSavingEmployeeCard, setIsSavingEmployeeCard] = useState(false);
@@ -301,6 +307,7 @@ function App() {
   const [historicalLeaveDraft, setHistoricalLeaveDraft] = useState<HistoricalLeaveDraft>({
     usedOn: "",
     days: "1",
+    halfDayPeriod: "AM",
     reason: "2026년 1~7월 기초 사용 등록"
   });
   const employeeSnapshotCacheRef = useRef(new Map<string, { cachedAt: number; snapshot: EmployeeSnapshot }>());
@@ -379,7 +386,14 @@ function App() {
     : employees.find((employee) => employee.id === selectedEmployeeId);
   const selectedEmployee = revealedEmployee?.id === baseSelectedEmployee?.id ? revealedEmployee : baseSelectedEmployee;
   const signedInEmployee = employees.find((employee) => employee.id === authSession?.employeeId) ?? selectedEmployee;
-  const requestedLeaveDays = Number(leaveDraft.days);
+  const requestedLeaveDays = useMemo(() => calculateLeaveDays({
+    type: leaveDraft.type,
+    startsOn: leaveDraft.startsOn,
+    endsOn: leaveDraft.endsOn,
+    halfDayPeriod: leaveDraft.halfDayPeriod,
+    workDays: dashboard?.settings?.workDays ?? defaultSystemPolicy.workDays,
+    holidayDates: dashboard?.settings?.payrollHolidayDates ?? defaultSystemPolicy.payrollHolidayDates
+  }), [dashboard?.settings?.payrollHolidayDates, dashboard?.settings?.workDays, leaveDraft.endsOn, leaveDraft.halfDayPeriod, leaveDraft.startsOn, leaveDraft.type]);
   const pendingAnnualLeaveDays = employeeSnapshot?.leaveBalance.pendingDays ?? 0;
   const requestableLeaveDays = Math.max((employeeSnapshot?.leaveBalance.availableDays ?? 0) - pendingAnnualLeaveDays, 0);
   const checksLeaveBalance = leaveDraft.type === "ANNUAL" || leaveDraft.type === "HALF_DAY";
@@ -597,13 +611,28 @@ function App() {
       return;
     }
 
+    if (nextMode === "EMPLOYEE" && authSession) {
+      const selfId = authSession.employeeId;
+      const cached = employeeSnapshotCacheRef.current.get(selfId)?.snapshot;
+      setSelectedEmployeeId(selfId);
+      setEmployeeSnapshot((current) => cached ?? (current?.employee.id === selfId ? current : null));
+      setIsEmployeeSensitiveDataRevealed(false);
+      setRevealedEmployee(null);
+      setClockFeedback(null);
+      void refresh(selfId);
+    }
+    setRequestDialog(null);
+    setIsCorrectionDialogOpen(false);
+    setCorrectionTarget(null);
+    setEvidenceTarget(null);
     setUserMode(nextMode);
     setActiveSection(nextMode === "ADMIN" ? "overview" : "self-service");
     setNotice(nextMode === "ADMIN" ? "관리자모드로 전환했습니다." : "직원모드로 전환했습니다.");
   }
 
   async function clock(type: ClockType, method: VerificationMethod, gpsError = false) {
-    if (!selectedEmployee || clockingType) return;
+    const actionEmployee = employees.find((employee) => employee.id === authSession?.employeeId);
+    if (!actionEmployee || employeeSnapshot?.employee.id !== actionEmployee.id || clockingType) return;
 
     setClockingType(type);
     setClockError(null);
@@ -621,7 +650,7 @@ function App() {
         }
       }
       const result = await clockAttendance({
-        employeeId: selectedEmployee.id,
+        employeeId: actionEmployee.id,
         type,
         method,
         session: authSession ?? undefined,
@@ -636,7 +665,7 @@ function App() {
         ? (await import("./content/attendanceMessages")).pickAttendanceMessage()
         : undefined;
       setEmployeeSnapshot((current) => {
-        if (!current || current.employee.id !== selectedEmployee.id) return current;
+        if (!current || current.employee.id !== actionEmployee.id) return current;
         const next = {
           ...current,
           todayAttendance: result.attendance,
@@ -655,7 +684,7 @@ function App() {
         status: verificationStatusLabel(result.verification.status),
         time: formatKoreaTime(recordedAt ?? now)
       });
-      setNotice(`${selectedEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}${fallbackNotice}`);
+      setNotice(`${actionEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}${fallbackNotice}`);
     } catch (error) {
       setClockError(error instanceof Error ? error.message : "출퇴근 기록을 처리하지 못했습니다.");
     } finally {
@@ -743,11 +772,15 @@ function App() {
   }
 
   async function submitLeave() {
-    if (!selectedEmployee) return;
+    const actionEmployee = employees.find((employee) => employee.id === authSession?.employeeId);
+    if (!actionEmployee || employeeSnapshot?.employee.id !== actionEmployee.id) return;
 
-    const days = Number(leaveDraft.days);
-    if (!leaveDraft.startsOn || !leaveDraft.endsOn || !leaveDraft.reason.trim() || !Number.isFinite(days) || days <= 0) {
-      setRequestError("휴가 유형, 기간, 일수, 사유를 모두 입력해 주세요.");
+    if (!leaveDraft.startsOn || !leaveDraft.endsOn || !leaveDraft.reason.trim()) {
+      setRequestError("휴가 유형, 기간과 사유를 모두 입력해 주세요.");
+      return;
+    }
+    if (requestedLeaveDays <= 0) {
+      setRequestError("선택한 기간에는 휴가로 차감할 근무일이 없습니다. 근무요일과 회사 휴일을 확인해 주세요.");
       return;
     }
     if (leaveBalanceInsufficient) {
@@ -759,18 +792,19 @@ function App() {
     setRequestError(null);
     try {
       const result = await submitLeaveRequest({
-        employeeId: selectedEmployee.id,
+        employeeId: actionEmployee.id,
         type: leaveDraft.type,
         startsOn: leaveDraft.startsOn,
         endsOn: leaveDraft.endsOn,
-        days,
+        days: requestedLeaveDays,
+        halfDayPeriod: leaveDraft.type === "HALF_DAY" ? leaveDraft.halfDayPeriod : undefined,
         reason: leaveDraft.reason.trim(),
-        actorId: authActorId(authSession, selectedEmployee.id),
+        actorId: authActorId(authSession, actionEmployee.id),
         session: authSession ?? undefined
       });
 
-      setNotice(`${selectedEmployee.name} 휴가 신청 · ${result.request.status}`);
-      setEmployeeSnapshot((current) => current && current.employee.id === selectedEmployee.id
+      setNotice(`${actionEmployee.name} 휴가 신청 · ${result.request.status}`);
+      setEmployeeSnapshot((current) => current && current.employee.id === actionEmployee.id
         ? { ...current, leaveRequests: [result.request, ...current.leaveRequests] }
         : current);
       setDashboard((current) => current ? {
@@ -779,7 +813,7 @@ function App() {
         pendingLeaveRequests: [result.request, ...current.pendingLeaveRequests]
       } : current);
       setRequestDialog(null);
-      setLeaveDraft({ type: "ANNUAL", startsOn: "", endsOn: "", days: "1", reason: "" });
+      setLeaveDraft({ type: "ANNUAL", startsOn: "", endsOn: "", halfDayPeriod: "AM", reason: "" });
       setActiveSection("leave");
     } catch (error) {
       setRequestError(humanizeLeaveError(error, requestableLeaveDays));
@@ -803,11 +837,12 @@ function App() {
         session: authSession ?? undefined,
         usedOn: historicalLeaveDraft.usedOn,
         days: Number(historicalLeaveDraft.days) as 0.5 | 1,
+        halfDayPeriod: historicalLeaveDraft.days === "0.5" ? historicalLeaveDraft.halfDayPeriod : undefined,
         reason: historicalLeaveDraft.reason.trim()
       });
       setNotice(`${selectedEmployee.name} 기존 연차 사용 ${formatLeaveDays(result.request.days)} 등록 완료`);
       setIsHistoricalLeaveOpen(false);
-      setHistoricalLeaveDraft({ usedOn: "", days: "1", reason: "2026년 1~7월 기초 사용 등록" });
+      setHistoricalLeaveDraft({ usedOn: "", days: "1", halfDayPeriod: "AM", reason: "2026년 1~7월 기초 사용 등록" });
       await refresh(selectedEmployee.id);
     } catch (error) {
       setHistoricalLeaveError(humanizeHistoricalLeaveError(error));
@@ -817,7 +852,8 @@ function App() {
   }
 
   async function submitOvertime() {
-    if (!selectedEmployee) return;
+    const actionEmployee = employees.find((employee) => employee.id === authSession?.employeeId);
+    if (!actionEmployee || employeeSnapshot?.employee.id !== actionEmployee.id) return;
 
     if (!overtimeDraft.date || !overtimeDraft.startsAt || !overtimeDraft.endsAt || !overtimeDraft.reason.trim()) {
       setRequestError("근무일, 시작·종료 시각, 사유를 모두 입력해 주세요.");
@@ -836,18 +872,18 @@ function App() {
     setRequestError(null);
     try {
       const result = await submitOvertimeRequest({
-        employeeId: selectedEmployee.id,
+        employeeId: actionEmployee.id,
         date: overtimeDraft.date,
         startsAt,
         endsAt,
         minutes,
         reason: overtimeDraft.reason.trim(),
-        actorId: authActorId(authSession, selectedEmployee.id),
+        actorId: authActorId(authSession, actionEmployee.id),
         session: authSession ?? undefined
       });
 
-      setNotice(`${selectedEmployee.name} 야근 신청 · ${result.request.status}`);
-      setEmployeeSnapshot((current) => current && current.employee.id === selectedEmployee.id
+      setNotice(`${actionEmployee.name} 야근 신청 · ${result.request.status}`);
+      setEmployeeSnapshot((current) => current && current.employee.id === actionEmployee.id
         ? { ...current, overtimeRequests: [result.request, ...current.overtimeRequests] }
         : current);
       setDashboard((current) => current ? { ...current, overtimeRequests: [result.request, ...current.overtimeRequests] } : current);
@@ -1008,7 +1044,8 @@ function App() {
   }
 
   async function submitCorrectionRequest() {
-    if (!selectedEmployee) {
+    const actionEmployee = employees.find((employee) => employee.id === authSession?.employeeId);
+    if (!actionEmployee || employeeSnapshot?.employee.id !== actionEmployee.id) {
       setCorrectionError("직원 정보를 불러오지 못했습니다.");
       return;
     }
@@ -1020,11 +1057,11 @@ function App() {
     setIsSubmittingCorrection(true);
     setCorrectionError(null);
     try {
-      const attendance = employeeSnapshot?.todayAttendance;
+      const attendance = correctionTarget ?? employeeSnapshot?.todayAttendance;
       const isClockOut = correctionDraft.type === "CLOCK_OUT_CORRECTION";
       const result = await submitAttendanceCorrectionRequest({
         attendanceId: attendance?.id,
-        employeeId: selectedEmployee.id,
+        employeeId: actionEmployee.id,
         session: authSession ?? undefined,
         type: correctionDraft.type,
         beforeValue: isClockOut ? attendance?.clockOutAt : attendance?.clockInAt,
@@ -1035,8 +1072,9 @@ function App() {
 
       setNotice(`근태 정정 신청이 접수되었습니다 · ${result.request.id}`);
       setIsCorrectionDialogOpen(false);
+      setCorrectionTarget(null);
       setCorrectionDraft({ type: "CLOCK_IN_CORRECTION", afterValue: "", reason: "" });
-      await refresh(selectedEmployee.id);
+      await refresh(actionEmployee.id);
     } catch (error) {
       setCorrectionError(error instanceof Error ? error.message : "근태 정정 신청을 저장하지 못했습니다.");
     } finally {
@@ -1075,9 +1113,45 @@ function App() {
     return result;
   }
 
+  async function submitEvidenceResponse() {
+    const actionEmployee = employees.find((employee) => employee.id === authSession?.employeeId);
+    if (!actionEmployee || !evidenceTarget || evidenceTarget.employeeId !== actionEmployee.id) {
+      setEvidenceError("회신할 근태 기록을 찾지 못했습니다.");
+      return;
+    }
+    if (!evidenceResponse.trim()) {
+      setEvidenceError("관리자가 확인할 수 있도록 상황 설명을 입력해 주세요.");
+      return;
+    }
+    setIsSubmittingEvidence(true);
+    setEvidenceError(null);
+    try {
+      await submitAttendanceEvidence({
+        attendanceId: evidenceTarget.id,
+        employeeId: actionEmployee.id,
+        response: evidenceResponse.trim(),
+        session: authSession ?? undefined
+      });
+      setNotice(`${evidenceTarget.date} 근태 증빙을 제출했습니다. 관리자 재검토를 기다려 주세요.`);
+      setEvidenceTarget(null);
+      setEvidenceResponse("");
+      await refresh(actionEmployee.id);
+    } catch (error) {
+      setEvidenceError(error instanceof Error ? error.message : "근태 증빙을 제출하지 못했습니다.");
+    } finally {
+      setIsSubmittingEvidence(false);
+    }
+  }
+
   function openCorrectionDialog(attendance?: AttendanceRecord) {
     setCorrectionError(null);
-    setCorrectionTarget(attendance ?? employeeSnapshot?.todayAttendance ?? null);
+    const target = attendance ?? employeeSnapshot?.todayAttendance ?? null;
+    setCorrectionTarget(target);
+    setCorrectionDraft({
+      type: target?.clockInAt && !target.clockOutAt ? "CLOCK_OUT_CORRECTION" : "CLOCK_IN_CORRECTION",
+      afterValue: "",
+      reason: ""
+    });
     setIsCorrectionDialogOpen(true);
   }
 
@@ -1490,16 +1564,17 @@ function App() {
                 onUpdateDailyTaskPlan: updateDailyTaskPlan,
                 onCreateCorrection: openCorrectionDialog,
                 onReviewAttendance: reviewAttendanceRecord,
-                onSubmitCorrectionRequest: () => {
-                  setCorrectionError(null);
-                  setIsCorrectionDialogOpen(true);
+                onSubmitAttendanceEvidence: (attendance) => {
+                  setEvidenceTarget(attendance);
+                  setEvidenceResponse("");
+                  setEvidenceError(null);
                 },
                 onDownloadPayroll: downloadPayroll,
                 onDeletePayroll: deletePayroll,
                 onUpdateEmployeeCard: () => void openEmployeeCardEditor(),
                 onRecordHistoricalLeave: () => {
                   setHistoricalLeaveError(null);
-                  setHistoricalLeaveDraft({ usedOn: "", days: "1", reason: "2026년 1~7월 기초 사용 등록" });
+                  setHistoricalLeaveDraft({ usedOn: "", days: "1", halfDayPeriod: "AM", reason: "2026년 1~7월 기초 사용 등록" });
                   setIsHistoricalLeaveOpen(true);
                 },
                 onToggleEmployeeSensitiveData: toggleEmployeeSensitiveData,
@@ -1559,7 +1634,7 @@ function App() {
           void submitLeave();
         }}
         open={requestDialog === "leave"}
-        submitDisabled={leaveBalanceInsufficient}
+        submitDisabled={leaveBalanceInsufficient || requestedLeaveDays <= 0}
         submitLabel="휴가 신청"
         title="휴가 신청"
         description="승인 전까지는 대기 상태로 표시됩니다."
@@ -1567,7 +1642,7 @@ function App() {
         <RequestField label="휴가 유형">
           <select value={leaveDraft.type} onChange={(event) => setLeaveDraft((current) => {
             const type = event.target.value as LeaveType;
-            return { ...current, type, days: type === "HALF_DAY" ? "0.5" : current.days === "0.5" ? "1" : current.days, endsOn: type === "HALF_DAY" ? current.startsOn : current.endsOn };
+            return { ...current, type, endsOn: type === "HALF_DAY" ? current.startsOn : current.endsOn };
           })}>
             <option value="ANNUAL">연차</option>
             <option disabled={!dashboard?.settings?.partialLeaveAllowed} value="HALF_DAY">반차</option>
@@ -1577,9 +1652,20 @@ function App() {
         </RequestField>
         <div className="request-form__split">
           <RequestField label="시작일"><input required type="date" value={leaveDraft.startsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, startsOn: event.target.value, endsOn: !current.endsOn || current.endsOn < event.target.value || current.type === "HALF_DAY" ? event.target.value : current.endsOn }))} /></RequestField>
-          <RequestField label="종료일"><input required min={leaveDraft.startsOn || undefined} type="date" value={leaveDraft.endsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, endsOn: event.target.value }))} /></RequestField>
+          <RequestField label="종료일"><input disabled={leaveDraft.type === "HALF_DAY"} required min={leaveDraft.startsOn || undefined} type="date" value={leaveDraft.endsOn} onChange={(event) => setLeaveDraft((current) => ({ ...current, endsOn: event.target.value }))} /></RequestField>
         </div>
-        <RequestField label="사용 일수"><input disabled={leaveDraft.type === "HALF_DAY"} required min={dashboard?.settings?.annualLeaveUnit ?? 0.5} step={dashboard?.settings?.annualLeaveUnit ?? 0.5} type="number" value={leaveDraft.days} onChange={(event) => setLeaveDraft((current) => ({ ...current, days: event.target.value }))} /></RequestField>
+        {leaveDraft.type === "HALF_DAY" ? (
+          <fieldset className="request-field request-field--fieldset">
+            <legend>반차 시간대</legend>
+            <div aria-label="반차 시간대" className="segmented" role="group">
+              <button aria-pressed={leaveDraft.halfDayPeriod === "AM"} className={leaveDraft.halfDayPeriod === "AM" ? "active" : undefined} onClick={() => setLeaveDraft((current) => ({ ...current, halfDayPeriod: "AM" }))} type="button">오전 반차</button>
+              <button aria-pressed={leaveDraft.halfDayPeriod === "PM"} className={leaveDraft.halfDayPeriod === "PM" ? "active" : undefined} onClick={() => setLeaveDraft((current) => ({ ...current, halfDayPeriod: "PM" }))} type="button">오후 반차</button>
+            </div>
+          </fieldset>
+        ) : null}
+        <InlineNotice title={`자동 계산 ${formatLeaveDays(requestedLeaveDays)}`} tone={requestedLeaveDays > 0 ? "info" : "warning"}>
+          회사 근무요일에서 등록된 공휴일을 제외해 차감합니다. 주말과 회사 휴일은 사용 일수에 포함되지 않습니다.
+        </InlineNotice>
         {checksLeaveBalance ? (
           <InlineNotice tone={leaveBalanceInsufficient ? "warning" : "info"} title={leaveBalanceInsufficient ? "신청 가능한 연차가 부족합니다" : "신청 가능 연차"}>
             현재 신청 가능 {formatLeaveDays(requestableLeaveDays)}{pendingAnnualLeaveDays > 0 ? ` · 승인 대기 ${formatLeaveDays(pendingAnnualLeaveDays)} 반영` : ""}
@@ -1588,7 +1674,7 @@ function App() {
         ) : null}
         <div aria-live="polite" className="request-summary">
           <span>신청 요약</span>
-          <strong>{leaveTypeLabel(leaveDraft.type)} · {leaveDraft.startsOn || "시작일"}{leaveDraft.endsOn && leaveDraft.endsOn !== leaveDraft.startsOn ? ` ~ ${leaveDraft.endsOn}` : ""} · {leaveDraft.days || "0"}일</strong>
+          <strong>{leaveTypeLabel(leaveDraft.type)}{leaveDraft.type === "HALF_DAY" ? `(${leaveDraft.halfDayPeriod === "AM" ? "오전" : "오후"})` : ""} · {leaveDraft.startsOn || "시작일"}{leaveDraft.endsOn && leaveDraft.endsOn !== leaveDraft.startsOn ? ` ~ ${leaveDraft.endsOn}` : ""} · {formatLeaveDays(requestedLeaveDays)}</strong>
         </div>
         <RequestField label="사유"><textarea required rows={3} value={leaveDraft.reason} onChange={(event) => setLeaveDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
       </FormDialog>
@@ -1634,6 +1720,15 @@ function App() {
             <option disabled={!dashboard?.settings?.partialLeaveAllowed} value="0.5">반차 0.5일</option>
           </select>
         </RequestField>
+        {historicalLeaveDraft.days === "0.5" ? (
+          <fieldset className="request-field request-field--fieldset">
+            <legend>반차 시간대</legend>
+            <div aria-label="기존 사용 반차 시간대" className="segmented" role="group">
+              <button aria-pressed={historicalLeaveDraft.halfDayPeriod === "AM"} className={historicalLeaveDraft.halfDayPeriod === "AM" ? "active" : undefined} onClick={() => setHistoricalLeaveDraft((current) => ({ ...current, halfDayPeriod: "AM" }))} type="button">오전 반차</button>
+              <button aria-pressed={historicalLeaveDraft.halfDayPeriod === "PM"} className={historicalLeaveDraft.halfDayPeriod === "PM" ? "active" : undefined} onClick={() => setHistoricalLeaveDraft((current) => ({ ...current, halfDayPeriod: "PM" }))} type="button">오후 반차</button>
+            </div>
+          </fieldset>
+        ) : null}
         <RequestField label="등록 사유">
           <textarea onChange={(event) => setHistoricalLeaveDraft((current) => ({ ...current, reason: event.target.value }))} required rows={3} value={historicalLeaveDraft.reason} />
         </RequestField>
@@ -1683,7 +1778,7 @@ function App() {
         busy={isSubmittingCorrection}
         description={effectiveMode === "ADMIN"
           ? `${correctionTarget?.date ?? "선택 날짜"} · ${employees.find((employee) => employee.id === correctionTarget?.employeeId)?.name ?? "선택 직원"} · 원본 기록은 유지합니다.`
-          : "관리자 승인 전까지 대기 상태로 보관되며, 처리 결과는 정정 신청 이력에서 확인할 수 있습니다."}
+          : `${correctionTarget?.date ?? "선택 날짜"} 기록을 정정 요청합니다. 관리자 승인 전까지 원본은 유지됩니다.`}
         error={correctionError ?? undefined}
         onClose={() => { setIsCorrectionDialogOpen(false); setCorrectionTarget(null); }}
         onSubmit={(event: FormEvent<HTMLFormElement>) => {
@@ -1704,6 +1799,27 @@ function App() {
         </RequestField>
         <RequestField label="보정 시각"><input required type="time" value={correctionDraft.afterValue} onChange={(event) => setCorrectionDraft((current) => ({ ...current, afterValue: event.target.value }))} /></RequestField>
         <RequestField label="보정 사유"><textarea required rows={3} value={correctionDraft.reason} onChange={(event) => setCorrectionDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
+      </FormDialog>
+      <FormDialog
+        busy={isSubmittingEvidence}
+        description={evidenceTarget ? `${evidenceTarget.date} 근태 기록 · 관리자 요청: ${evidenceTarget.reviewNote ?? "상황을 확인할 수 있는 설명을 제출해 주세요."}` : undefined}
+        error={evidenceError ?? undefined}
+        onClose={() => { setEvidenceTarget(null); setEvidenceResponse(""); setEvidenceError(null); }}
+        onSubmit={(event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          void submitEvidenceResponse();
+        }}
+        open={evidenceTarget !== null}
+        submitDisabled={!evidenceResponse.trim()}
+        submitLabel="증빙 제출"
+        title="근태 증빙 회신"
+      >
+        <InlineNotice title="제출 후 관리자 재검토" tone="info">
+          외근, GPS 오류, 퇴근 누락 등 당시 상황과 확인 가능한 근거를 구체적으로 남겨 주세요.
+        </InlineNotice>
+        <RequestField label="상황 설명">
+          <textarea maxLength={2000} onChange={(event) => setEvidenceResponse(event.target.value)} required rows={5} value={evidenceResponse} />
+        </RequestField>
       </FormDialog>
       {isAdminAccount ? (
         <Suspense fallback={null}>
@@ -1899,7 +2015,7 @@ function renderSection(props: {
   onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
   onCreateCorrection: (attendance?: AttendanceRecord) => void;
   onReviewAttendance: (attendanceId: string, action: "CONFIRM" | "REQUEST_EVIDENCE", note?: string) => void | Promise<unknown>;
-  onSubmitCorrectionRequest: () => void;
+  onSubmitAttendanceEvidence: (attendance: AttendanceRecord) => void;
   onDownloadPayroll: (statementId?: string) => void;
   onDeletePayroll: (statementId?: string, deleteReason?: string) => void;
   onUpdateEmployeeCard: () => void;
@@ -1959,11 +2075,11 @@ function renderSection(props: {
 function AdminOverviewSection(props: { erpViewModel: ErpViewModel; isLoading: boolean }) {
   return (
     <div className="erp-two-column admin-overview">
-      <DetailPanel title="오늘 처리 큐" description="승인·예외·보정처럼 관리자 확인이 필요한 업무를 우선 표시합니다.">
-        <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="오늘 처리할 업무가 없습니다." />} />
+      <DetailPanel title="미처리 큐" description="승인·인증 예외·증빙 회신·퇴근 누락처럼 관리자 확인이 필요한 업무를 우선 표시합니다.">
+        <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="처리할 업무가 없습니다." />} />
       </DetailPanel>
-      <DetailPanel title="운영 요약" description="전체 직원의 오늘 상태를 빠르게 확인합니다.">
-        <DataTable columns={rowColumns} rows={props.erpViewModel.attendanceRows.slice(0, 10)} emptyState={<EmptyState title="오늘 근태 기록이 없습니다." />} />
+      <DetailPanel title="최근 근태 요약" description="전체 직원의 최근 출퇴근 상태를 빠르게 확인합니다.">
+        <DataTable columns={rowColumns} rows={props.erpViewModel.attendanceRows.slice(0, 10)} emptyState={<EmptyState title="근태 기록이 없습니다." />} />
       </DetailPanel>
       {props.isLoading ? <p className="sr-only" aria-live="polite">관리자 대시보드를 불러오는 중입니다.</p> : null}
     </div>
@@ -2024,6 +2140,7 @@ function SelfServiceSection(props: {
   clockFeedback: ClockFeedback | null;
   clockingType: ClockType | null;
   employeeViewModel: EmployeeViewModel | null;
+  employeeSnapshot: EmployeeSnapshot;
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   taskUpdateError: string | null;
@@ -2052,7 +2169,7 @@ function SelfServiceSection(props: {
         <div className="my-day__intro">
           <p className="eyebrow">{formatToday(today)} · {employee.department}</p>
           <h2>{employee.name}님, 오늘도 반갑습니다.</h2>
-          <p>{nextClockAction?.time ?? "오늘 출퇴근 기록이 모두 완료되었습니다."} · 기본 근무 {props.systemPolicy.workStartTime}~{props.systemPolicy.workEndTime}</p>
+          <p>{nextClockAction?.time ?? "오늘 출퇴근 기록이 모두 완료되었습니다."} · 내 근무 {props.employeeSnapshot.employee.workStartTime ?? props.systemPolicy.workStartTime}~{props.employeeSnapshot.employee.workEndTime ?? props.systemPolicy.workEndTime}</p>
         </div>
         <div className="attendance-check-area">
           {nextClockAction ? (
@@ -2276,7 +2393,7 @@ function AttendanceSection(props: {
   systemPolicy: SystemPolicy;
   onCreateCorrection: (attendance?: AttendanceRecord) => void;
   onReviewAttendance: (attendanceId: string, action: "CONFIRM" | "REQUEST_EVIDENCE", note?: string) => void | Promise<unknown>;
-  onSubmitCorrectionRequest: () => void;
+  onSubmitAttendanceEvidence: (attendance: AttendanceRecord) => void;
   onCancelAttendanceCorrection: (requestId?: string) => void | Promise<void>;
 }) {
   const [dateFilter, setDateFilter] = useState("");
@@ -2293,28 +2410,43 @@ function AttendanceSection(props: {
   const pendingCorrectionRequest = correctionRequestRows.find((row) => row.status === "PENDING");
   const attendanceRecords = props.canAdmin ? props.erpViewModel.attendanceRecords : props.employeeSnapshot.attendanceRecords;
   const attendanceById = new Map(attendanceRecords.map((record) => [record.id, record]));
-  const attendanceColumns: DataTableColumn<ErpViewModelRow>[] = props.canAdmin
-    ? [
-        ...rowColumns,
-        {
+  const attendanceBaseColumns: DataTableColumn<ErpViewModelRow>[] = [
+    { key: "label", header: "대상", value: "label", width: "18%" },
+    { key: "value", header: "출퇴근", value: "value", width: "22%" },
+    {
+      key: "meta",
+      className: "erp-data-table__status-cell",
+      header: "상태/메모",
+      cell: (row) => <StatusPill tone={toneForStatus(row.status)} variant="detail">{row.meta}</StatusPill>,
+      width: "38%"
+    }
+  ];
+  const attendanceColumns: DataTableColumn<ErpViewModelRow>[] = [
+    ...attendanceBaseColumns,
+    props.canAdmin
+      ? {
           key: "actions",
           header: "처리",
-          width: "28%",
+          width: "22%",
           cell: (row) => {
             const record = attendanceById.get(row.id);
             if (!record) return null;
-            const needsReview = record.reviewStatus === "PENDING" || record.reviewStatus === "EVIDENCE_REQUESTED"
+            const needsReview = record.reviewStatus === "PENDING"
+              || record.reviewStatus === "EVIDENCE_REQUESTED"
+              || record.reviewStatus === "EVIDENCE_SUBMITTED"
+              || record.attentionReason === "MISSING_CLOCK_OUT"
               || (!record.reviewStatus && (record.status === "OUT_OF_RANGE" || record.status === "MANUAL_REVIEW_REQUIRED"));
+            const canConfirm = needsReview && record.attentionReason !== "MISSING_CLOCK_OUT";
             return (
               <div className="attendance-row-actions">
-                {needsReview ? (
+                {canConfirm ? (
                   <button onClick={() => { setReviewDraft({ action: "CONFIRM", record }); setReviewNote(""); setReviewError(null); }} type="button">
                     <Check size={14} /> 정상 인정
                   </button>
                 ) : null}
                 {needsReview && record.reviewStatus !== "EVIDENCE_REQUESTED" ? (
                   <button onClick={() => { setReviewDraft({ action: "REQUEST_EVIDENCE", record }); setReviewNote(""); setReviewError(null); }} type="button">
-                    <FileText size={14} /> 증빙 요청
+                    <FileText size={14} /> {record.reviewStatus === "EVIDENCE_SUBMITTED" ? "추가 증빙" : "증빙 요청"}
                   </button>
                 ) : null}
                 <button onClick={() => props.onCreateCorrection(record)} type="button">
@@ -2324,8 +2456,29 @@ function AttendanceSection(props: {
             );
           }
         }
-      ]
-    : rowColumns;
+      : {
+          key: "actions",
+          header: "내 작업",
+          width: "22%",
+          cell: (row) => {
+            const record = attendanceById.get(row.id);
+            if (!record) return null;
+            const hasPendingCorrection = props.employeeSnapshot.attendanceCorrectionRequests?.some((request) => request.attendanceId === record.id && request.status === "PENDING");
+            return (
+              <div className="attendance-row-actions">
+                {record.reviewStatus === "EVIDENCE_REQUESTED" ? (
+                  <button onClick={() => props.onSubmitAttendanceEvidence(record)} type="button">
+                    <FileText size={14} /> 증빙 제출
+                  </button>
+                ) : null}
+                <button disabled={hasPendingCorrection} onClick={() => props.onCreateCorrection(record)} type="button">
+                  <TimerReset size={14} /> {hasPendingCorrection ? "정정 대기" : "정정 요청"}
+                </button>
+              </div>
+            );
+          }
+        }
+  ];
 
   async function submitAttendanceReview() {
     if (!reviewDraft || !reviewNote.trim()) {
@@ -2357,7 +2510,6 @@ function AttendanceSection(props: {
         description="GPS 실패 시 QR과 수동 클릭을 동등하게 허용하고 이력을 남깁니다."
         actions={!props.canAdmin ? (
           <InlineActions>
-            <button disabled={props.isLoading} onClick={props.onSubmitCorrectionRequest}>근태 정정 신청</button>
             {pendingCorrectionRequest ? <button disabled={props.isLoading} onClick={() => void props.onCancelAttendanceCorrection(pendingCorrectionRequest.id)}>대기 신청 취소</button> : null}
           </InlineActions>
         ) : undefined}
@@ -2387,6 +2539,11 @@ function AttendanceSection(props: {
         submitLabel={reviewDraft?.action === "CONFIRM" ? "정상 인정" : "증빙 요청"}
         title={reviewDraft?.action === "CONFIRM" ? "근태 기록 정상 인정" : "근태 증빙 요청"}
       >
+        {reviewDraft?.record.evidenceResponse ? (
+          <InlineNotice title="직원 증빙 회신" tone="info">
+            {reviewDraft.record.evidenceResponse}
+          </InlineNotice>
+        ) : null}
         <RequestField label="처리 사유">
           <textarea required rows={3} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} />
         </RequestField>
@@ -2471,19 +2628,17 @@ function LeaveSection(props: {
       ) : null}
       <DetailPanel
       title="휴가 장부"
-      description={props.canAdmin ? "전체 직원의 신청 현황을 확인합니다. 처리는 승인함에서 일괄 관리합니다." : "내 휴가 신청과 처리 상태를 확인합니다."}
-      actions={
+      description={props.canAdmin ? "전체 직원의 신청 현황을 확인합니다. 휴가 신청은 직원 본인만 할 수 있고 처리는 승인함에서 관리합니다." : "내 휴가 신청과 처리 상태를 확인합니다."}
+      actions={!props.canAdmin ? (
         <InlineActions>
           <button disabled={props.isLoading} onClick={props.onSubmitLeave}>
             휴가 신청
           </button>
-          {!props.canAdmin ? (
-            <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onCancelLeave(firstPendingId)}>
-              신청 취소
-            </button>
-          ) : null}
+          <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onCancelLeave(firstPendingId)}>
+            신청 취소
+          </button>
         </InlineActions>
-      }
+      ) : undefined}
     >
       <DataTable columns={rowColumns} rows={leaveRows} emptyState={<EmptyState title="휴가 신청 없음" />} />
       </DetailPanel>
@@ -2514,19 +2669,17 @@ function OvertimeSection(props: {
       ) : null}
       <DetailPanel
       title="야근·상계"
-      description={props.canAdmin ? "평달 야근은 조기퇴근 누적분과 상계합니다. 승인과 수당 인정은 승인함에서 처리합니다." : "평달 야근은 조기퇴근 누적분과 상계하고, 관리자 인정분만 수당 집계 대상으로 표시합니다."}
-      actions={
+      description={props.canAdmin ? "평달 야근은 조기퇴근 누적분과 상계합니다. 신청은 직원 본인만 할 수 있고 승인과 수당 인정은 승인함에서 처리합니다." : "평달 야근은 조기퇴근 누적분과 상계하고, 관리자 인정분만 수당 집계 대상으로 표시합니다."}
+      actions={!props.canAdmin ? (
         <InlineActions>
           <button disabled={props.isLoading} onClick={props.onSubmitOvertime}>
             야근 신청
           </button>
-          {!props.canAdmin ? (
-            <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onCancelOvertime(firstPendingId)}>
-              신청 취소
-            </button>
-          ) : null}
+          <button disabled={props.isLoading || !firstPendingId} onClick={() => props.onCancelOvertime(firstPendingId)}>
+            신청 취소
+          </button>
         </InlineActions>
-      }
+      ) : undefined}
     >
       <DataTable columns={rowColumns} rows={overtimeRows} emptyState={<EmptyState title="야근 신청 없음" />} />
       </DetailPanel>

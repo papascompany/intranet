@@ -1,4 +1,48 @@
-import type { Employee, LeaveBalance, LeaveRequest } from "./types.js";
+import type { Employee, HalfDayPeriod, LeaveBalance, LeaveRequest, LeaveType } from "./types.js";
+
+export type WorkDayCode = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
+
+export function workDayCode(date: string): WorkDayCode {
+  const parsed = dateParts(date);
+  if (!parsed) throw new Error("Work date must use YYYY-MM-DD");
+  const day = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day)).getUTCDay();
+  return ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][day] as WorkDayCode;
+}
+
+export function chargeableLeaveDates(params: {
+  startsOn: string;
+  endsOn: string;
+  workDays: WorkDayCode[];
+  holidayDates?: string[];
+}) {
+  const start = dateParts(params.startsOn);
+  const end = dateParts(params.endsOn);
+  if (!start || !end || compareDateParts(start, end) > 0) return [];
+
+  const holidays = new Set(params.holidayDates ?? []);
+  const dates: string[] = [];
+  for (let cursor = start; compareDateParts(cursor, end) <= 0; cursor = addDays(cursor, 1)) {
+    const date = formatDateParts(cursor);
+    if (params.workDays.includes(workDayCode(date)) && !holidays.has(date)) {
+      dates.push(date);
+    }
+  }
+  return dates;
+}
+
+export function calculateLeaveDays(params: {
+  type: LeaveType;
+  startsOn: string;
+  endsOn: string;
+  workDays: WorkDayCode[];
+  holidayDates?: string[];
+  halfDayPeriod?: HalfDayPeriod;
+}) {
+  const dates = chargeableLeaveDates(params);
+  if (params.type !== "HALF_DAY") return dates.length;
+  if (params.startsOn !== params.endsOn || dates.length !== 1 || !params.halfDayPeriod) return 0;
+  return 0.5;
+}
 
 export function monthsSinceHire(hireDate: string, asOf: string) {
   const hire = dateParts(hireDate);

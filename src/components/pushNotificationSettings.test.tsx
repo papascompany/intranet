@@ -14,7 +14,12 @@ vi.mock("../api/pushHttpClient", () => ({
 
 describe("PushNotificationSettings", () => {
   beforeEach(() => {
-    vi.mocked(getPushConfiguration).mockResolvedValue({ configured: true, devices: [], publicKey: "public-key" });
+    vi.mocked(getPushConfiguration).mockResolvedValue({
+      configured: true,
+      devices: [],
+      publicKey: "public-key",
+      recipients: [{ employeeId: "admin-1", enabledDeviceCount: 0, name: "더스토리지", role: "HR_ADMIN" }]
+    });
     Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Mozilla/5.0 (iPhone) AppleWebKit Safari" });
     Object.defineProperty(navigator, "serviceWorker", {
       configurable: true,
@@ -36,7 +41,7 @@ describe("PushNotificationSettings", () => {
     await waitFor(() => expect(getPushConfiguration).toHaveBeenCalled());
   });
 
-  it("shows the registered current iPhone and its preferences", async () => {
+  it("shows the registered current iPhone and mandatory attendance alerts", async () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
@@ -45,6 +50,7 @@ describe("PushNotificationSettings", () => {
       configured: true,
       currentDeviceId: "3",
       publicKey: "public-key",
+      recipients: [{ employeeId: "admin-1", enabledDeviceCount: 1, name: "더스토리지", role: "HR_ADMIN" }],
       devices: [{
         id: "3",
         deviceLabel: "iPhone",
@@ -57,7 +63,9 @@ describe("PushNotificationSettings", () => {
     render(<PushNotificationSettings onClose={vi.fn()} open />);
 
     expect(await screen.findByText("알림 수신 중")).toBeTruthy();
-    expect((screen.getByLabelText("출근 처리") as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByLabelText("퇴근 처리") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText("필수 수신 항목")).toBeTruthy();
+    expect(screen.getByText("출근 처리")).toBeTruthy();
+    expect(screen.getByText("퇴근 처리")).toBeTruthy();
+    expect(screen.getByText("iPhone 1대")).toBeTruthy();
   });
 });

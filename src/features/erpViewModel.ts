@@ -150,7 +150,7 @@ export function buildErpViewModel({
         id: "kpi-attendance-review",
         label: "근태 검토",
         value: `${reviewQueue.length}건`,
-        meta: "반경 밖 또는 근무지 미지정 기록"
+        meta: "인증 예외·증빙 회신·퇴근 누락"
       },
       {
         id: "kpi-pending-approvals",
@@ -259,7 +259,7 @@ function buildWorkQueueRows(
     ...attendanceReviewQueue(dashboard).map((record) => ({
       ...attendanceRow(record, employees),
       id: `queue-${record.id}`,
-      meta: "근태 인증 검토 대기"
+      meta: record.attentionReason === "MISSING_CLOCK_OUT" ? "퇴근 누락 확인 필요" : "근태 인증 검토 대기"
     })),
     ...(dashboard.correctionRequests ?? []).filter((request) => request.status === "PENDING").map((request) => ({
       ...correctionRequestRow(request, employees),
@@ -278,14 +278,16 @@ function attendanceRow(record: AttendanceRecord, employees: Employee[]): ErpView
     PENDING: "관리자 확인 필요",
     CONFIRMED: "관리자 정상 인정",
     EVIDENCE_REQUESTED: "증빙 요청",
+    EVIDENCE_SUBMITTED: "증빙 제출 · 재검토 필요",
     CORRECTED: "보정 완료"
   } as const)[reviewStatus];
+  const attentionLabel = record.attentionReason === "MISSING_CLOCK_OUT" ? "퇴근 누락" : "";
   return {
     id: record.id,
     label: employeeName(employees, record.employeeId),
     value: `${formatTime(record.clockInAt)} / ${formatTime(record.clockOutAt)}`,
-    meta: [record.date, workLabel, statusLabels[record.status], reviewLabel].filter(Boolean).join(" · "),
-    status: reviewStatus === "PENDING" || reviewStatus === "EVIDENCE_REQUESTED" ? reviewStatus : workStatus
+    meta: [record.date, workLabel, statusLabels[record.status], attentionLabel, reviewLabel].filter(Boolean).join(" · "),
+    status: record.attentionReason === "MISSING_CLOCK_OUT" || reviewStatus === "PENDING" || reviewStatus === "EVIDENCE_REQUESTED" || reviewStatus === "EVIDENCE_SUBMITTED" ? "PENDING" : workStatus
   };
 }
 
@@ -293,15 +295,20 @@ function attendanceReviewQueue(dashboard: Dashboard) {
   return dashboard.attendanceReviewQueue ?? (dashboard.attendanceRecords ?? dashboard.todayAttendance).filter((record) =>
     record.reviewStatus === "PENDING"
     || record.reviewStatus === "EVIDENCE_REQUESTED"
+    || record.reviewStatus === "EVIDENCE_SUBMITTED"
+    || record.attentionReason === "MISSING_CLOCK_OUT"
     || (!record.reviewStatus && (record.status === "OUT_OF_RANGE" || record.status === "MANUAL_REVIEW_REQUIRED"))
   );
 }
 
 function leaveRow(request: LeaveRequest, employees: Employee[]): ErpViewModelRow {
+  const halfDayLabel = request.type === "HALF_DAY" && request.halfDayPeriod
+    ? ` · ${request.halfDayPeriod === "AM" ? "오전 반차" : "오후 반차"}`
+    : "";
   return {
     id: request.id,
     label: employeeName(employees, request.employeeId),
-    value: `${formatDateRange(request.startsOn, request.endsOn)} · ${formatDays(request.days)}일`,
+    value: `${formatDateRange(request.startsOn, request.endsOn)} · ${formatDays(request.days)}일${halfDayLabel}`,
     meta: request.reason,
     status: request.status
   };

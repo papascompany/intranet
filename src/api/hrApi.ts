@@ -1,5 +1,5 @@
-import { buildAttendanceRecord, calculateLateMinutes, calculateRecognizedWorkMinutes, evaluateVerification } from "../domain/attendance.js";
-import { annualLeaveCycle, getLeaveBalance } from "../domain/leave.js";
+import { buildAttendanceRecord, calculateLateMinutes, calculateRecognizedWorkMinutes, evaluateVerification, isMissingClockOut } from "../domain/attendance.js";
+import { annualLeaveCycle, calculateLeaveDays, chargeableLeaveDates, getLeaveBalance, workDayCode } from "../domain/leave.js";
 import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
 import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
 import type {
@@ -56,6 +56,7 @@ import type {
   RegisterUploadedPayrollStatementInput,
   RecordHistoricalLeaveUsageInput,
   ReviewAttendanceInput,
+  SubmitAttendanceEvidenceInput,
   RevealEmployeeSensitiveDataInput,
   ResetEmployeeAccountPasswordInput,
   SubmitLeaveRequestInput,
@@ -171,7 +172,9 @@ export class HrApi {
     const today = asOf.slice(0, 10);
     const { employees, attendanceRecords, leaveRequests: leaveRequestRecords, overtimeRequests: overtimeRequestRecords, corrections: correctionRecords, correctionRequests: correctionRequestRecords, payrollStatements: payrollStatementRecords, settings, auditLogs } = data;
     const visibleEmployeeIds = this.visibleEmployeeIds(session, employees);
-    const attendance = attendanceRecords.filter((record) => visibleEmployeeIds.has(record.employeeId));
+    const attendance = attendanceRecords
+      .filter((record) => visibleEmployeeIds.has(record.employeeId))
+      .map((record) => attendanceWithAttention(record, employees.find((employee) => employee.id === record.employeeId), settings, asOf));
     const leaveRequests = leaveRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
     const overtimeRequests = overtimeRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
     const corrections = correctionRecords.filter((correction) => visibleEmployeeIds.has(correction.employeeId));
@@ -203,6 +206,8 @@ export class HrApi {
       attendanceReviewQueue: attendance.filter((record) =>
         record.reviewStatus === "PENDING"
         || record.reviewStatus === "EVIDENCE_REQUESTED"
+        || record.reviewStatus === "EVIDENCE_SUBMITTED"
+        || record.attentionReason === "MISSING_CLOCK_OUT"
         || (!record.reviewStatus && (record.status === "OUT_OF_RANGE" || record.status === "MANUAL_REVIEW_REQUIRED"))
       ),
       activePayrollStatements,
@@ -447,7 +452,9 @@ export class HrApi {
       throw new Error(`Employee not found: ${employeeId}`);
     }
 
-    const attendanceRecords = attendanceRecordRows.filter((record) => record.employeeId === employeeId);
+    const attendanceRecords = attendanceRecordRows
+      .filter((record) => record.employeeId === employeeId)
+      .map((record) => attendanceWithAttention(record, employee, settings, asOf));
     const leaveRequests = leaveRequestRows.filter((request) => request.employeeId === employeeId);
     const earlyLeaveLedger = earlyLeaveLedgerRows.filter((entry) => entry.employeeId === employeeId);
     const overtimeRequests = overtimeRequestRows.filter((request) => request.employeeId === employeeId);
@@ -676,7 +683,7 @@ export class HrApi {
 
   async clockAttendance(input: ClockAttendanceInput) {
     const employee = await this.findEmployee(input.employeeId);
-    await this.assertCanReadEmployee(input.employeeId, input.session);
+    this.assertSelfServiceActor(input.employeeId, input.session);
     assertActiveEmployment(employee, "clock attendance");
 
     // Authenticated HTTP requests use the server clock; `now` remains injectable for deterministic tests.
@@ -741,21 +748,22 @@ export class HrApi {
 
   async submitLeaveRequest(input: SubmitLeaveRequestInput) {
     const employee = await this.findEmployee(input.employeeId);
-    await this.assertCanReadEmployee(input.employeeId, input.session);
+    this.assertSelfServiceActor(input.employeeId, input.session);
     assertActiveEmployment(employee, "submit leave");
     const actorId = this.resolveActorId(input, input.employeeId);
     const settings = await this.db.getSettings();
     const leaveRequests = await this.db.listLeaveRequests();
-    this.assertLeaveRequest(input, employee, leaveRequests, settings);
+    const normalized = this.assertLeaveRequest(input, employee, leaveRequests, settings);
     const reason = requiredText(input.reason, "Leave request reason");
 
     const request: LeaveRequest = {
       id: await this.db.nextId("leave"),
       employeeId: input.employeeId,
       type: input.type,
-      startsOn: input.startsOn,
-      endsOn: input.endsOn,
-      days: input.days,
+      startsOn: normalized.startsOn,
+      endsOn: normalized.endsOn,
+      days: normalized.days,
+      halfDayPeriod: normalized.halfDayPeriod,
       reason,
       status: "PENDING"
     };
@@ -791,6 +799,12 @@ export class HrApi {
     if (input.days === 0.5 && !settings.partialLeaveAllowed) {
       throw new Error("Half-day leave is not allowed by the current policy");
     }
+    if (input.days === 0.5 && input.halfDayPeriod !== "AM" && input.halfDayPeriod !== "PM") {
+      throw new Error("오전 또는 오후 반차를 선택해 주세요.");
+    }
+    if (chargeableLeaveDates({ startsOn: usedOn, endsOn: usedOn, workDays: settings.workDays, holidayDates: settings.payrollHolidayDates }).length !== 1) {
+      throw new Error("회사 근무일에 사용한 휴가만 등록할 수 있습니다.");
+    }
     const reason = requiredText(input.reason, "Historical leave usage reason");
     const leaveRequests = await this.db.listLeaveRequests();
     const recordedOnDate = leaveRequests
@@ -819,6 +833,7 @@ export class HrApi {
       startsOn: usedOn,
       endsOn: usedOn,
       days: input.days,
+      halfDayPeriod: input.days === 0.5 ? input.halfDayPeriod : undefined,
       reason,
       status: "APPROVED",
       decidedBy: actorId,
@@ -847,7 +862,7 @@ export class HrApi {
 
   async submitOvertimeRequest(input: SubmitOvertimeRequestInput) {
     const employee = await this.findEmployee(input.employeeId);
-    await this.assertCanReadEmployee(input.employeeId, input.session);
+    this.assertSelfServiceActor(input.employeeId, input.session);
     assertActiveEmployment(employee, "submit overtime");
     const actorId = this.resolveActorId(input, input.employeeId);
     await this.assertEmployee(actorId);
@@ -931,7 +946,7 @@ export class HrApi {
   async cancelRequest(input: CancelRequestInput) {
     if (input.targetType === "LeaveRequest") {
       const request = await this.findLeaveRequest(input.requestId);
-      await this.assertCanReadEmployee(request.employeeId, input.session);
+      this.assertSelfServiceActor(request.employeeId, input.session);
       assertPendingRequest(request.status);
       const resolvedActorId = this.resolveActorId(input, request.employeeId);
       const saved = await this.db.updateLeaveRequest({ ...request, status: "CANCELLED", decidedBy: resolvedActorId, decidedAt: this.clock() });
@@ -947,7 +962,7 @@ export class HrApi {
 
     if (input.targetType === "AttendanceCorrectionRequest") {
       const request = await this.findCorrectionRequest(input.requestId);
-      await this.assertCanReadEmployee(request.employeeId, input.session);
+      this.assertSelfServiceActor(request.employeeId, input.session);
       assertPendingRequest(request.status);
       const resolvedActorId = this.resolveActorId(input, request.employeeId);
       const saved = await this.db.updateCorrectionRequest({ ...request, status: "CANCELLED", decidedBy: resolvedActorId, decidedAt: this.clock() });
@@ -962,7 +977,7 @@ export class HrApi {
     }
 
     const request = await this.findOvertimeRequest(input.requestId);
-    await this.assertCanReadEmployee(request.employeeId, input.session);
+    this.assertSelfServiceActor(request.employeeId, input.session);
     assertPendingRequest(request.status);
     const resolvedActorId = this.resolveActorId(input, request.employeeId);
     const saved = await this.db.updateOvertimeRequest({ ...request, status: "CANCELLED", decidedBy: resolvedActorId, decidedAt: this.clock() });
@@ -1047,8 +1062,16 @@ export class HrApi {
     await this.assertAdmin(actorId, input.session);
     const attendance = (await this.db.listAttendanceRecords()).find((record) => record.id === input.attendanceId);
     if (!attendance) throw new Error("Attendance record not found");
-    if (attendance.reviewStatus !== "PENDING" && attendance.reviewStatus !== "EVIDENCE_REQUESTED") {
+    const [employee, settings] = await Promise.all([this.findEmployee(attendance.employeeId), this.db.getSettings()]);
+    const reviewedAttendance = attendanceWithAttention(attendance, employee, settings, this.clock());
+    if (attendance.reviewStatus !== "PENDING"
+      && attendance.reviewStatus !== "EVIDENCE_REQUESTED"
+      && attendance.reviewStatus !== "EVIDENCE_SUBMITTED"
+      && reviewedAttendance.attentionReason !== "MISSING_CLOCK_OUT") {
       throw new Error("검토 대기 중인 근태 기록만 처리할 수 있습니다.");
+    }
+    if (input.action === "CONFIRM" && reviewedAttendance.attentionReason === "MISSING_CLOCK_OUT") {
+      throw new Error("퇴근 누락 기록은 증빙 요청 또는 근태 보정으로 처리해 주세요.");
     }
     const note = normalizeOptionalText(input.note);
     if (input.action === "REQUEST_EVIDENCE" && !note) {
@@ -1060,7 +1083,9 @@ export class HrApi {
       reviewStatus: input.action === "CONFIRM" ? "CONFIRMED" : "EVIDENCE_REQUESTED",
       reviewedById: actorId,
       reviewedAt,
-      reviewNote: note ?? (input.action === "CONFIRM" ? "관리자 정상 인정" : undefined)
+      reviewNote: note ?? (input.action === "CONFIRM" ? "관리자 정상 인정" : undefined),
+      evidenceResponse: input.action === "REQUEST_EVIDENCE" ? undefined : attendance.evidenceResponse,
+      evidenceSubmittedAt: input.action === "REQUEST_EVIDENCE" ? undefined : attendance.evidenceSubmittedAt
     });
     const auditLog = await this.addAuditLog({
       actorId,
@@ -1072,9 +1097,35 @@ export class HrApi {
     return { attendance: saved, auditLog };
   }
 
+  async submitAttendanceEvidence(input: SubmitAttendanceEvidenceInput) {
+    this.assertSelfServiceActor(input.employeeId, input.session);
+    const attendance = await this.findAttendanceRecord(input.attendanceId, input.employeeId);
+    if (attendance.reviewStatus !== "EVIDENCE_REQUESTED") {
+      throw new Error("증빙 요청 중인 근태 기록만 회신할 수 있습니다.");
+    }
+    const response = requiredText(input.response, "Attendance evidence response");
+    if (response.length > 2_000) {
+      throw new Error("근태 증빙 설명은 2,000자 이내로 입력해 주세요.");
+    }
+    const saved = await this.db.upsertAttendanceRecord({
+      ...attendance,
+      reviewStatus: "EVIDENCE_SUBMITTED",
+      evidenceResponse: response,
+      evidenceSubmittedAt: this.clock()
+    });
+    const auditLog = await this.addAuditLog({
+      actorId: input.employeeId,
+      action: "ATTENDANCE_EVIDENCE_SUBMITTED",
+      targetType: "AttendanceRecord",
+      targetId: saved.id,
+      detail: response
+    });
+    return { attendance: saved, auditLog };
+  }
+
   async submitAttendanceCorrectionRequest(input: SubmitAttendanceCorrectionRequestInput) {
     const employee = await this.findEmployee(input.employeeId);
-    await this.assertCanReadEmployee(input.employeeId, input.session);
+    this.assertSelfServiceActor(input.employeeId, input.session);
     assertActiveEmployment(employee, "submit attendance correction");
     assertCorrectionType(input.type);
     const requestedValue = requiredText(input.requestedValue, "Requested attendance time");
@@ -1461,8 +1512,8 @@ export class HrApi {
       employeeId: attendance.employeeId,
       date: attendance.date,
       minutes: attendance.earlyLeaveMinutes,
-      status: "UNAPPROVED",
-      reason: "실제 퇴근 기록 기준"
+      status: "FLEX_ALLOWED",
+      reason: "개인별 근무시간 정책 자동 인정"
     };
 
     return await this.db.upsertEarlyLeaveLedger(entry);
@@ -1585,6 +1636,14 @@ export class HrApi {
   private async assertCanReadEmployee(employeeId: string, session?: AuthSession) {
     const employee = await this.findEmployee(employeeId);
     this.assertCanReadEmployeeRecord(employeeId, session, employee);
+  }
+
+  private assertSelfServiceActor(employeeId: string, session?: AuthSession) {
+    // Direct in-memory calls without a session remain available to deterministic domain tests.
+    if (!session) return;
+    if (session.employeeId !== employeeId) {
+      throw new Error(`Self-service permission denied: ${session.employeeId} cannot act as ${employeeId}`);
+    }
   }
 
   private assertCanReadEmployeeRecord(employeeId: string, session: AuthSession | undefined, employee?: Employee) {
@@ -1857,29 +1916,52 @@ export class HrApi {
     if (startsOn < employee.hireDate) throw new Error("Leave date cannot be before the hire date");
     if (startsOn < this.clock().slice(0, 10)) throw new Error("Past leave usage must be recorded by an administrator");
     requiredText(input.reason, "Leave request reason");
-    if (!Number.isFinite(input.days) || input.days <= 0) {
-      throw new Error("Leave days must be greater than zero");
-    }
-    if (input.type === "HALF_DAY" && (!settings.partialLeaveAllowed || input.days !== 0.5)) {
+    if (input.type === "HALF_DAY" && (!settings.partialLeaveAllowed || (input.halfDayPeriod !== "AM" && input.halfDayPeriod !== "PM"))) {
       throw new Error("Half-day leave is not allowed by the current policy");
     }
-    if ((input.type === "ANNUAL" || input.type === "HALF_DAY") && Math.abs(input.days / settings.annualLeaveUnit - Math.round(input.days / settings.annualLeaveUnit)) > 0.0001) {
-      throw new Error(`Leave must be requested in ${settings.annualLeaveUnit}-day units`);
+    const requestedDates = chargeableLeaveDates({
+      startsOn,
+      endsOn,
+      workDays: settings.workDays,
+      holidayDates: settings.payrollHolidayDates
+    });
+    const expectedDays = calculateLeaveDays({
+      type: input.type,
+      startsOn,
+      endsOn,
+      workDays: settings.workDays,
+      holidayDates: settings.payrollHolidayDates,
+      halfDayPeriod: input.halfDayPeriod
+    });
+    if (expectedDays <= 0) {
+      throw new Error("선택한 기간에 휴가로 차감할 근무일이 없습니다.");
     }
-    const calendarDays = inclusiveCalendarDays(startsOn, endsOn);
-    const expectedDays = input.type === "HALF_DAY" ? (calendarDays === 1 ? 0.5 : undefined) : calendarDays;
-    if (expectedDays === undefined || Math.abs(input.days - expectedDays) > 0.0001) {
-      throw new Error("Leave days must match the selected date range");
+    if (input.days !== undefined && (!Number.isFinite(input.days) || Math.abs(input.days - expectedDays) > 0.0001)) {
+      throw new Error("휴가 일수가 근무일·공휴일 기준 자동 계산 결과와 일치하지 않습니다.");
     }
-    if ((input.type !== "ANNUAL" && input.type !== "HALF_DAY") || settings.annualLeaveOveruseAllowed) return;
+    const normalized = { startsOn, endsOn, days: expectedDays, halfDayPeriod: input.type === "HALF_DAY" ? input.halfDayPeriod : undefined };
+    if (input.type !== "ANNUAL" && input.type !== "HALF_DAY") return normalized;
 
-    const overlapsExistingRequest = requests.some((request) =>
-      request.employeeId === employee.id
-      && (request.type === "ANNUAL" || request.type === "HALF_DAY")
-      && (request.status === "PENDING" || request.status === "APPROVED")
-      && request.startsOn <= endsOn
-      && request.endsOn >= startsOn
-    );
+    const requestedDateSet = new Set(requestedDates);
+    const overlapsExistingRequest = requests.some((request) => {
+      if (request.employeeId !== employee.id
+        || (request.type !== "ANNUAL" && request.type !== "HALF_DAY")
+        || (request.status !== "PENDING" && request.status !== "APPROVED")) return false;
+      const existingDates = chargeableLeaveDates({
+        startsOn: request.startsOn,
+        endsOn: request.endsOn,
+        workDays: settings.workDays,
+        holidayDates: settings.payrollHolidayDates
+      });
+      const intersects = existingDates.some((date) => requestedDateSet.has(date));
+      if (!intersects) return false;
+      return !(input.type === "HALF_DAY"
+        && request.type === "HALF_DAY"
+        && request.startsOn === startsOn
+        && request.halfDayPeriod
+        && input.halfDayPeriod
+        && request.halfDayPeriod !== input.halfDayPeriod);
+    });
     if (overlapsExistingRequest) {
       throw new Error("Leave request overlaps an existing annual leave request");
     }
@@ -1889,11 +1971,13 @@ export class HrApi {
     if (startCycle.startsOn !== endCycle.startsOn) {
       throw new Error("Leave requests cannot span two hire-date leave cycles");
     }
+    if (settings.annualLeaveOveruseAllowed) return normalized;
 
     const balance = getLeaveBalance({ employee, asOf: `${startsOn}T23:59:59+09:00`, approvedRequests: requests, policy: settings });
-    if (input.days > balance.availableDays - (balance.pendingDays ?? 0)) {
+    if (expectedDays > balance.availableDays - (balance.pendingDays ?? 0)) {
       throw new Error("Requested leave exceeds the available balance");
     }
+    return normalized;
   }
 }
 
@@ -1913,6 +1997,24 @@ function normalizeEmployeeCardForPersistence(employee: Employee): Employee {
     payrollBank: normalizeOptionalText(employee.payrollBank),
     payrollAccount: normalizeOptionalText(employee.payrollAccount)
   };
+}
+
+function attendanceWithAttention(
+  record: AttendanceRecord,
+  employee: Employee | undefined,
+  settings: import("./types.js").SystemPolicy,
+  asOf: string
+): AttendanceRecord {
+  if (!employee) return record;
+  const isScheduledWorkDay = settings.workDays.includes(workDayCode(record.date))
+    && !settings.payrollHolidayDates.includes(record.date);
+  const missingClockOut = isMissingClockOut({
+    record,
+    asOf,
+    scheduledEndTime: employee.workEndTime ?? settings.workEndTime,
+    isScheduledWorkDay
+  });
+  return missingClockOut ? { ...record, attentionReason: "MISSING_CLOCK_OUT" } : record;
 }
 
 function assertSystemPolicy(settings: import("./types.js").SystemPolicy) {
@@ -2016,11 +2118,6 @@ function assertCorrectionDate(attendanceDate: string, timestamp: string) {
   }
 }
 
-function workDayCode(timestamp: string): import("./types.js").SystemPolicy["workDays"][number] {
-  const date = new Date(`${timestamp.slice(0, 10)}T00:00:00Z`);
-  return ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][date.getUTCDay()] as import("./types.js").SystemPolicy["workDays"][number];
-}
-
 function assertSelfServiceEmployeeCardPatch(patch: UpdateEmployeeCardInput["patch"]) {
   const allowedFields = new Set(["birthday", "address", "mobile", "emergencyContact", "familyRelations", "payrollBank", "payrollAccount"]);
   const restrictedField = Object.keys(patch).find((field) => !allowedFields.has(field));
@@ -2054,12 +2151,6 @@ function normalizeDateOnly(value: unknown, label: string, required = false) {
   }
 
   return normalized;
-}
-
-function inclusiveCalendarDays(startsOn: string, endsOn: string) {
-  const start = Date.parse(`${startsOn}T00:00:00Z`);
-  const end = Date.parse(`${endsOn}T00:00:00Z`);
-  return Math.floor((end - start) / 86_400_000) + 1;
 }
 
 function validateOvertimeRequestInput(input: SubmitOvertimeRequestInput) {
@@ -2202,6 +2293,7 @@ export const cancelRequest = defaultHrApi.cancelRequest.bind(defaultHrApi);
 export const setOvertimePayApproval = defaultHrApi.setOvertimePayApproval.bind(defaultHrApi);
 export const createAttendanceCorrection = defaultHrApi.createAttendanceCorrection.bind(defaultHrApi);
 export const reviewAttendance = defaultHrApi.reviewAttendance.bind(defaultHrApi);
+export const submitAttendanceEvidence = defaultHrApi.submitAttendanceEvidence.bind(defaultHrApi);
 export const submitAttendanceCorrectionRequest = defaultHrApi.submitAttendanceCorrectionRequest.bind(defaultHrApi);
 export const updateAttendanceCorrectionRequestStatus = defaultHrApi.updateAttendanceCorrectionRequestStatus.bind(defaultHrApi);
 export const uploadPayrollStatement = defaultHrApi.uploadPayrollStatement.bind(defaultHrApi);

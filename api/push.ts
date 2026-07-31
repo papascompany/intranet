@@ -1,7 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { AuthSession } from "../src/api/auth.js";
-import type { PushAlertPreferences, PushConfiguration, PushDevice, PushSubscriptionInput } from "../src/api/pushTypes.js";
+import type {
+  PushAdministratorRecipient,
+  PushAlertPreferences,
+  PushConfiguration,
+  PushDevice,
+  PushSubscriptionInput
+} from "../src/api/pushTypes.js";
 import type { PostgresQuery } from "../src/api/postgresRepository.js";
 import { createDatabaseQuery } from "../src/server/neonRepositoryFactory.js";
 import { getAuthenticatedSessionFromCookie } from "../src/server/productionAuth.js";
@@ -34,6 +40,14 @@ type PushSubscriptionRow = Record<string, unknown> & {
   id: string;
   last_success_at?: string | null;
   p256dh: string;
+};
+
+type PushAdministratorRecipientRow = Record<string, unknown> & {
+  employee_id: string;
+  enabled_device_count: number | string;
+  last_success_at?: string | null;
+  name: string;
+  role: "HR_ADMIN" | "SYSTEM_ADMIN";
 };
 
 type PushActionBody = {
@@ -109,14 +123,14 @@ export async function handlePushHttpRequest(
         `insert into web_push_subscriptions (
            employee_id, endpoint, p256dh, auth_secret, device_label,
            alert_clock_in, alert_clock_out, enabled, failure_count, updated_at
-         ) values ($1, $2, $3, $4, $5, $6, $7, true, 0, now())
+         ) values ($1, $2, $3, $4, $5, true, true, true, 0, now())
          on conflict (endpoint) do update set
            employee_id = excluded.employee_id,
            p256dh = excluded.p256dh,
            auth_secret = excluded.auth_secret,
            device_label = excluded.device_label,
-           alert_clock_in = excluded.alert_clock_in,
-           alert_clock_out = excluded.alert_clock_out,
+           alert_clock_in = true,
+           alert_clock_out = true,
            enabled = true,
            deliver_from = now(),
            failure_count = 0,
@@ -128,9 +142,7 @@ export async function handlePushHttpRequest(
           subscription.endpoint,
           subscription.keys.p256dh,
           subscription.keys.auth,
-          cleanDeviceLabel(subscription.deviceLabel || request.userAgent || "iPhone"),
-          subscription.preferences.clockIn,
-          subscription.preferences.clockOut
+          cleanDeviceLabel(subscription.deviceLabel || request.userAgent || "iPhone")
         ]
       );
       return {
@@ -144,14 +156,13 @@ export async function handlePushHttpRequest(
 
     const deviceId = requiredDeviceId(body?.deviceId);
     if (action === "update") {
-      const preferences = validatePreferences(body?.preferences);
       const rows = await databaseQuery<PushSubscriptionRow>(
         `update web_push_subscriptions
-         set alert_clock_in = $3, alert_clock_out = $4, deliver_from = now(), updated_at = now()
+         set alert_clock_in = true, alert_clock_out = true, deliver_from = now(), updated_at = now()
          where id = $1 and employee_id = $2
          returning id::text as id, endpoint, p256dh, auth_secret, device_label,
                    alert_clock_in, alert_clock_out, enabled, created_at, last_success_at`,
-        [deviceId, session.employeeId, preferences.clockIn, preferences.clockOut]
+        [deviceId, session.employeeId]
       );
       return { status: 200, body: { device: toPushDevice(requireRow(rows[0])) } };
     }
@@ -210,18 +221,34 @@ async function buildConfiguration(
   currentEndpoint: string | undefined,
   config: ReturnType<typeof getWebPushConfiguration>
 ): Promise<PushConfiguration> {
-  const rows = await query<PushSubscriptionRow>(
-    `select id::text as id, endpoint, p256dh, auth_secret, device_label,
-            alert_clock_in, alert_clock_out, enabled, created_at, last_success_at
-     from web_push_subscriptions
-     where employee_id = $1 and enabled = true
-     order by updated_at desc`,
-    [employeeId]
-  );
+  const [rows, recipientRows] = await Promise.all([
+    query<PushSubscriptionRow>(
+      `select id::text as id, endpoint, p256dh, auth_secret, device_label,
+              alert_clock_in, alert_clock_out, enabled, created_at, last_success_at
+       from web_push_subscriptions
+       where employee_id = $1 and enabled = true
+       order by updated_at desc`,
+      [employeeId]
+    ),
+    query<PushAdministratorRecipientRow>(
+      `select administrators.id as employee_id,
+              administrators.name,
+              administrators.role,
+              count(subscriptions.id) filter (where subscriptions.enabled = true)::integer as enabled_device_count,
+              max(subscriptions.last_success_at) as last_success_at
+       from employees administrators
+       left join web_push_subscriptions subscriptions on subscriptions.employee_id = administrators.id
+       where administrators.role in ('HR_ADMIN', 'SYSTEM_ADMIN')
+         and administrators.employment_status <> 'TERMINATED'
+       group by administrators.id, administrators.name, administrators.role
+       order by administrators.name asc`
+    )
+  ]);
   return {
     configured: config.configured,
     currentDeviceId: rows.find((row) => currentEndpoint && row.endpoint === currentEndpoint)?.id,
     devices: rows.map(toPushDevice),
+    recipients: recipientRows.map(toPushAdministratorRecipient),
     ...(config.publicKey ? { publicKey: config.publicKey } : {})
   };
 }
@@ -269,6 +296,16 @@ function toPushDevice(row: PushSubscriptionRow): PushDevice {
     createdAt: row.created_at,
     ...(row.last_success_at ? { lastSuccessAt: row.last_success_at } : {}),
     preferences: { clockIn: row.alert_clock_in, clockOut: row.alert_clock_out }
+  };
+}
+
+function toPushAdministratorRecipient(row: PushAdministratorRecipientRow): PushAdministratorRecipient {
+  return {
+    employeeId: row.employee_id,
+    enabledDeviceCount: Number(row.enabled_device_count),
+    name: row.name,
+    role: row.role,
+    ...(row.last_success_at ? { lastSuccessAt: row.last_success_at } : {})
   };
 }
 

@@ -69,7 +69,8 @@ export type VerificationStatus =
   | "MANUAL_REVIEW_REQUIRED";
 
 export type AttendanceWorkStatus = "NORMAL" | "LATE";
-export type AttendanceReviewStatus = "NOT_REQUIRED" | "PENDING" | "CONFIRMED" | "EVIDENCE_REQUESTED" | "CORRECTED";
+export type AttendanceReviewStatus = "NOT_REQUIRED" | "PENDING" | "CONFIRMED" | "EVIDENCE_REQUESTED" | "EVIDENCE_SUBMITTED" | "CORRECTED";
+export type AttendanceAttentionReason = "MISSING_CLOCK_OUT";
 
 export type VerificationAttempt = {
   id: string;
@@ -100,6 +101,10 @@ export type AttendanceRecord = {
   reviewedById?: string;
   reviewedAt?: string;
   reviewNote?: string;
+  evidenceResponse?: string;
+  evidenceSubmittedAt?: string;
+  /** Derived at read time; it is not persisted in the attendance row. */
+  attentionReason?: AttendanceAttentionReason;
 };
 
 export type CorrectionType =
@@ -138,6 +143,7 @@ export type AttendanceCorrectionRequest = {
 };
 
 export type LeaveType = "ANNUAL" | "HALF_DAY" | "SPECIAL" | "UNPAID";
+export type HalfDayPeriod = "AM" | "PM";
 
 export type LeaveBalanceAdjustment = {
   id: string;
@@ -157,6 +163,7 @@ export type LeaveRequest = {
   startsOn: string;
   endsOn: string;
   days: number;
+  halfDayPeriod?: HalfDayPeriod;
   reason: string;
   status: RequestStatus;
   decidedBy?: string;
