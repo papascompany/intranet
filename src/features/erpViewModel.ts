@@ -82,7 +82,7 @@ const navLabels = {
   leave: "휴가",
   overtime: "야근",
   payroll: "급여",
-  settings: "설정",
+  settings: "계정·권한",
   history: "처리 이력",
   audit: "감사"
 } satisfies Record<ErpActiveSection, string>;

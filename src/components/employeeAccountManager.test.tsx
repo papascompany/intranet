@@ -56,6 +56,20 @@ describe("EmployeeAccountManager", () => {
     expect(onSetEnabled).toHaveBeenCalledWith("emp-1", false);
   });
 
+  it("lets an HR administrator assign operational roles with a mandatory reason", async () => {
+    const onChangeRole = vi.fn().mockResolvedValue(undefined);
+    renderManager({ currentEmployeeId: "emp-ceo", onChangeRole, roleManagement: "HR" });
+
+    fireEvent.click(screen.getByRole("button", { name: "김운영 권한 변경" }));
+    const dialog = screen.getByRole("dialog", { name: "관리자/승인 권한 변경" });
+    expect(within(dialog).queryByRole("option", { name: "시스템 관리자" })).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("변경할 권한"), { target: { value: "HR_ADMIN" } });
+    fireEvent.change(within(dialog).getByLabelText("변경 사유"), { target: { value: "휴가 승인 담당 지정" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "권한 변경 저장" }));
+
+    await waitFor(() => expect(onChangeRole).toHaveBeenCalledWith("emp-1", "HR_ADMIN", "휴가 승인 담당 지정"));
+  });
+
   it("previews a CSV employee list before issuing accounts", async () => {
     const onImport = vi.fn().mockResolvedValue({
       created: [{ employee: { ...employees[0], name: "이제작", id: "emp-2" }, loginId: "lee-production", temporaryPassword: "Bulk-Temp-2026!" }],

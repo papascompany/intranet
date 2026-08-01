@@ -39,11 +39,17 @@
 .audit-log-explorer__clear svg { width: 15px; height: 15px; }
 
 .audit-log-explorer__table-wrap { overflow-x: auto; border: 1px solid var(--color-silver); border-radius: 6px; background: var(--color-white); }
-.audit-log-explorer table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+.audit-log-explorer table { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; text-align: left; }
+.audit-log-explorer__created-at { width: 142px; }
+.audit-log-explorer__actor { width: 142px; }
+.audit-log-explorer__action { width: 138px; }
+.audit-log-explorer__target { width: 168px; }
 .audit-log-explorer th, .audit-log-explorer td { border-bottom: 1px solid var(--color-silver); padding: 11px 12px; vertical-align: top; font-size: 13px; line-height: 1.45; }
 .audit-log-explorer th { color: var(--color-slate); background: var(--color-paper); font-size: 12px; font-weight: 700; }
 .audit-log-explorer tbody tr:last-child td { border-bottom: 0; }
 .audit-log-explorer td:first-child { white-space: nowrap; color: var(--color-slate); }
+.audit-log-explorer__actor-cell, .audit-log-explorer__detail-cell { overflow-wrap: anywhere; }
+.audit-log-explorer__detail-cell { color: var(--color-graphite); }
 .audit-log-explorer td code { color: #1d4ed8; font-size: 12px; overflow-wrap: anywhere; }
 .audit-log-explorer td span, .audit-log-explorer td small { display: block; }
 .audit-log-explorer td small { margin-top: 2px; color: var(--color-slate); font-size: 11px; overflow-wrap: anywhere; }

@@ -91,8 +91,15 @@ export function AuditLogExplorer({ auditLogs, employees, variant = "audit" }: Au
 
       {filteredLogs.length ? (
         <div className="audit-log-explorer__table-wrap">
-          <table>
+          <table className={variant === "history" ? "audit-log-explorer__history-table" : undefined}>
             <caption className="sr-only">필터링된 감사 로그 {filteredLogs.length}건</caption>
+            <colgroup>
+              <col className="audit-log-explorer__created-at" />
+              <col className="audit-log-explorer__actor" />
+              <col className="audit-log-explorer__action" />
+              <col className="audit-log-explorer__target" />
+              <col className="audit-log-explorer__detail" />
+            </colgroup>
             <thead>
               <tr><th scope="col">기록 시각</th><th scope="col">수행자</th><th scope="col">작업</th><th scope="col">대상</th><th scope="col">상세</th></tr>
             </thead>
@@ -100,10 +107,10 @@ export function AuditLogExplorer({ auditLogs, employees, variant = "audit" }: Au
               {filteredLogs.map((log) => (
                 <tr key={log.id}>
                   <td><time dateTime={log.createdAt}>{formatCreatedAt(log.createdAt)}</time></td>
-                  <td>{employeeLabels.get(log.actorId) ?? log.actorId}</td>
+                  <td className="audit-log-explorer__actor-cell">{employeeLabels.get(log.actorId) ?? log.actorId}</td>
                   <td><code>{variant === "history" ? humanizeAction(log.action) : log.action}</code></td>
                   <td><span>{log.targetType}</span><small>{log.targetId}</small></td>
-                  <td>{log.detail}</td>
+                  <td className="audit-log-explorer__detail-cell">{log.detail}</td>
                 </tr>
               ))}
             </tbody>

@@ -30,15 +30,19 @@ export type EmployeeAccountPasswordResult = {
   temporaryPassword: string;
 };
 
+export type EmployeeAccountRoleManagement = "NONE" | "HR" | "SYSTEM";
+
 export interface EmployeeAccountManagerProps {
   accountStates: readonly EmployeeAccountState[];
   busy?: boolean;
-  canManageAdminRoles?: boolean;
+  currentEmployeeId?: string;
   employees: readonly EmployeeAccountEmployee[];
+  onChangeRole?: (employeeId: string, role: Role, reason: string) => void | Promise<void>;
   onCreate: (input: EmployeeAccountCreateInput) => EmployeeAccountPasswordResult | Promise<EmployeeAccountPasswordResult>;
   onResetPassword: (employeeId: string, temporaryPassword: string) => void | EmployeeAccountPasswordResult | Promise<void | EmployeeAccountPasswordResult>;
   onSetEnabled: (employeeId: string, enabled: boolean) => void | Promise<void>;
   onImport: (rows: EmployeeImportRow[]) => Promise<ImportEmployeeAccountsResult>;
+  roleManagement?: EmployeeAccountRoleManagement;
   workplaces: readonly EmployeeAccountWorkplace[];
 }
 
@@ -57,6 +61,12 @@ function roleLabel(role: Role) {
   return roles.find((option) => option.value === role)?.label ?? role;
 }
 
+function changeableRoles(roleManagement: EmployeeAccountRoleManagement) {
+  if (roleManagement === "SYSTEM") return roles;
+  if (roleManagement === "HR") return roles.filter((role) => role.value !== "SYSTEM_ADMIN");
+  return [];
+}
+
 async function readTextFile(file: File) {
   if (typeof file.text === "function") return await file.text();
   return await new Promise<string>((resolve, reject) => {
@@ -67,12 +77,15 @@ async function readTextFile(file: File) {
   });
 }
 
-export function EmployeeAccountManager({ accountStates, busy = false, canManageAdminRoles = false, employees, onCreate, onResetPassword, onSetEnabled, onImport, workplaces }: EmployeeAccountManagerProps) {
+export function EmployeeAccountManager({ accountStates, busy = false, currentEmployeeId, employees, onChangeRole, onCreate, onResetPassword, onSetEnabled, onImport, roleManagement = "NONE", workplaces }: EmployeeAccountManagerProps) {
   const [draft, setDraft] = useState(() => newDraft(workplaces));
   const [createOpen, setCreateOpen] = useState(false);
   const [resetEmployee, setResetEmployee] = useState<EmployeeAccountEmployee | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [resetPasswordConfirmation, setResetPasswordConfirmation] = useState("");
+  const [roleEmployee, setRoleEmployee] = useState<EmployeeAccountEmployee | null>(null);
+  const [nextRole, setNextRole] = useState<Role>("EMPLOYEE");
+  const [roleChangeReason, setRoleChangeReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null);
@@ -81,7 +94,8 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
   const [importFileName, setImportFileName] = useState("");
   const [importedCredentials, setImportedCredentials] = useState<ImportEmployeeAccountsResult["created"]>([]);
   const isBusy = busy || isSubmitting;
-  const availableRoles = canManageAdminRoles ? roles : roles.filter((role) => role.value === "EMPLOYEE" || role.value === "APPROVER");
+  const availableRoles = roleManagement === "SYSTEM" ? roles : roles.filter((role) => role.value === "EMPLOYEE" || role.value === "APPROVER");
+  const roleChangeOptions = changeableRoles(roleManagement);
 
   const stateByEmployeeId = useMemo(() => new Map(accountStates.map((state) => [state.employeeId, state])), [accountStates]);
 
@@ -141,6 +155,28 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
     }
   };
 
+  const openRoleChange = (employee: EmployeeAccountEmployee) => {
+    setError(null);
+    setRoleEmployee(employee);
+    setNextRole(employee.role);
+    setRoleChangeReason("");
+  };
+
+  const closeRoleChange = () => {
+    if (!isBusy) {
+      setRoleEmployee(null);
+      setRoleChangeReason("");
+      setError(null);
+    }
+  };
+
+  const changeEmployeeRole = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isBusy || !roleEmployee || !onChangeRole || nextRole === roleEmployee.role || !roleChangeReason.trim()) return;
+    const completed = await runAction(() => onChangeRole(roleEmployee.id, nextRole, roleChangeReason.trim()));
+    if (completed) closeRoleChange();
+  };
+
   const resetPasswordIsValid = resetPassword.length >= 12 && resetPassword === resetPasswordConfirmation;
 
   const prepareImport = async (file: File | null) => {
@@ -179,7 +215,7 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
         <div>
           <p className="employee-account-manager__eyebrow"><ShieldCheck aria-hidden="true" /> 인사 관리</p>
           <h2 id="employee-account-manager-title">직원 계정 관리</h2>
-          <p>입사자 계정을 발급하고 접근 상태를 관리합니다.</p>
+          <p>입사자 계정, 접근 상태와 승인·관리자 권한을 관리합니다.</p>
         </div>
         <div className="employee-account-manager__header-actions">
           <label className="employee-account-manager__import"><Upload aria-hidden="true" size={15} /> 직원명부 CSV<input accept=".csv,text/csv" aria-label="직원명부 CSV 선택" disabled={isBusy || workplaces.length === 0} onChange={(event) => { void prepareImport(event.target.files?.[0] ?? null); event.target.value = ""; }} type="file" /></label>
@@ -205,12 +241,22 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
       ) : null}
       {error && !createOpen ? <InlineNotice title="처리하지 못했습니다" tone="danger">{error}</InlineNotice> : null}
 
+      {roleChangeOptions.length ? (
+        <InlineNotice title="관리자 지정" tone="info">
+          직원 행의 권한 변경에서 승인자 또는 인사 관리자를 지정할 수 있습니다. 권한 변경 사유와 처리 기록이 함께 남습니다.
+        </InlineNotice>
+      ) : null}
+
       <div aria-label={`직원 계정 ${employees.length}명`} className="employee-account-manager__summary"><Users aria-hidden="true" /> 등록 계정 {employees.length}명</div>
       {employees.length ? (
         <div className="employee-account-manager__list" role="list">
           {employees.map((employee) => {
             const state = stateByEmployeeId.get(employee.id);
             const enabled = state?.enabled ?? false;
+            const canChangeRole = Boolean(onChangeRole)
+              && roleChangeOptions.length > 0
+              && employee.id !== currentEmployeeId
+              && !(roleManagement === "HR" && employee.role === "SYSTEM_ADMIN");
             return (
               <article className="employee-account-row" key={employee.id} role="listitem">
                 <div className="employee-account-row__person">
@@ -222,6 +268,11 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
                   <span className={enabled ? "is-enabled" : "is-disabled"}>{enabled ? "사용 중" : "사용 중지"}</span>
                 </div>
                 <div className="employee-account-row__actions">
+                  {canChangeRole ? (
+                    <button aria-label={`${employee.name} 권한 변경`} className="employee-account-row__role" disabled={isBusy} onClick={() => openRoleChange(employee)} type="button">
+                      <ShieldCheck aria-hidden="true" /> 권한 변경
+                    </button>
+                  ) : null}
                   <button aria-label={`${employee.name} 비밀번호 재설정`} disabled={isBusy} onClick={() => openResetPassword(employee)} type="button"><KeyRound aria-hidden="true" /> 비밀번호 재설정</button>
                   <button aria-label={`${employee.name} 계정 ${enabled ? "사용 중지" : "사용 설정"}`} className={enabled ? "is-disable" : "is-enable"} disabled={isBusy} onClick={() => void runAction(() => onSetEnabled(employee.id, !enabled))} type="button">
                     {enabled ? "사용 중지" : "사용 설정"}
@@ -251,6 +302,14 @@ export function EmployeeAccountManager({ accountStates, busy = false, canManageA
           <label><span>임시 비밀번호 확인</span><input autoComplete="new-password" minLength={12} onChange={(event) => setResetPasswordConfirmation(event.target.value)} required type="password" value={resetPasswordConfirmation} /></label>
           {resetPassword && resetPassword.length < 12 ? <p className="employee-account-manager__password-help">임시 비밀번호는 12자 이상이어야 합니다.</p> : null}
           {resetPasswordConfirmation && resetPassword !== resetPasswordConfirmation ? <p className="employee-account-manager__password-help">임시 비밀번호가 일치하지 않습니다.</p> : null}
+        </div>
+      </FormDialog>
+
+      <FormDialog busy={isBusy} description={`${roleEmployee?.name ?? "직원"}님의 업무 권한을 변경합니다. 본인 권한은 변경할 수 없고, 변경 사유는 처리 이력에 남습니다.`} error={error ?? undefined} onClose={closeRoleChange} onSubmit={changeEmployeeRole} open={Boolean(roleEmployee)} submitDisabled={!roleEmployee || nextRole === roleEmployee.role || !roleChangeReason.trim()} submitLabel="권한 변경 저장" title="관리자/승인 권한 변경">
+        <div className="employee-account-manager__form">
+          <label><span>대상 직원</span><input readOnly value={roleEmployee ? `${roleEmployee.name} · ${roleLabel(roleEmployee.role)}` : ""} /></label>
+          <label><span>변경할 권한</span><select aria-label="변경할 권한" onChange={(event) => setNextRole(event.target.value as Role)} value={nextRole}>{roleChangeOptions.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
+          <label className="employee-account-manager__full-width"><span>변경 사유</span><textarea aria-label="변경 사유" onChange={(event) => setRoleChangeReason(event.target.value)} placeholder="예: 휴가 및 근태 승인 담당 지정" required rows={3} value={roleChangeReason} /></label>
         </div>
       </FormDialog>
 

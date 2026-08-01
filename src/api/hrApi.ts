@@ -625,7 +625,7 @@ export class HrApi {
       if (input.employeeId === actorId) {
         throw new Error("Administrators cannot change their own role");
       }
-      await this.assertSystemAdmin(actorId, input.session);
+      await this.assertRoleAssignmentAllowed(actorId, employee, input.patch.role, input.session);
     }
 
     if (input.patch.workplaceId !== undefined && input.patch.workplaceId !== null) {
@@ -1604,6 +1604,17 @@ export class HrApi {
 
     if (employee.role !== "SYSTEM_ADMIN") {
       throw new Error(`System administrator permission required: ${employeeId}`);
+    }
+  }
+
+  private async assertRoleAssignmentAllowed(actorId: string, targetEmployee: Employee, nextRole: Employee["role"], session?: AuthSession) {
+    await this.assertAdmin(actorId, session);
+    const actor = await this.findEmployee(actorId);
+
+    if (actor.role === "SYSTEM_ADMIN") return;
+
+    if (actor.role !== "HR_ADMIN" || targetEmployee.role === "SYSTEM_ADMIN" || nextRole === "SYSTEM_ADMIN") {
+      throw new Error(`System administrator permission required: ${actorId}`);
     }
   }
 

@@ -1270,8 +1270,19 @@ describe("hr api", () => {
     });
   });
 
-  it("prevents HR administrators from escalating account roles or changing immutable employee numbers", async () => {
+  it("lets HR administrators designate existing operational administrators without system-role escalation", async () => {
     const hrApi = api();
+
+    await expect(hrApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { role: "HR_ADMIN" },
+      reason: "휴가·근태 관리자 지정"
+    })).resolves.toMatchObject({
+      employee: { id: "emp-ops-1", role: "HR_ADMIN" },
+      auditLog: { action: "EMPLOYEE_CARD_UPDATED", detail: "휴가·근태 관리자 지정" }
+    });
 
     await expect(hrApi.updateEmployeeCard({
       employeeId: "emp-ops-1",
@@ -1280,6 +1291,14 @@ describe("hr api", () => {
       patch: { role: "SYSTEM_ADMIN" },
       reason: "권한 변경"
     })).rejects.toThrow("System administrator permission required");
+
+    await expect(hrApi.updateEmployeeCard({
+      employeeId: adminSession.employeeId,
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      patch: { role: "EMPLOYEE" },
+      reason: "본인 권한 변경"
+    })).rejects.toThrow("Administrators cannot change their own role");
 
     await expect(hrApi.updateEmployeeCard({
       employeeId: "emp-ops-1",

@@ -79,7 +79,7 @@ import {
 import { FormDialog, InlineNotice } from "./components/operational";
 import type { DailyWorkPlanDraft } from "./components/dailyWorkPlanManager";
 import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/employeeCardEditor";
-import type { EmployeeAccountCreateInput } from "./components/employeeAccountManager";
+import type { EmployeeAccountCreateInput, EmployeeAccountRoleManagement } from "./components/employeeAccountManager";
 import { ForcePasswordChange } from "./components/forcePasswordChange";
 import type { ApprovalQueueItem } from "./components/approvalQueue";
 import type { AttendanceRecord, AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, HalfDayPeriod, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod, Workplace } from "./domain/types";
@@ -1336,6 +1336,21 @@ function App() {
     await refresh(selectedEmployeeId);
   }
 
+  async function updateManagedEmployeeRole(employeeId: string, role: Employee["role"], reason: string) {
+    if (!authSession) {
+      throw new Error("로그인 세션을 확인할 수 없습니다.");
+    }
+    const result = await updateEmployeeCard({
+      employeeId,
+      actorId: authSession.employeeId,
+      session: authSession,
+      patch: { role },
+      reason
+    });
+    setNotice(`${result.employee.name} 권한 변경 · ${roleLabel(role)}`);
+    await refresh(selectedEmployeeId);
+  }
+
   async function updateSystemPolicy(settings: SystemPolicy) {
     if (!selectedEmployee || !isAdminAccount) {
       setNotice("GPS 허용 반경은 관리자 지정 계정만 변경할 수 있습니다.");
@@ -1582,6 +1597,7 @@ function App() {
                 onImportEmployeeAccounts: importManagedEmployeeAccounts,
                 onResetEmployeePassword: resetManagedEmployeePassword,
                 onSetEmployeeAccountAccess: setManagedEmployeeAccountAccess,
+                onChangeEmployeeRole: updateManagedEmployeeRole,
                 onUpdateSystemPolicy: updateSystemPolicy,
                 onCreateWorkplace: createManagedWorkplace,
                 onUpdateWorkplace: updateManagedWorkplace,
@@ -1591,6 +1607,8 @@ function App() {
                 onUploadPayroll: openPayrollUpload,
                 canAdmin: effectiveMode === "ADMIN",
                 canManageRoles: authSession?.role === "SYSTEM_ADMIN",
+                currentEmployeeId: authSession?.employeeId,
+                roleManagement: authSession?.role === "SYSTEM_ADMIN" ? "SYSTEM" : authSession?.role === "HR_ADMIN" ? "HR" : "NONE",
                 clockError,
                 clockFeedback,
                 clockingType,
@@ -1986,6 +2004,7 @@ function renderSection(props: {
   employeeSnapshot: EmployeeSnapshot;
   canAdmin: boolean;
   canManageRoles: boolean;
+  currentEmployeeId?: string;
   clockError: string | null;
   clockFeedback: ClockFeedback | null;
   clockingType: ClockType | null;
@@ -2010,6 +2029,7 @@ function renderSection(props: {
   onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
   onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
   onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
+  onChangeEmployeeRole: (employeeId: string, role: Employee["role"], reason: string) => Promise<void>;
   onImportEmployeeAccounts: (rows: EmployeeImportRow[]) => Promise<import("./api/types").ImportEmployeeAccountsResult>;
   onUpdateDailyTask: (task: DailyWorkTask) => void;
   onUpdateDailyTaskPlan: (taskId: string, draft: DailyWorkPlanDraft) => Promise<void>;
@@ -2025,6 +2045,7 @@ function renderSection(props: {
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onSelectEmployee: (employeeId: string) => void | Promise<void>;
   onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
+  roleManagement: EmployeeAccountRoleManagement;
   onCreateWorkplace: (workplace: Omit<Workplace, "id">) => void | Promise<void>;
   onUpdateWorkplace: (workplaceId: string, patch: Partial<Omit<Workplace, "id">>) => void | Promise<void>;
   onDeleteWorkplace: (workplaceId: string) => void | Promise<void>;
@@ -2721,15 +2742,17 @@ function PayrollSection(props: {
 
 function SettingsSection(props: {
   canAdmin: boolean;
-  canManageRoles: boolean;
+  currentEmployeeId?: string;
   employeeAccountStates: EmployeeAccountState[];
   employees: Employee[];
   isLoading: boolean;
   onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
+  onChangeEmployeeRole: (employeeId: string, role: Employee["role"], reason: string) => Promise<void>;
   onImportEmployeeAccounts: (rows: EmployeeImportRow[]) => Promise<import("./api/types").ImportEmployeeAccountsResult>;
   onResetEmployeePassword: (employeeId: string, temporaryPassword: string) => Promise<void>;
   onSetEmployeeAccountAccess: (employeeId: string, enabled: boolean) => Promise<void>;
   onUpdateSystemPolicy: (settings: SystemPolicy) => void | Promise<void>;
+  roleManagement: EmployeeAccountRoleManagement;
   systemPolicy: SystemPolicy;
   workplaces: Workplace[];
   onCreateWorkplace: (workplace: Omit<Workplace, "id">) => void | Promise<void>;
@@ -2741,12 +2764,14 @@ function SettingsSection(props: {
       <EmployeeAccountManager
         accountStates={props.employeeAccountStates}
         busy={props.isLoading}
-        canManageAdminRoles={props.canManageRoles}
+        currentEmployeeId={props.currentEmployeeId}
         employees={props.employees}
+        onChangeRole={props.onChangeEmployeeRole}
         onCreate={props.onCreateEmployeeAccount}
         onImport={props.onImportEmployeeAccounts}
         onResetPassword={props.onResetEmployeePassword}
         onSetEnabled={props.onSetEmployeeAccountAccess}
+        roleManagement={props.roleManagement}
         workplaces={props.workplaces}
       />
       {props.canAdmin ? (
@@ -2771,7 +2796,7 @@ function SettingsSection(props: {
 
 function HistorySection({ auditLogs, employees, isLoading }: { auditLogs: AuditLog[]; employees: Employee[]; isLoading: boolean }) {
   return (
-    <div className="erp-two-column">
+    <div className="admin-operations-stack">
       <AuditLogExplorer auditLogs={auditLogs} employees={employees} variant="history" />
       {isLoading ? <p className="sr-only" aria-live="polite">처리 이력을 불러오는 중입니다.</p> : null}
     </div>
@@ -2816,7 +2841,7 @@ function sectionTitle(section: ErpActiveSection) {
     leave: "휴가/연차",
     overtime: "야근/상계",
     payroll: "급여명세서",
-    settings: "설정/정책",
+    settings: "계정·권한 및 정책",
     history: "처리 이력",
     audit: "감사 로그"
   };
