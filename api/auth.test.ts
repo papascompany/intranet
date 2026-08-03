@@ -28,6 +28,25 @@ describe("auth API", () => {
     expect(response.body).toMatchObject({ session: { employeeId: "emp-ops-1", role: "EMPLOYEE", passwordChangeRequired: true } });
   });
 
+  it("renews a remembered device cookie when the app restores its session", async () => {
+    const passwordHash = await hashPassword("correct-password");
+    const query: AuthAccountQuery = async <T extends Record<string, unknown>>(sql: string) => (sql.includes("select") ? [{
+      account_id: "account-1", employee_id: "emp-ops-1", employee_number: "EMP-0002", login_id: "operations.lee", password_hash: passwordHash,
+      password_change_required: false, role: "EMPLOYEE", disabled_at: null, locked_until: null
+    }] : []) as unknown as T[];
+    const login = await handleAuthHttpRequest(
+      { method: "POST", body: { action: "login", loginId: "operations.lee", password: "correct-password", rememberLogin: true } },
+      env,
+      query
+    );
+    const restored = await handleAuthHttpRequest({ method: "GET", cookie: login.setCookie }, env, query);
+
+    expect(restored.status).toBe(200);
+    expect(restored.body).toMatchObject({ session: { rememberLogin: true } });
+    expect(restored.setCookie).toContain("HttpOnly");
+    expect(restored.setCookie).toContain("Max-Age=2592000");
+  });
+
   it("changes an authenticated password and reports validation errors", async () => {
     const passwordHash = await hashPassword("correct-password");
     const calls: Array<{ sql: string; params?: unknown[] }> = [];

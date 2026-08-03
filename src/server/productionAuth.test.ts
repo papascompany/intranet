@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hashPassword } from "./sessionAuth";
-import { authenticateCredentials, changeAuthenticatedPassword, getAuthenticatedSessionFromCookie, type AuthAccountQuery } from "./productionAuth";
+import { authenticateCredentials, changeAuthenticatedPassword, getAuthenticatedSessionFromCookie, refreshRememberedSessionCookie, type AuthAccountQuery } from "./productionAuth";
 
 const env = {
   DATABASE_URL: "postgres://test",
@@ -19,6 +19,30 @@ describe("productionAuth", () => {
     expect(login.cookie).toContain("HttpOnly");
     expect(login.cookie).not.toContain("Secure");
     expect(session?.session).toMatchObject({ employeeId: "emp-ops-1", role: "EMPLOYEE", passwordChangeRequired: true });
+  });
+
+  it("keeps a remembered personal-device session alive when the intranet is reopened", async () => {
+    const passwordHash = await hashPassword("correct-password");
+    const query = accountQuery(passwordHash);
+    const loggedInAt = new Date("2026-08-03T09:00:00.000Z");
+    const login = await authenticateCredentials({ loginId: "operations.lee", password: "correct-password", rememberLogin: true }, env, query, loggedInAt);
+    const restored = await getAuthenticatedSessionFromCookie(login.cookie, env, query, new Date("2026-08-20T09:00:00.000Z"));
+    const renewed = refreshRememberedSessionCookie(restored!, env, new Date("2026-08-20T09:00:00.000Z"));
+
+    expect(login.cookie).toContain("Max-Age=2592000");
+    expect(restored?.session.rememberLogin).toBe(true);
+    expect(renewed).toContain("Max-Age=2592000");
+    expect(getAuthenticatedSessionFromCookie(renewed, env, query, new Date("2026-09-18T09:00:00.000Z"))).resolves.toBeDefined();
+  });
+
+  it("does not renew a session when login retention was not chosen", async () => {
+    const passwordHash = await hashPassword("correct-password");
+    const query = accountQuery(passwordHash);
+    const login = await authenticateCredentials({ loginId: "operations.lee", password: "correct-password", rememberLogin: false }, env, query);
+    const restored = await getAuthenticatedSessionFromCookie(login.cookie, env, query);
+
+    expect(restored?.session.rememberLogin).toBe(false);
+    expect(refreshRememberedSessionCookie(restored!, env)).toBeUndefined();
   });
 
   it("does not authenticate a bad password", async () => {

@@ -5,6 +5,7 @@ import {
   changeAuthenticatedPassword,
   clearSessionCookie,
   getAuthenticatedSessionFromCookie,
+  refreshRememberedSessionCookie,
   type AuthAccountQuery,
   type ServerAuthEnv
 } from "../src/server/productionAuth.js";
@@ -52,7 +53,11 @@ export async function handleAuthHttpRequest(
       if (!authenticated) {
         throw new AuthenticationError();
       }
-      return { status: 200, body: { session: authenticated.session } };
+      return {
+        status: 200,
+        body: { session: authenticated.session },
+        setCookie: refreshRememberedSessionCookie(authenticated, env)
+      };
     }
 
     if (request.method === "POST") {

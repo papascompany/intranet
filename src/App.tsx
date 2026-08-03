@@ -240,7 +240,7 @@ function App() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("emp-ops-1");
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [rememberLogin, setRememberLogin] = useState(false);
+  const [rememberLogin, setRememberLogin] = useState(true);
   const [userMode, setUserMode] = useState<UserMode>("EMPLOYEE");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeeAccountStates, setEmployeeAccountStates] = useState<EmployeeAccountState[]>([]);
@@ -2141,7 +2141,7 @@ function LoginScreen(props: {
               onChange={(event) => props.onRememberChange(event.target.checked)}
               type="checkbox"
             />
-            로그인 상태 유지
+            이 기기에서 로그인 유지
           </label>
           {props.authError ? <InlineNotice title="로그인 실패" tone="danger">{props.authError}</InlineNotice> : null}
           <div className="login-form__actions">

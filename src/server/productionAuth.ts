@@ -50,6 +50,8 @@ const SESSION_COOKIE_NAME = "intranet_session";
 const INVALID_CREDENTIALS = "Invalid login ID or password.";
 const MAX_FAILED_SIGN_INS = 5;
 const SIGN_IN_LOCK_DURATION_MS = 15 * 60 * 1000;
+const STANDARD_SESSION_LIFETIME_SECONDS = 8 * 60 * 60;
+const PERSISTENT_SESSION_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
 
 export function getAuthQuery(env: ServerAuthEnv = process.env): AuthAccountQuery {
   if (!env.DATABASE_URL) {
@@ -84,17 +86,8 @@ export async function authenticateCredentials(
   await query("update auth_accounts set failed_sign_in_count = 0, locked_until = null, last_signed_in_at = now(), updated_at = now() where id = $1", [account.account_id]);
   const authenticated = toAuthenticatedSession(account, input.rememberLogin ?? false, now);
   const secret = getRequiredSessionSecret(env);
-  const lifetimeSeconds = authenticated.session.rememberLogin ? 30 * 24 * 60 * 60 : 8 * 60 * 60;
-  const token = createSignedSessionToken(
-    {
-      accountId: authenticated.accountId,
-      employeeId: authenticated.session.employeeId,
-      employeeNumber: authenticated.employeeNumber
-    },
-    secret,
-    now.getTime(),
-    lifetimeSeconds * 1000
-  );
+  const lifetimeSeconds = sessionLifetimeSeconds(authenticated.session.rememberLogin);
+  const token = createSessionToken(authenticated, secret, now, lifetimeSeconds);
 
   return {
     authenticated,
@@ -104,6 +97,30 @@ export async function authenticateCredentials(
       secure: shouldUseSecureCookie(env)
     })
   };
+}
+
+/**
+ * Refresh a remembered session only when the app is actively reopened. The
+ * server still checks account access and role data on every authenticated call.
+ */
+export function refreshRememberedSessionCookie(
+  authenticated: AuthenticatedServerSession,
+  env: ServerAuthEnv = process.env,
+  now = new Date()
+): string | undefined {
+  if (!authenticated.session.rememberLogin) return undefined;
+
+  const token = createSessionToken(
+    authenticated,
+    getRequiredSessionSecret(env),
+    now,
+    PERSISTENT_SESSION_LIFETIME_SECONDS
+  );
+  return serializeSessionCookie(token, {
+    name: SESSION_COOKIE_NAME,
+    maxAgeSeconds: PERSISTENT_SESSION_LIFETIME_SECONDS,
+    secure: shouldUseSecureCookie(env)
+  });
 }
 
 export async function changeAuthenticatedPassword(
@@ -147,7 +164,7 @@ export async function getAuthenticatedSessionFromCookie(
     return undefined;
   }
 
-  return toAuthenticatedSession(account, false, new Date(tokenSession.issuedAt));
+  return toAuthenticatedSession(account, isRememberedSession(tokenSession), new Date(tokenSession.issuedAt));
 }
 
 export function clearSessionCookie(env: ServerAuthEnv = process.env): string {
@@ -225,6 +242,32 @@ export function toAuthenticatedSession(account: AuthAccountRow, rememberLogin: b
       passwordChangeRequired: account.password_change_required
     }
   };
+}
+
+function createSessionToken(
+  authenticated: AuthenticatedServerSession,
+  secret: string,
+  now: Date,
+  lifetimeSeconds: number
+) {
+  return createSignedSessionToken(
+    {
+      accountId: authenticated.accountId,
+      employeeId: authenticated.session.employeeId,
+      employeeNumber: authenticated.employeeNumber
+    },
+    secret,
+    now.getTime(),
+    lifetimeSeconds * 1000
+  );
+}
+
+function sessionLifetimeSeconds(rememberLogin: boolean) {
+  return rememberLogin ? PERSISTENT_SESSION_LIFETIME_SECONDS : STANDARD_SESSION_LIFETIME_SECONDS;
+}
+
+function isRememberedSession(session: ServerAuthSession) {
+  return session.expiresAt - session.issuedAt > STANDARD_SESSION_LIFETIME_SECONDS * 1000;
 }
 
 export function isAccountActive(account: AuthAccountRow, now: Date) {
