@@ -16,6 +16,7 @@ describe("production health", () => {
   it("reports all production dependencies when database and schema checks pass", async () => {
     const health = await checkProductionHealth(baseEnv, async () => [{
       employees_table: "public.employees",
+      auth_session_version_column: true,
       push_subscriptions_table: "public.web_push_subscriptions",
       push_deliveries_table: "public.web_push_deliveries"
     }]);
@@ -37,6 +38,7 @@ describe("production health", () => {
   it("fails closed when required production secrets are absent", async () => {
     const health = await checkProductionHealth({ DATABASE_URL: "postgres://example", NODE_ENV: "production" }, async () => [{
       employees_table: "public.employees",
+      auth_session_version_column: true,
       push_subscriptions_table: "public.web_push_subscriptions",
       push_deliveries_table: "public.web_push_deliveries"
     }]);

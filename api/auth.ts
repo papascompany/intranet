@@ -75,8 +75,8 @@ export async function handleAuthHttpRequest(
         return { status: 200, body: { session: result.authenticated.session }, setCookie: result.cookie };
       }
       if (body?.action === "changePassword") {
-        const authenticated = await changeAuthenticatedPassword(request.cookie, body.newPassword ?? "", env, query);
-        return { status: 200, body: { session: authenticated.session } };
+        const result = await changeAuthenticatedPassword(request.cookie, body.newPassword ?? "", env, query);
+        return { status: 200, body: { session: result.authenticated.session }, setCookie: result.cookie };
       }
       if (body?.action === "logout") {
         return { status: 200, body: { ok: true }, setCookie: clearSessionCookie(env) };

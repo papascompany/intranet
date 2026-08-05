@@ -51,6 +51,13 @@ const adminSession: AuthSession = {
   rememberLogin: false
 };
 
+const systemAdminSession: AuthSession = {
+  employeeId: "emp-system",
+  role: "SYSTEM_ADMIN",
+  authenticatedAt: fixedNow,
+  rememberLogin: false
+};
+
 describe("hr api", () => {
   it("creates an employee account with a server-generated temporary password and audits it", async () => {
     const db = new InMemoryDatabase();
@@ -75,6 +82,7 @@ describe("hr api", () => {
     expect(result.auditLog).toMatchObject({ action: "EMPLOYEE_ACCOUNT_CREATED", actorId: adminSession.employeeId });
     const account = await db.findEmployeeAccount(result.employee.id);
     expect(account && await verifyPassword(result.temporaryPassword, account.passwordHash)).toBe(true);
+    expect(account?.sessionVersion).toBe(1);
 
     await expect(
       hrApi.createEmployeeAccount({
@@ -162,7 +170,7 @@ describe("hr api", () => {
     expect(reset).not.toHaveProperty("temporaryPassword");
     expect(JSON.stringify(reset.auditLog)).not.toContain(temporaryPassword);
     const resetAccount = await db.findEmployeeAccount(created.employee.id);
-    expect(resetAccount).toMatchObject({ passwordChangeRequired: true, failedSignInCount: 0, lockedUntil: undefined });
+    expect(resetAccount).toMatchObject({ passwordChangeRequired: true, sessionVersion: 2, failedSignInCount: 0, lockedUntil: undefined });
     expect(resetAccount && await verifyPassword(temporaryPassword, resetAccount.passwordHash)).toBe(true);
 
     await expect(hrApi.resetEmployeeAccountPassword({
@@ -176,6 +184,7 @@ describe("hr api", () => {
       .resolves.toMatchObject({ enabled: false, auditLog: { action: "EMPLOYEE_ACCOUNT_DISABLED" } });
     await expect(hrApi.setEmployeeAccountAccess({ actorId: adminSession.employeeId, employeeId: created.employee.id, enabled: true, session: adminSession }))
       .resolves.toMatchObject({ enabled: true, auditLog: { action: "EMPLOYEE_ACCOUNT_ENABLED" } });
+    expect((await db.findEmployeeAccount(created.employee.id))?.sessionVersion).toBe(3);
     expect((await hrApi.getEmployees()).some((employee) => employee.id === created.employee.id)).toBe(true);
     await expect(hrApi.getEmployeeAccountStates({ actorId: adminSession.employeeId, session: adminSession })).resolves.toContainEqual({
       employeeId: created.employee.id,
@@ -1092,9 +1101,16 @@ describe("hr api", () => {
   it("returns only self in the employee directory for employee sessions", async () => {
     const hrApi = api();
 
-    await expect(hrApi.getEmployeeDirectory({ session: employeeSession })).resolves.toEqual([
-      expect.objectContaining({ id: "emp-ops-1" })
-    ]);
+    const directory = await hrApi.getEmployeeDirectory({ session: employeeSession });
+    expect(directory).toEqual([expect.objectContaining({ id: "emp-ops-1", payrollAccount: "000-0000-000002" })]);
+    expect(directory[0].annualSalary).toBeUndefined();
+    expect(directory[0].severancePay).toBeUndefined();
+    expect(directory[0].incomeDeductionDependents).toBeUndefined();
+    expect(directory[0].customAdminFields).toBeUndefined();
+
+    const snapshot = await hrApi.getEmployeeSnapshot("emp-ops-1", fixedNow, employeeSession);
+    expect(snapshot.employee.payrollAccount).toBe("000-0000-000002");
+    expect(snapshot.employee.annualSalary).toBeUndefined();
   });
 
   it("limits approver directory and dashboard visibility to assigned employees", async () => {
@@ -1103,6 +1119,9 @@ describe("hr api", () => {
     const ids = directory.map((employee) => employee.id);
     expect(ids).toEqual(expect.arrayContaining(["emp-ops-2", "emp-prod-1"]));
     expect(ids).not.toContain("emp-ops-1");
+    expect(directory.find((employee) => employee.id === "emp-ops-2")?.payrollAccount).toBe("000-0000-000003");
+    expect(directory.find((employee) => employee.id === "emp-ops-2")?.annualSalary).toBeUndefined();
+    expect(directory.find((employee) => employee.id === "emp-prod-1")?.payrollAccount).toBeUndefined();
 
     const dashboard = await hrApi.getDashboard({ asOf: fixedNow, session: approverSession });
     expect(dashboard.leaveRequests.every((request) => request.employeeId === "emp-prod-1" || request.employeeId === "emp-ops-2")).toBe(true);
@@ -1270,27 +1289,34 @@ describe("hr api", () => {
     });
   });
 
-  it("lets HR administrators designate existing operational administrators without system-role escalation", async () => {
+  it("limits HR administrators to operational roles and reserves administrator roles for system administrators", async () => {
     const hrApi = api();
 
     await expect(hrApi.updateEmployeeCard({
       employeeId: "emp-ops-1",
       actorId: adminSession.employeeId,
       session: adminSession,
-      patch: { role: "HR_ADMIN" },
-      reason: "휴가·근태 관리자 지정"
-    })).resolves.toMatchObject({
-      employee: { id: "emp-ops-1", role: "HR_ADMIN" },
-      auditLog: { action: "EMPLOYEE_CARD_UPDATED", detail: "휴가·근태 관리자 지정" }
-    });
+      patch: { role: "APPROVER" },
+      reason: "휴가·근태 승인자 지정"
+    })).resolves.toMatchObject({ employee: { id: "emp-ops-1", role: "APPROVER" } });
 
     await expect(hrApi.updateEmployeeCard({
-      employeeId: "emp-ops-1",
+      employeeId: "emp-ops-2",
       actorId: adminSession.employeeId,
       session: adminSession,
-      patch: { role: "SYSTEM_ADMIN" },
-      reason: "권한 변경"
+      patch: { role: "HR_ADMIN" },
+      reason: "관리자 권한 변경"
     })).rejects.toThrow("System administrator permission required");
+
+    const systemEmployee = { ...employees[0], id: "emp-system", employeeNumber: "EMP-SYSTEM", role: "SYSTEM_ADMIN" as const };
+    const systemApi = createHrApi(new InMemoryDatabase({ employees: [...employees, systemEmployee] }), () => fixedNow);
+    await expect(systemApi.updateEmployeeCard({
+      employeeId: "emp-ops-1",
+      actorId: systemAdminSession.employeeId,
+      session: systemAdminSession,
+      patch: { role: "HR_ADMIN" },
+      reason: "시스템 관리자 승인"
+    })).resolves.toMatchObject({ employee: { id: "emp-ops-1", role: "HR_ADMIN" } });
 
     await expect(hrApi.updateEmployeeCard({
       employeeId: adminSession.employeeId,
@@ -1307,6 +1333,49 @@ describe("hr api", () => {
       patch: { employeeNumber: "EMP-9999" },
       reason: "사번 변경"
     })).rejects.toThrow("Employee number cannot be changed");
+  });
+
+  it("prevents HR administrators from resetting or disabling administrator accounts", async () => {
+    const systemEmployee = { ...employees[0], id: "emp-system", employeeNumber: "EMP-SYSTEM", role: "SYSTEM_ADMIN" as const };
+    const account = (employeeId: string, employeeNumber: string, loginId: string) => ({
+      id: `account-${employeeId}`,
+      employeeId,
+      employeeNumber,
+      loginId,
+      passwordHash: "pbkdf2_sha256$310000$salt$hash",
+      passwordChangedAt: fixedNow,
+      passwordChangeRequired: false,
+      sessionVersion: 1,
+      failedSignInCount: 0
+    });
+    const db = new InMemoryDatabase({
+      employees: [...employees, systemEmployee],
+      employeeAccounts: [
+        account("emp-ceo", "EMP-0001", "hr-admin"),
+        account("emp-system", "EMP-SYSTEM", "system-admin")
+      ]
+    });
+    const hrApi = createHrApi(db, () => fixedNow);
+
+    await expect(hrApi.resetEmployeeAccountPassword({
+      actorId: adminSession.employeeId,
+      employeeId: systemAdminSession.employeeId,
+      temporaryPassword: "Protected-Admin-2026!",
+      session: adminSession
+    })).rejects.toThrow("System administrator permission required");
+    await expect(hrApi.setEmployeeAccountAccess({
+      actorId: adminSession.employeeId,
+      employeeId: adminSession.employeeId,
+      enabled: false,
+      session: adminSession
+    })).rejects.toThrow("cannot manage their own account");
+    await expect(hrApi.resetEmployeeAccountPassword({
+      actorId: systemAdminSession.employeeId,
+      employeeId: adminSession.employeeId,
+      temporaryPassword: "Protected-Admin-2026!",
+      session: systemAdminSession
+    })).resolves.toMatchObject({ employeeId: adminSession.employeeId });
+    expect((await db.findEmployeeAccount(adminSession.employeeId))?.sessionVersion).toBe(2);
   });
 
   it("records annual leave HR corrections as a separately traceable action", async () => {
@@ -1367,6 +1436,22 @@ describe("hr api", () => {
     expect(employee?.residentRegistrationNumber).toBeUndefined();
     expect(employee?.payrollAccount).toBeUndefined();
     expect(employee?.annualSalary).toBeUndefined();
+  });
+
+  it("does not expose administrator-only fields in an employee self-service update response", async () => {
+    const result = await api().updateEmployeeCard({
+      employeeId: employeeSession.employeeId,
+      actorId: employeeSession.employeeId,
+      session: employeeSession,
+      patch: { mobile: "010-1234-5678" }
+    });
+
+    expect(result.employee).toMatchObject({ id: employeeSession.employeeId, mobile: "010-1234-5678" });
+    expect(result.employee.payrollAccount).toBe("000-0000-000002");
+    expect(result.employee.annualSalary).toBeUndefined();
+    expect(result.employee.severancePay).toBeUndefined();
+    expect(result.employee.incomeDeductionDependents).toBeUndefined();
+    expect(result.employee.customAdminFields).toBeUndefined();
   });
 
   it("rejects unknown workplace assignments before updating an employee card", async () => {

@@ -115,10 +115,14 @@ export class HrApi {
     if (input.session.role === "APPROVER") {
       return employees
         .filter((employee) => employee.id === input.session?.employeeId || employee.approverId === input.session?.employeeId)
-        .map(redactSensitiveEmployee);
+        .map((employee) => employee.id === input.session?.employeeId
+          ? redactAdminOnlyEmployee(employee)
+          : redactSensitiveEmployee(employee));
     }
 
-    return employees.filter((employee) => employee.id === input.session?.employeeId);
+    return employees
+      .filter((employee) => employee.id === input.session?.employeeId)
+      .map(redactAdminOnlyEmployee);
   }
 
   async getAppBootstrap(input: { employeeId: string; asOf?: string; session?: AuthSession }): Promise<AppBootstrap> {
@@ -165,7 +169,9 @@ export class HrApi {
 
   private visibleEmployees(employees: Employee[], session?: AuthSession) {
     const visibleEmployeeIds = this.visibleEmployeeIds(session, employees);
-    return employees.filter((employee) => visibleEmployeeIds.has(employee.id)).map((employee) => session && isAdminSession(session) ? redactSensitiveEmployee(employee) : employee);
+    return employees
+      .filter((employee) => visibleEmployeeIds.has(employee.id))
+      .map((employee) => employeeForDirectory(employee, session));
   }
 
   private buildDashboard(data: HrDataSnapshot, asOf: string, session?: AuthSession): Dashboard {
@@ -318,6 +324,7 @@ export class HrApi {
       passwordHash: credential.passwordHash,
       passwordChangedAt: this.clock(),
       passwordChangeRequired: true,
+      sessionVersion: 1,
       failedSignInCount: 0
     };
     const saved = await this.db.createEmployeeWithAccount(employee, account);
@@ -383,8 +390,7 @@ export class HrApi {
 
   async resetEmployeeAccountPassword(input: ResetEmployeeAccountPasswordInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    await this.assertAdmin(actorId, input.session);
-    await this.assertEmployee(input.employeeId);
+    await this.assertCanManageEmployeeAccount(actorId, input.employeeId, input.session);
     const account = await this.requireEmployeeAccount(input.employeeId);
     const temporaryPassword = assertTemporaryPassword(input.temporaryPassword);
     const saved = await this.db.updateEmployeeAccount({
@@ -392,6 +398,7 @@ export class HrApi {
       passwordHash: await hashPassword(temporaryPassword),
       passwordChangedAt: this.clock(),
       passwordChangeRequired: true,
+      sessionVersion: account.sessionVersion + 1,
       failedSignInCount: 0,
       lockedUntil: undefined
     });
@@ -408,12 +415,12 @@ export class HrApi {
 
   async setEmployeeAccountAccess(input: SetEmployeeAccountAccessInput) {
     const actorId = this.resolveActorId(input, input.actorId);
-    await this.assertAdmin(actorId, input.session);
-    await this.assertEmployee(input.employeeId);
+    await this.assertCanManageEmployeeAccount(actorId, input.employeeId, input.session);
     const account = await this.requireEmployeeAccount(input.employeeId);
     const saved = await this.db.updateEmployeeAccount({
       ...account,
       disabledAt: input.enabled ? undefined : this.clock(),
+      sessionVersion: input.enabled ? account.sessionVersion : account.sessionVersion + 1,
       failedSignInCount: input.enabled ? 0 : account.failedSignInCount,
       lockedUntil: input.enabled ? undefined : account.lockedUntil
     });
@@ -474,7 +481,7 @@ export class HrApi {
 
     return {
       asOf,
-      employee: session && session.employeeId !== employeeId ? redactSensitiveEmployee(employee) : employee,
+      employee: employeeForSnapshot(employee, session),
       workplaceOptions,
       todayAttendance: attendanceRecords.find((record) => record.date === asOf.slice(0, 10)),
       attendanceRecords,
@@ -637,6 +644,12 @@ export class HrApi {
 
     const updatedEmployee = normalizeEmployeeCardForPersistence(applyEmployeeCardUpdate(employee, input.patch));
     const saved = await this.db.updateEmployee(updatedEmployee);
+    if (employee.role !== saved.role || employee.employmentStatus !== saved.employmentStatus) {
+      const account = await this.db.findEmployeeAccount(saved.id);
+      if (account) {
+        await this.db.updateEmployeeAccount({ ...account, sessionVersion: account.sessionVersion + 1 });
+      }
+    }
     const isLeaveAdjustment = Object.prototype.hasOwnProperty.call(input.patch, "annualLeaveAdjustmentDays");
     let leaveBalanceAdjustment: LeaveBalanceAdjustment | undefined;
     if (isLeaveAdjustment) {
@@ -662,7 +675,11 @@ export class HrApi {
       detail: input.reason ?? Object.keys(input.patch).sort().join(", ")
     });
 
-    return { employee: saved, leaveBalanceAdjustment, auditLog };
+    return {
+      employee: selfServiceUpdate ? redactAdminOnlyEmployee(saved) : saved,
+      leaveBalanceAdjustment,
+      auditLog
+    };
   }
 
   async revealEmployeeSensitiveData(input: RevealEmployeeSensitiveDataInput) {
@@ -1613,7 +1630,26 @@ export class HrApi {
 
     if (actor.role === "SYSTEM_ADMIN") return;
 
-    if (actor.role !== "HR_ADMIN" || targetEmployee.role === "SYSTEM_ADMIN" || nextRole === "SYSTEM_ADMIN") {
+    if (actor.role !== "HR_ADMIN"
+      || targetEmployee.role === "HR_ADMIN"
+      || targetEmployee.role === "SYSTEM_ADMIN"
+      || nextRole === "HR_ADMIN"
+      || nextRole === "SYSTEM_ADMIN") {
+      throw new Error(`System administrator permission required: ${actorId}`);
+    }
+  }
+
+  private async assertCanManageEmployeeAccount(actorId: string, targetEmployeeId: string, session?: AuthSession) {
+    await this.assertAdmin(actorId, session);
+    if (actorId === targetEmployeeId) {
+      throw new Error("Administrators cannot manage their own account");
+    }
+
+    const [actor, target] = await Promise.all([
+      this.findEmployee(actorId),
+      this.findEmployee(targetEmployeeId)
+    ]);
+    if (actor.role !== "SYSTEM_ADMIN" && (target.role === "HR_ADMIN" || target.role === "SYSTEM_ADMIN")) {
       throw new Error(`System administrator permission required: ${actorId}`);
     }
   }
@@ -2081,9 +2117,21 @@ function normalizeWorkplace(workplace: Workplace): Workplace {
   return { ...workplace, name, qrPath };
 }
 
-function redactSensitiveEmployee(employee: Employee): Employee {
+function redactAdminOnlyEmployee(employee: Employee): Employee {
   return {
     ...employee,
+    annualSalary: undefined,
+    severancePay: undefined,
+    incomeDeductionDependents: undefined,
+    annualLeaveAdjustmentDays: undefined,
+    annualLeaveAdjustmentYear: undefined,
+    customAdminFields: undefined
+  };
+}
+
+function redactSensitiveEmployee(employee: Employee): Employee {
+  return {
+    ...redactAdminOnlyEmployee(employee),
     residentRegistrationNumber: undefined,
     birthday: undefined,
     address: undefined,
@@ -2091,12 +2139,24 @@ function redactSensitiveEmployee(employee: Employee): Employee {
     emergencyContact: undefined,
     familyRelations: undefined,
     payrollBank: undefined,
-    payrollAccount: undefined,
-    annualSalary: undefined,
-    severancePay: undefined,
-    incomeDeductionDependents: undefined,
-    customAdminFields: undefined
+    payrollAccount: undefined
   };
+}
+
+function employeeForDirectory(employee: Employee, session?: AuthSession): Employee {
+  if (!session) return employee;
+  if (isAdminSession(session)) return redactSensitiveEmployee(employee);
+  return employee.id === session.employeeId
+    ? redactAdminOnlyEmployee(employee)
+    : redactSensitiveEmployee(employee);
+}
+
+function employeeForSnapshot(employee: Employee, session?: AuthSession): Employee {
+  if (!session) return employee;
+  if (session.employeeId === employee.id) {
+    return isAdminSession(session) ? employee : redactAdminOnlyEmployee(employee);
+  }
+  return redactSensitiveEmployee(employee);
 }
 
 function assertActiveEmployment(employee: Employee, action: string) {

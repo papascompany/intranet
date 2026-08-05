@@ -7,7 +7,7 @@ const employees = [{ id: "emp-1", name: "김운영", employeeNumber: "P-001", ro
 const workplaces = [{ id: "hq", name: "본사" }];
 
 function renderManager(overrides: Partial<React.ComponentProps<typeof EmployeeAccountManager>> = {}) {
-  return render(<EmployeeAccountManager accountStates={[{ employeeId: "emp-1", loginId: "kim-ops", enabled: true }]} employees={employees} onCreate={vi.fn().mockResolvedValue({ temporaryPassword: "Temp-2026!" })} onImport={vi.fn().mockResolvedValue({ created: [], auditLogs: [] })} onResetPassword={vi.fn().mockResolvedValue(undefined)} onSetEnabled={vi.fn()} workplaces={workplaces} {...overrides} />);
+  return render(<EmployeeAccountManager accountStates={[{ employeeId: "emp-1", loginId: "kim-ops", enabled: true }]} employees={employees} onCreate={vi.fn().mockResolvedValue({ temporaryPassword: "Temp-2026!" })} onImport={vi.fn().mockResolvedValue({ created: [], auditLogs: [] })} onResetPassword={vi.fn().mockResolvedValue(undefined)} onSetEnabled={vi.fn()} roleManagement="HR" workplaces={workplaces} {...overrides} />);
 }
 
 describe("EmployeeAccountManager", () => {
@@ -56,18 +56,31 @@ describe("EmployeeAccountManager", () => {
     expect(onSetEnabled).toHaveBeenCalledWith("emp-1", false);
   });
 
-  it("lets an HR administrator assign operational roles with a mandatory reason", async () => {
+  it("lets an HR administrator assign only operational roles with a mandatory reason", async () => {
     const onChangeRole = vi.fn().mockResolvedValue(undefined);
     renderManager({ currentEmployeeId: "emp-ceo", onChangeRole, roleManagement: "HR" });
 
     fireEvent.click(screen.getByRole("button", { name: "김운영 권한 변경" }));
     const dialog = screen.getByRole("dialog", { name: "관리자/승인 권한 변경" });
     expect(within(dialog).queryByRole("option", { name: "시스템 관리자" })).not.toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("변경할 권한"), { target: { value: "HR_ADMIN" } });
+    expect(within(dialog).queryByRole("option", { name: "인사 관리자" })).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("변경할 권한"), { target: { value: "APPROVER" } });
     fireEvent.change(within(dialog).getByLabelText("변경 사유"), { target: { value: "휴가 승인 담당 지정" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "권한 변경 저장" }));
 
-    await waitFor(() => expect(onChangeRole).toHaveBeenCalledWith("emp-1", "HR_ADMIN", "휴가 승인 담당 지정"));
+    await waitFor(() => expect(onChangeRole).toHaveBeenCalledWith("emp-1", "APPROVER", "휴가 승인 담당 지정"));
+  });
+
+  it("hides administrator account controls from HR administrators", () => {
+    renderManager({
+      currentEmployeeId: "emp-ceo",
+      employees: [{ ...employees[0], id: "emp-admin", name: "다른 관리자", role: "HR_ADMIN" }],
+      roleManagement: "HR"
+    });
+
+    expect(screen.queryByRole("button", { name: "다른 관리자 권한 변경" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다른 관리자 비밀번호 재설정" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "다른 관리자 계정 사용 중지" })).not.toBeInTheDocument();
   });
 
   it("previews a CSV employee list before issuing accounts", async () => {

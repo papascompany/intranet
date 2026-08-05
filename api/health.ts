@@ -67,16 +67,29 @@ export async function checkProductionHealth(
       const databaseQuery = query ?? createDatabaseQuery(env.DATABASE_URL);
       const rows = await databaseQuery<{
         employees_table?: string | null;
+        auth_session_version_column?: boolean;
         push_deliveries_table?: string | null;
         push_subscriptions_table?: string | null;
       }>(
         `select
            to_regclass('public.employees') as employees_table,
            to_regclass('public.web_push_subscriptions') as push_subscriptions_table,
-           to_regclass('public.web_push_deliveries') as push_deliveries_table`
+           to_regclass('public.web_push_deliveries') as push_deliveries_table,
+           exists (
+             select 1
+             from information_schema.columns
+             where table_schema = 'public'
+               and table_name = 'auth_accounts'
+               and column_name = 'session_version'
+           ) as auth_session_version_column`
       );
       checks.database = "ok";
-      checks.schema = rows[0]?.employees_table && rows[0]?.push_subscriptions_table && rows[0]?.push_deliveries_table ? "ok" : "missing";
+      checks.schema = rows[0]?.employees_table
+        && rows[0]?.push_subscriptions_table
+        && rows[0]?.push_deliveries_table
+        && rows[0]?.auth_session_version_column
+        ? "ok"
+        : "missing";
     } catch {
       checks.database = "unreachable";
     }

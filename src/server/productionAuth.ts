@@ -27,6 +27,7 @@ type AuthAccountRow = Record<string, unknown> & {
   login_id: string;
   password_hash: string;
   password_change_required: boolean;
+  session_version: number;
   failed_sign_in_count?: number;
   role: AuthSession["role"];
   employment_status?: "ACTIVE" | "LEAVE" | "TERMINATED";
@@ -44,6 +45,7 @@ export type AuthenticatedServerSession = {
   session: AuthSession;
   accountId: string;
   employeeNumber: string;
+  sessionVersion: number;
 };
 
 const SESSION_COOKIE_NAME = "intranet_session";
@@ -129,21 +131,36 @@ export async function changeAuthenticatedPassword(
   env: ServerAuthEnv = process.env,
   query: AuthAccountQuery = getAuthQuery(env),
   now = new Date()
-): Promise<AuthenticatedServerSession> {
+): Promise<{ authenticated: AuthenticatedServerSession; cookie: string }> {
   const authenticated = await getAuthenticatedSessionFromCookie(cookieHeader, env, query, now);
   if (!authenticated) {
     throw new AuthenticationError();
   }
 
   const passwordHash = await hashPassword(newPassword);
-  await query(
-    "update auth_accounts set password_hash = $1, password_changed_at = now(), password_change_required = false, updated_at = now() where id = $2",
-    [passwordHash, authenticated.accountId]
+  const rows = await query<{ session_version: number }>(
+    "update auth_accounts set password_hash = $1, password_changed_at = now(), password_change_required = false, session_version = session_version + 1, updated_at = now() where id = $2 and session_version = $3 returning session_version",
+    [passwordHash, authenticated.accountId, authenticated.sessionVersion]
   );
+  const sessionVersion = Number(rows[0]?.session_version);
+  if (!Number.isInteger(sessionVersion) || sessionVersion <= authenticated.sessionVersion) {
+    throw new Error("Password change did not revoke existing sessions.");
+  }
 
-  return {
+  const nextAuthenticated: AuthenticatedServerSession = {
     ...authenticated,
-    session: { ...authenticated.session, passwordChangeRequired: false }
+    sessionVersion,
+    session: { ...authenticated.session, authenticatedAt: now.toISOString(), passwordChangeRequired: false }
+  };
+  const lifetimeSeconds = sessionLifetimeSeconds(nextAuthenticated.session.rememberLogin);
+  const token = createSessionToken(nextAuthenticated, getRequiredSessionSecret(env), now, lifetimeSeconds);
+  return {
+    authenticated: nextAuthenticated,
+    cookie: serializeSessionCookie(token, {
+      name: SESSION_COOKIE_NAME,
+      maxAgeSeconds: lifetimeSeconds,
+      secure: shouldUseSecureCookie(env)
+    })
   };
 }
 
@@ -191,6 +208,7 @@ export async function findAccountByLoginId(query: AuthAccountQuery, loginId: str
        auth_accounts.login_id,
        auth_accounts.password_hash,
        auth_accounts.password_change_required,
+       auth_accounts.session_version,
        auth_accounts.failed_sign_in_count,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
@@ -214,6 +232,7 @@ export async function findAccountBySignedSession(query: AuthAccountQuery, token:
        auth_accounts.login_id,
        auth_accounts.password_hash,
        auth_accounts.password_change_required,
+       auth_accounts.session_version,
        auth_accounts.failed_sign_in_count,
        auth_accounts.disabled_at,
        auth_accounts.locked_until,
@@ -224,8 +243,9 @@ export async function findAccountBySignedSession(query: AuthAccountQuery, token:
      where auth_accounts.id = $1
        and auth_accounts.employee_id = $2
        and auth_accounts.employee_number = $3
+       and auth_accounts.session_version = $4
      limit 1`,
-    [token.accountId, token.employeeId, token.employeeNumber]
+    [token.accountId, token.employeeId, token.employeeNumber, token.sessionVersion]
   );
   return rows[0];
 }
@@ -234,6 +254,7 @@ export function toAuthenticatedSession(account: AuthAccountRow, rememberLogin: b
   return {
     accountId: account.account_id,
     employeeNumber: account.employee_number,
+    sessionVersion: Number(account.session_version),
     session: {
       employeeId: account.employee_id,
       role: account.role,
@@ -254,7 +275,8 @@ function createSessionToken(
     {
       accountId: authenticated.accountId,
       employeeId: authenticated.session.employeeId,
-      employeeNumber: authenticated.employeeNumber
+      employeeNumber: authenticated.employeeNumber,
+      sessionVersion: authenticated.sessionVersion
     },
     secret,
     now.getTime(),

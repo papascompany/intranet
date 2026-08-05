@@ -63,7 +63,7 @@ function roleLabel(role: Role) {
 
 function changeableRoles(roleManagement: EmployeeAccountRoleManagement) {
   if (roleManagement === "SYSTEM") return roles;
-  if (roleManagement === "HR") return roles.filter((role) => role.value !== "SYSTEM_ADMIN");
+  if (roleManagement === "HR") return roles.filter((role) => role.value === "EMPLOYEE" || role.value === "APPROVER");
   return [];
 }
 
@@ -243,7 +243,9 @@ export function EmployeeAccountManager({ accountStates, busy = false, currentEmp
 
       {roleChangeOptions.length ? (
         <InlineNotice title="관리자 지정" tone="info">
-          직원 행의 권한 변경에서 승인자 또는 인사 관리자를 지정할 수 있습니다. 권한 변경 사유와 처리 기록이 함께 남습니다.
+          {roleManagement === "SYSTEM"
+            ? "직원 행의 권한 변경에서 승인자 또는 관리자를 지정할 수 있습니다. 권한 변경 사유와 처리 기록이 함께 남습니다."
+            : "인사 관리자는 일반 직원과 승인자 권한만 변경할 수 있습니다. 관리자 지정은 시스템 관리자가 처리합니다."}
         </InlineNotice>
       ) : null}
 
@@ -253,10 +255,10 @@ export function EmployeeAccountManager({ accountStates, busy = false, currentEmp
           {employees.map((employee) => {
             const state = stateByEmployeeId.get(employee.id);
             const enabled = state?.enabled ?? false;
-            const canChangeRole = Boolean(onChangeRole)
-              && roleChangeOptions.length > 0
-              && employee.id !== currentEmployeeId
-              && !(roleManagement === "HR" && employee.role === "SYSTEM_ADMIN");
+            const canManageAccount = employee.id !== currentEmployeeId
+              && (roleManagement === "SYSTEM"
+                || (roleManagement === "HR" && (employee.role === "EMPLOYEE" || employee.role === "APPROVER")));
+            const canChangeRole = Boolean(onChangeRole) && roleChangeOptions.length > 0 && canManageAccount;
             return (
               <article className="employee-account-row" key={employee.id} role="listitem">
                 <div className="employee-account-row__person">
@@ -273,10 +275,12 @@ export function EmployeeAccountManager({ accountStates, busy = false, currentEmp
                       <ShieldCheck aria-hidden="true" /> 권한 변경
                     </button>
                   ) : null}
-                  <button aria-label={`${employee.name} 비밀번호 재설정`} disabled={isBusy} onClick={() => openResetPassword(employee)} type="button"><KeyRound aria-hidden="true" /> 비밀번호 재설정</button>
-                  <button aria-label={`${employee.name} 계정 ${enabled ? "사용 중지" : "사용 설정"}`} className={enabled ? "is-disable" : "is-enable"} disabled={isBusy} onClick={() => void runAction(() => onSetEnabled(employee.id, !enabled))} type="button">
-                    {enabled ? "사용 중지" : "사용 설정"}
-                  </button>
+                  {canManageAccount ? <>
+                    <button aria-label={`${employee.name} 비밀번호 재설정`} disabled={isBusy} onClick={() => openResetPassword(employee)} type="button"><KeyRound aria-hidden="true" /> 비밀번호 재설정</button>
+                    <button aria-label={`${employee.name} 계정 ${enabled ? "사용 중지" : "사용 설정"}`} className={enabled ? "is-disable" : "is-enable"} disabled={isBusy} onClick={() => void runAction(() => onSetEnabled(employee.id, !enabled))} type="button">
+                      {enabled ? "사용 중지" : "사용 설정"}
+                    </button>
+                  </> : null}
                 </div>
               </article>
             );

@@ -8,6 +8,7 @@ import healthHandler from "./api/health.js";
 import hrHandler from "./api/hr.js";
 import payrollHandler from "./api/payroll.js";
 import pushHandler from "./api/push.js";
+import { applySecurityHeaders, getHttpsRedirectLocation } from "./src/server/httpSecurity.js";
 import { startWebPushWorker } from "./src/server/webPush.js";
 
 // Self-hosted entry point. Reproduces the two Vercel Node runtime behaviors the
@@ -158,7 +159,16 @@ async function serveStatic(pathname: string, response: ServerResponse, method: s
 
 async function routeRequest(request: IncomingMessage, response: ServerResponse) {
   const method = request.method ?? "GET";
-  response.setHeader("X-Content-Type-Options", "nosniff");
+  applySecurityHeaders(response);
+
+  const redirectLocation = getHttpsRedirectLocation(request.headers, request.url);
+  if (redirectLocation) {
+    response.statusCode = 308;
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Location", redirectLocation);
+    response.end();
+    return;
+  }
 
   let url: URL;
   try {
@@ -170,6 +180,7 @@ async function routeRequest(request: IncomingMessage, response: ServerResponse) 
 
   const handler = API_ROUTES[url.pathname];
   if (handler) {
+    response.setHeader("Cache-Control", "private, no-store");
     try {
       const augmented = request as AugmentedRequest;
       augmented.query = parseQuery(url);

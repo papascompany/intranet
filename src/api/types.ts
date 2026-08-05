@@ -274,6 +274,7 @@ export type EmployeeAuthAccount = {
   passwordHash: string;
   passwordChangedAt: string;
   passwordChangeRequired: boolean;
+  sessionVersion: number;
   failedSignInCount: number;
   lockedUntil?: string;
   lastSignedInAt?: string;

@@ -6,7 +6,7 @@ const pbkdf2Async = promisify(pbkdf2);
 const HASH_ALGORITHM = "sha256";
 const HASH_ITERATIONS = 310_000;
 const HASH_KEY_LENGTH = 32;
-const SESSION_TOKEN_VERSION = 1;
+const SESSION_TOKEN_VERSION = 2;
 const MIN_SESSION_SECRET_LENGTH = 32;
 
 export class PasswordValidationError extends Error {
@@ -20,6 +20,7 @@ export type ServerAuthSession = {
   accountId: string;
   employeeId: string;
   employeeNumber: string;
+  sessionVersion: number;
   issuedAt: number;
   expiresAt: number;
 };
@@ -74,6 +75,8 @@ function isSignedSessionPayload(value: unknown): value is SignedSessionPayload {
     isValidSessionValue(payload.accountId) &&
     isValidSessionValue(payload.employeeId) &&
     isValidSessionValue(payload.employeeNumber) &&
+    Number.isInteger(payload.sessionVersion) &&
+    Number(payload.sessionVersion) > 0 &&
     typeof payload.issuedAt === "number" &&
     Number.isFinite(payload.issuedAt) &&
     typeof payload.expiresAt === "number" &&
@@ -148,6 +151,7 @@ export function createSignedSessionToken(
     accountId: input.accountId,
     employeeId: input.employeeId,
     employeeNumber: input.employeeNumber,
+    sessionVersion: input.sessionVersion,
     issuedAt: now,
     expiresAt: input.expiresAt ?? now + defaultLifetimeMs
   };

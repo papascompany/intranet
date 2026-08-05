@@ -13,7 +13,8 @@ const secret = "a-session-secret-that-is-at-least-thirty-two-characters";
 const sessionInput = {
   accountId: "account-001",
   employeeId: "employee-001",
-  employeeNumber: "PAPA-001"
+  employeeNumber: "PAPA-001",
+  sessionVersion: 1
 };
 
 describe("sessionAuth", () => {

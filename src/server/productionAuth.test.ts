@@ -108,11 +108,15 @@ describe("productionAuth", () => {
 
     const changed = await changeAuthenticatedPassword(login.cookie, "new-correct-password", env, query);
 
-    expect(changed.session.passwordChangeRequired).toBe(false);
+    expect(changed.authenticated.session.passwordChangeRequired).toBe(false);
+    expect(changed.authenticated.sessionVersion).toBe(2);
+    expect(changed.cookie).toContain("HttpOnly");
     expect(calls).toContainEqual({
       sql: expect.stringContaining("password_change_required = false"),
-      params: [expect.stringMatching(/^pbkdf2_sha256\$/), "account-1"]
+      params: [expect.stringMatching(/^pbkdf2_sha256\$/), "account-1", 1]
     });
+    await expect(getAuthenticatedSessionFromCookie(login.cookie, env, query)).resolves.toBeUndefined();
+    await expect(getAuthenticatedSessionFromCookie(changed.cookie, env, query)).resolves.toBeDefined();
   });
 
   it("rejects a short replacement password", async () => {
@@ -129,11 +133,19 @@ function accountQuery(
   calls: Array<{ sql: string; params?: unknown[] }> = [],
   employmentStatus: "ACTIVE" | "LEAVE" | "TERMINATED" = "ACTIVE"
 ): AuthAccountQuery {
+  let sessionVersion = 1;
   return async <T extends Record<string, unknown>>(sql: string, params?: unknown[]) => {
     calls.push({ sql, params });
+    if (sql.includes("returning session_version")) {
+      sessionVersion += 1;
+      return [{ session_version: sessionVersion }] as unknown as T[];
+    }
+    if (sql.includes("auth_accounts.session_version = $4") && Number(params?.[3]) !== sessionVersion) {
+      return [] as T[];
+    }
     const rows = sql.includes("select") ? [{
       account_id: "account-1", employee_id: "emp-ops-1", employee_number: "EMP-0002", login_id: "operations.lee", password_hash: passwordHash,
-      password_change_required: true, role: "EMPLOYEE", employment_status: employmentStatus, disabled_at: null, locked_until: null
+      password_change_required: true, session_version: sessionVersion, role: "EMPLOYEE", employment_status: employmentStatus, disabled_at: null, locked_until: null
     }] : [];
     return rows as unknown as T[];
   };
@@ -147,7 +159,7 @@ function statefulAccountQuery(
     if (sql.includes("select")) {
       return [{
         account_id: "account-1", employee_id: "emp-ops-1", employee_number: "EMP-0002", login_id: "operations.lee", password_hash: passwordHash,
-        password_change_required: true, failed_sign_in_count: state.failedSignInCount, role: "EMPLOYEE", employment_status: "ACTIVE", disabled_at: null,
+        password_change_required: true, session_version: 1, failed_sign_in_count: state.failedSignInCount, role: "EMPLOYEE", employment_status: "ACTIVE", disabled_at: null,
         locked_until: state.lockedUntil
       }] as unknown as T[];
     }
