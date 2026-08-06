@@ -211,6 +211,15 @@ export async function handlePushHttpRequest(
   } catch (error) {
     const message = error instanceof Error ? error.message : "푸시 알림 요청을 처리하지 못했습니다.";
     const status = error instanceof PushRequestError ? error.status : 500;
+    const action = (request.body as PushActionBody | undefined)?.action ?? "missing";
+    const pushStatus = error instanceof Error && "statusCode" in error
+      ? Number((error as Error & { statusCode?: unknown }).statusCode) || undefined
+      : undefined;
+    console.error(`[push] ${action} failed`, {
+      message,
+      name: error instanceof Error ? error.name : typeof error,
+      ...(pushStatus ? { statusCode: pushStatus } : {})
+    });
     return { status, body: { error: status === 500 ? "푸시 알림 서비스에 연결하지 못했습니다." : message } };
   }
 }

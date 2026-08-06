@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createDatabaseQuery, type HrServerEnv, getPersistenceStatusFromEnv } from "../src/server/neonRepositoryFactory.js";
 import { getRequiredSessionSecret } from "../src/server/sessionAuth.js";
+import { isWebPushRuntimeReady } from "../src/server/webPush.js";
 
 type VercelRequest = IncomingMessage & { method?: string };
 type HealthQuery = <T extends Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>;
@@ -46,7 +47,9 @@ export async function checkProductionHealth(
     // The `blob` key is kept for wire compatibility; it reports whichever
     // payroll storage backend is configured (local disk or Vercel Blob).
     blob: await checkPayrollStorage(env),
-    push: env.WEB_PUSH_VAPID_PUBLIC_KEY && env.WEB_PUSH_VAPID_PRIVATE_KEY && env.WEB_PUSH_SUBJECT ? "ok" : "missing"
+    push: env.WEB_PUSH_VAPID_PUBLIC_KEY && env.WEB_PUSH_VAPID_PRIVATE_KEY && env.WEB_PUSH_SUBJECT && isWebPushRuntimeReady()
+      ? "ok"
+      : "missing"
   };
 
   if (env.SESSION_SECRET) {

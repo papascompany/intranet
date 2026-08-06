@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { PostgresQuery } from "../api/postgresRepository";
-import { deliverAttendancePushes } from "./webPush";
+import { deliverAttendancePushes, isWebPushRuntimeReady } from "./webPush";
 
 const env = {
   DATABASE_URL: "postgres://example",
@@ -11,6 +11,10 @@ const env = {
 };
 
 describe("web push delivery worker", () => {
+  it("loads the CommonJS web-push sender in the ESM server runtime", () => {
+    expect(isWebPushRuntimeReady()).toBe(true);
+  });
+
   it("claims a clock-in audit event and sends one notification", async () => {
     const candidate = {
       audit_log_id: "audit-1",

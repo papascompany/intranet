@@ -1,4 +1,4 @@
-import * as webpush from "web-push";
+import webpush from "web-push";
 
 import type { PushNotificationPayload } from "../api/pushTypes.js";
 import type { PostgresQuery } from "../api/postgresRepository.js";
@@ -49,6 +49,10 @@ export function getWebPushConfiguration(env: WebPushEnv = process.env) {
   };
 }
 
+export function isWebPushRuntimeReady() {
+  return typeof webpush.sendNotification === "function";
+}
+
 export async function sendWebPushNotification(
   subscription: StoredPushSubscription,
   payload: PushNotificationPayload,
@@ -57,6 +61,9 @@ export async function sendWebPushNotification(
   const config = getWebPushConfiguration(env);
   if (!config.configured || !config.publicKey || !config.privateKey || !config.subject) {
     throw new Error("Web Push is not configured.");
+  }
+  if (!isWebPushRuntimeReady()) {
+    throw new Error("Web Push runtime is unavailable.");
   }
 
   return await webpush.sendNotification(
