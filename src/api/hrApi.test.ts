@@ -330,6 +330,43 @@ describe("hr api", () => {
     expect(late.attendance).toMatchObject({ workStatus: "LATE", lateMinutes: 5, reviewStatus: "NOT_REQUIRED" });
   });
 
+  it("does not reuse the previous Korean workday before 09:00 when the server clock is UTC", async () => {
+    const previousDay = {
+      id: "att-2026-08-06-emp-ops-1",
+      employeeId: "emp-ops-1",
+      date: "2026-08-06",
+      clockInAt: "2026-08-06T09:00:00+09:00",
+      clockOutAt: "2026-08-06T18:00:00+09:00",
+      status: "GPS_PASSED" as const,
+      verificationId: "ver-previous-day",
+      earlyLeaveMinutes: 0
+    };
+    const hrApi = createHrApi(
+      new InMemoryDatabase({
+        attendanceRecords: [previousDay],
+        employees: employees.map((employee) => employee.id === employeeSession.employeeId
+          ? { ...employee, workStartTime: "09:00", workEndTime: "18:00" }
+          : employee)
+      }),
+      () => "2026-08-06T23:55:00.000Z"
+    );
+
+    const result = await hrApi.clockAttendance({
+      employeeId: employeeSession.employeeId,
+      type: "CLOCK_IN",
+      method: "MANUAL_CLICK",
+      gpsError: true,
+      session: employeeSession
+    });
+
+    expect(result.attendance).toMatchObject({
+      id: "att-2026-08-07-emp-ops-1",
+      date: "2026-08-07",
+      workStatus: "NORMAL",
+      lateMinutes: 0
+    });
+  });
+
   it("enforces the attendance state machine for out-of-order and duplicate clicks", async () => {
     const hrApi = api();
 

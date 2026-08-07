@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { CalendarDays, Pencil, Plus, Users } from "lucide-react";
 import { FormDialog, InlineNotice } from "./operational";
 import type { DailyWorkTask, DailyWorkTaskStatus, Employee } from "../domain/types";
+import { koreaDate } from "../domain/koreaTime";
 import "./dailyWorkPlanManager.css";
 
 const statusOptions: Array<{ value: DailyWorkTaskStatus; label: string }> = [
@@ -36,7 +37,7 @@ type DialogState =
   | null;
 
 function todayForInput() {
-  return new Date().toISOString().slice(0, 10);
+  return koreaDate(new Date().toISOString());
 }
 
 function newDraft(employees: DailyWorkPlanManagerProps["employees"]): DailyWorkPlanDraft {

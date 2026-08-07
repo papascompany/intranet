@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { AttendanceRecord, Employee } from "../domain/types";
+import { koreaDate } from "../domain/koreaTime";
 import { buildRecognizedWorkStats, formatRecognizedMinutes } from "../features/recognizedWork";
 import { DetailPanel, KpiGrid, KpiTile } from "./erp";
 import "./recognizedWorkStats.css";
@@ -22,9 +23,10 @@ export function RecognizedWorkSummary({ monthLabel, cumulativeLabel }: { monthLa
 }
 
 export function RecognizedWorkStats({ asOf, employees, records }: { asOf: string; employees: Employee[]; records: AttendanceRecord[] }) {
-  const currentMonth = asOf.slice(0, 7);
+  const asOfDate = koreaDate(asOf);
+  const currentMonth = asOfDate.slice(0, 7);
   const [startDate, setStartDate] = useState(`${currentMonth}-01`);
-  const [endDate, setEndDate] = useState(asOf.slice(0, 10));
+  const [endDate, setEndDate] = useState(asOfDate);
   const [employeeId, setEmployeeId] = useState("");
   const stats = useMemo(
     () => buildRecognizedWorkStats(records, employees, { startDate, endDate, employeeId: employeeId || undefined }),
@@ -37,7 +39,7 @@ export function RecognizedWorkStats({ asOf, employees, records }: { asOf: string
         <label><span>시작일</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></label>
         <label><span>종료일</span><input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></label>
         <label><span>직원</span><select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}><option value="">전체 직원</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
-        <button type="button" onClick={() => { setStartDate(`${currentMonth}-01`); setEndDate(asOf.slice(0, 10)); setEmployeeId(""); }}>이번 달</button>
+        <button type="button" onClick={() => { setStartDate(`${currentMonth}-01`); setEndDate(asOfDate); setEmployeeId(""); }}>이번 달</button>
       </div>
       <KpiGrid className="recognized-work-kpis">
         <KpiTile label="기간 합계" value={formatRecognizedMinutes(stats.totalMinutes)} footer={`${stats.totalDays}일 기록`} />

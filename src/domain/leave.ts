@@ -1,4 +1,5 @@
 import type { Employee, HalfDayPeriod, LeaveBalance, LeaveRequest, LeaveType } from "./types.js";
+import { koreaDate } from "./koreaTime.js";
 
 export type WorkDayCode = "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
 
@@ -46,7 +47,7 @@ export function calculateLeaveDays(params: {
 
 export function monthsSinceHire(hireDate: string, asOf: string) {
   const hire = dateParts(hireDate);
-  const today = dateParts(asOf);
+  const today = dateParts(koreaDate(asOf));
   if (!hire || !today) return 0;
 
   let months = (today.year - hire.year) * 12 + today.month - hire.month;
@@ -71,7 +72,7 @@ export function statutoryAnnualLeaveDays(hireDate: string, asOf: string) {
 
 export function annualLeaveCycle(hireDate: string, asOf: string) {
   const hire = dateParts(hireDate);
-  const today = dateParts(asOf);
+  const today = dateParts(koreaDate(asOf));
   if (!hire || !today) {
     return { startsOn: hireDate.slice(0, 10), endsOn: hireDate.slice(0, 10), completedYears: 0 };
   }
@@ -96,10 +97,10 @@ export function getLeaveBalance(params: {
     request.employeeId === params.employee.id
     && (request.type === "ANNUAL" || request.type === "HALF_DAY")
   );
-  const asOfDate = params.asOf.slice(0, 10);
+  const asOfDate = koreaDate(params.asOf);
   const currentMonth = asOfDate.slice(0, 7);
   const currentYear = asOfDate.slice(0, 4);
-  const cycle = annualLeaveCycle(params.employee.hireDate, params.asOf);
+  const cycle = annualLeaveCycle(params.employee.hireDate, asOfDate);
   const currentCycleRequests = eligibleRequests.filter((request) =>
     request.startsOn >= cycle.startsOn && request.startsOn <= cycle.endsOn
   );
@@ -110,7 +111,7 @@ export function getLeaveBalance(params: {
   const usedDays = sumDays(approvedCycleRequests);
 
   const autoAccrual = params.policy?.annualLeaveAutoAccrual ?? true;
-  const statutoryDays = autoAccrual ? statutoryAnnualLeaveDays(params.employee.hireDate, params.asOf) : 0;
+  const statutoryDays = autoAccrual ? statutoryAnnualLeaveDays(params.employee.hireDate, asOfDate) : 0;
   const adjustmentYear = params.employee.annualLeaveAdjustmentYear ?? Number(currentYear);
   const adjustmentDays = adjustmentYear === Number(currentYear) ? params.employee.annualLeaveAdjustmentDays ?? 0 : 0;
 

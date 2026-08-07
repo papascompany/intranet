@@ -66,6 +66,24 @@ describe("attendance verification policy", () => {
       reviewStatus: "PENDING"
     });
   });
+
+  it("uses the Korean calendar date for an authenticated server timestamp before 09:00", () => {
+    const result = buildAttendanceRecord({
+      employeeId: "emp-ops-1",
+      type: "CLOCK_IN",
+      now: "2026-08-06T23:55:00.000Z",
+      verification: {
+        id: "ver-before-nine",
+        employeeId: "emp-ops-1",
+        method: "MANUAL_CLICK",
+        status: "GPS_FAILED_ALLOWED",
+        attemptedAt: "2026-08-06T23:55:00.000Z"
+      },
+      scheduledStartTime: "09:00"
+    });
+
+    expect(result).toMatchObject({ date: "2026-08-07", workStatus: "NORMAL", lateMinutes: 0 });
+  });
 });
 
 describe("leave policy", () => {
@@ -83,6 +101,7 @@ describe("leave policy", () => {
     expect(monthsSinceHire("2025-07-21", "2026-07-21T00:00:00+09:00")).toBe(12);
     expect(statutoryAnnualLeaveDays("2025-07-21", "2026-07-21T00:00:00+09:00")).toBe(15);
     expect(statutoryAnnualLeaveDays("2023-07-21", "2026-07-21T00:00:00+09:00")).toBe(16);
+    expect(statutoryAnnualLeaveDays("2025-08-07", "2026-08-06T23:55:00.000Z")).toBe(15);
   });
 
   it("uses a hire-date-based cycle and clamps leap-day anniversaries", () => {

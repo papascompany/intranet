@@ -6,6 +6,7 @@ import type {
   VerificationStatus,
   Workplace
 } from "./types.js";
+import { koreaDate } from "./koreaTime.js";
 
 type Coordinate = {
   latitude: number;
@@ -95,7 +96,7 @@ export function buildAttendanceRecord(params: {
   scheduledEndTime?: string;
   scheduledEndHour?: number;
 }): AttendanceRecord {
-  const date = params.now.slice(0, 10);
+  const date = koreaDate(params.now);
   const lateMinutes = params.type === "CLOCK_IN"
     ? calculateLateMinutes(params.now, params.scheduledStartTime)
     : params.existing?.lateMinutes ?? 0;

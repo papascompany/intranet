@@ -63,6 +63,7 @@ import {
 import { defaultSystemPolicy, type Dashboard, type EmployeeAccountState, type EmployeeSnapshot, type SystemPolicy } from "./api/types";
 import { isAdminSession, type AuthSession } from "./api/auth";
 import { changeAuthenticatedPassword, getAuthenticatedSession, loginWithLoginId, logoutAuthenticatedSession } from "./api/authHttpClient";
+import { koreaDate } from "./domain/koreaTime";
 import {
   DataTable,
   DetailPanel,
@@ -1963,7 +1964,7 @@ function buildAdminSelectionSnapshot(
     asOf: dashboard.asOf,
     employee,
     workplaceOptions,
-    todayAttendance: attendanceRecords.find((record) => record.date === dashboard.asOf.slice(0, 10)),
+    todayAttendance: attendanceRecords.find((record) => record.date === koreaDate(dashboard.asOf)),
     attendanceRecords,
     leaveBalance: getLeaveBalance({
       employee,

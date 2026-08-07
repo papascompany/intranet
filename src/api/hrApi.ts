@@ -1,4 +1,5 @@
 import { buildAttendanceRecord, calculateLateMinutes, calculateRecognizedWorkMinutes, evaluateVerification, isMissingClockOut } from "../domain/attendance.js";
+import { koreaDate } from "../domain/koreaTime.js";
 import { annualLeaveCycle, calculateLeaveDays, chargeableLeaveDates, getLeaveBalance, workDayCode } from "../domain/leave.js";
 import { offsetOvertimeWithEarlyLeave } from "../domain/overtime.js";
 import { applyEmployeeCardUpdate } from "../features/employeeCardUpdate.js";
@@ -175,7 +176,7 @@ export class HrApi {
   }
 
   private buildDashboard(data: HrDataSnapshot, asOf: string, session?: AuthSession): Dashboard {
-    const today = asOf.slice(0, 10);
+    const today = koreaDate(asOf);
     const { employees, attendanceRecords, leaveRequests: leaveRequestRecords, overtimeRequests: overtimeRequestRecords, corrections: correctionRecords, correctionRequests: correctionRequestRecords, payrollStatements: payrollStatementRecords, settings, auditLogs } = data;
     const visibleEmployeeIds = this.visibleEmployeeIds(session, employees);
     const attendance = attendanceRecords
@@ -458,6 +459,7 @@ export class HrApi {
     if (!employee) {
       throw new Error(`Employee not found: ${employeeId}`);
     }
+    const today = koreaDate(asOf);
 
     const attendanceRecords = attendanceRecordRows
       .filter((record) => record.employeeId === employeeId)
@@ -483,7 +485,7 @@ export class HrApi {
       asOf,
       employee: employeeForSnapshot(employee, session),
       workplaceOptions,
-      todayAttendance: attendanceRecords.find((record) => record.date === asOf.slice(0, 10)),
+      todayAttendance: attendanceRecords.find((record) => record.date === today),
       attendanceRecords,
       leaveBalance: getLeaveBalance({
         employee,
@@ -506,7 +508,7 @@ export class HrApi {
       attendanceCorrectionRequests: correctionRequestRows.filter((request) => request.employeeId === employeeId),
       leaveBalanceAdjustments: leaveBalanceAdjustmentRows.filter((adjustment) => adjustment.employeeId === employeeId),
       payrollStatements: payrollStatementRows.filter((statement) => statement.employeeId === employeeId),
-      dailyWorkTasks: dailyWorkTaskRows.filter((task) => task.employeeId === employeeId && task.date === asOf.slice(0, 10)),
+      dailyWorkTasks: dailyWorkTaskRows.filter((task) => task.employeeId === employeeId && task.date === today),
       recentAuditLogs: auditLogs
         .filter((log) => log.actorId === employeeId || visibleAuditTargetIds.has(log.targetId))
         .slice(0, 10)
@@ -515,7 +517,7 @@ export class HrApi {
 
   async getDailyWorkTasks(input: GetDailyWorkTasksInput) {
     await this.assertCanReadEmployee(input.employeeId, input.session);
-    const date = input.date ?? this.clock().slice(0, 10);
+    const date = input.date ?? koreaDate(this.clock());
     return (await this.db.listDailyWorkTasks())
       .filter((task) => task.employeeId === input.employeeId && task.date === date)
       .sort((left, right) => left.displayOrder - right.displayOrder || left.id.localeCompare(right.id));
@@ -705,7 +707,8 @@ export class HrApi {
 
     // Authenticated HTTP requests use the server clock; `now` remains injectable for deterministic tests.
     const now = input.session ? this.clock() : input.now ?? this.clock();
-    const existing = await this.db.findAttendanceByEmployeeDate(input.employeeId, now.slice(0, 10));
+    const workDate = koreaDate(now);
+    const existing = await this.db.findAttendanceByEmployeeDate(input.employeeId, workDate);
     if (input.type === "CLOCK_IN" && existing?.clockInAt) {
       throw new Error("이미 출근 처리된 날짜입니다.");
     }
@@ -716,7 +719,7 @@ export class HrApi {
       throw new Error("이미 퇴근 처리된 날짜입니다.");
     }
     const settings = await this.db.getSettings();
-    const isScheduledWorkDay = settings.workDays.includes(workDayCode(now));
+    const isScheduledWorkDay = settings.workDays.includes(workDayCode(workDate));
     const scheduledStartTime = isScheduledWorkDay ? employee.workStartTime ?? settings.workStartTime : undefined;
     const scheduledEndTime = isScheduledWorkDay ? employee.workEndTime ?? settings.workEndTime : "00:00";
     const verification = evaluateVerification({
@@ -801,7 +804,7 @@ export class HrApi {
     await this.assertAdmin(actorId, input.session);
     const employee = await this.findEmployee(input.employeeId);
     const usedOn = normalizeDateOnly(input.usedOn, "사용일", true)!;
-    const today = this.clock().slice(0, 10);
+    const today = koreaDate(this.clock());
     if (usedOn > today) {
       throw new Error("Historical leave usage date cannot be in the future");
     }
@@ -1961,7 +1964,7 @@ export class HrApi {
     const endsOn = normalizeDateOnly(input.endsOn, "휴가 종료일", true)!;
     if (endsOn < startsOn) throw new Error("Leave period is invalid");
     if (startsOn < employee.hireDate) throw new Error("Leave date cannot be before the hire date");
-    if (startsOn < this.clock().slice(0, 10)) throw new Error("Past leave usage must be recorded by an administrator");
+    if (startsOn < koreaDate(this.clock())) throw new Error("Past leave usage must be recorded by an administrator");
     requiredText(input.reason, "Leave request reason");
     if (input.type === "HALF_DAY" && (!settings.partialLeaveAllowed || (input.halfDayPeriod !== "AM" && input.halfDayPeriod !== "PM"))) {
       throw new Error("Half-day leave is not allowed by the current policy");
@@ -2184,7 +2187,7 @@ function assertCorrectionType(type: unknown): asserts type is CorrectionType {
 }
 
 function assertCorrectionDate(attendanceDate: string, timestamp: string) {
-  if (timestamp.slice(0, 10) !== attendanceDate) {
+  if (koreaDate(timestamp) !== attendanceDate) {
     throw new Error("Correction time must match the attendance date");
   }
 }
