@@ -288,6 +288,27 @@ describe("PostgresHrRepository", () => {
     await expect(repository.getSettings()).resolves.toMatchObject({ payrollHolidayDates: ["2026-09-24", "2026-09-25"] });
   });
 
+  it("persists and maps the leave reason requirement policy", async () => {
+    const { calls, repository } = repositoryWithRows([[
+      {
+        id: "system-policy",
+        gps_allowed_radius_meters: 300,
+        leave_reason_required: true,
+        gps_failure_fallback: "QR_OR_MANUAL_EQUAL",
+        payroll_employee_access: "VIEW_ONLY",
+        payroll_delete_mode: "ADMIN_ONLY_SOFT_DELETE",
+        overtime_pay_approver_role: "ADMIN_ONLY",
+        advance_leave_exception_handling: "HR_CORRECTION"
+      }
+    ]]);
+
+    const settings = await repository.updateSettings({ leaveReasonRequired: true });
+
+    expect(calls[0].sql).toContain("leave_reason_required = $2");
+    expect(calls[0].params).toEqual(["system-policy", true]);
+    expect(settings.leaveReasonRequired).toBe(true);
+  });
+
   it("writes audit logs with database column names", async () => {
     const { calls, repository } = repositoryWithRows([
       [

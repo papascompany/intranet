@@ -59,7 +59,7 @@ export type SubmitLeaveRequestInput = AuthenticatedInput & {
   /** Optional legacy hint. The server always calculates the charged days from policy. */
   days?: number;
   halfDayPeriod?: HalfDayPeriod;
-  reason: string;
+  reason?: string;
   actorId?: string;
   status?: Extract<RequestStatus, "DRAFT" | "PENDING">;
 };
@@ -314,6 +314,7 @@ export type SystemPolicy = {
   annualLeaveUnit: 0.5 | 1;
   partialLeaveAllowed: boolean;
   annualLeaveOveruseAllowed: boolean;
+  leaveReasonRequired: boolean;
   gpsFailureFallback: "QR_OR_MANUAL_EQUAL";
   payrollEmployeeAccess: "VIEW_ONLY";
   payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE";
@@ -334,6 +335,7 @@ export const defaultSystemPolicy: SystemPolicy = {
   annualLeaveUnit: 0.5,
   partialLeaveAllowed: true,
   annualLeaveOveruseAllowed: false,
+  leaveReasonRequired: false,
   gpsFailureFallback: "QR_OR_MANUAL_EQUAL",
   payrollEmployeeAccess: "VIEW_ONLY",
   payrollDeleteMode: "ADMIN_ONLY_SOFT_DELETE",
@@ -417,6 +419,7 @@ export type Dashboard = {
   attendanceRecords?: AttendanceRecord[];
   leaveRequests: LeaveRequest[];
   pendingLeaveRequests: LeaveRequest[];
+  leaveCalendarEntries: LeaveCalendarEntry[];
   overtimeRequests: OvertimeRequest[];
   corrections: AttendanceCorrection[];
   correctionRequests?: AttendanceCorrectionRequest[];
@@ -425,6 +428,19 @@ export type Dashboard = {
   activePayrollStatements: PayrollStatement[];
   settings?: SystemPolicy;
   recentAuditLogs: AuditLog[];
+};
+
+export type LeaveCalendarEntry = {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  department: Employee["department"];
+  type: LeaveType;
+  startsOn: string;
+  endsOn: string;
+  halfDayPeriod?: HalfDayPeriod;
+  status: Extract<RequestStatus, "PENDING" | "APPROVED">;
+  isOwn: boolean;
 };
 
 export type EmployeeSnapshot = {

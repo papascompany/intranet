@@ -34,6 +34,7 @@ describe("SystemPolicyEditor", () => {
     expect(screen.getByLabelText("연차/월차 자동 생성")).toBeChecked();
     expect(screen.getByLabelText("부분휴가 사용 허용")).toBeChecked();
     expect(screen.getByLabelText("연차 초과 사용 허용")).not.toBeChecked();
+    expect(screen.getByLabelText("휴가 신청 사유 필수 입력")).not.toBeChecked();
     expect(screen.getByLabelText("회사 휴일")).toHaveValue("");
   });
 
@@ -71,6 +72,7 @@ describe("SystemPolicyEditor", () => {
     fireEvent.change(screen.getByLabelText("연차 사용 단위"), { target: { value: "1" } });
     fireEvent.click(screen.getByLabelText("연차 초과 사용 허용"));
     fireEvent.click(screen.getByLabelText("부분휴가 사용 허용"));
+    fireEvent.click(screen.getByLabelText("휴가 신청 사유 필수 입력"));
     fireEvent.click(screen.getByRole("button", { name: "근무·연차 정책 저장" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -81,7 +83,8 @@ describe("SystemPolicyEditor", () => {
       workDays: ["MON", "TUE", "WED", "THU", "FRI", "SAT"],
       annualLeaveUnit: 1,
       annualLeaveOveruseAllowed: true,
-      partialLeaveAllowed: false
+      partialLeaveAllowed: false,
+      leaveReasonRequired: true
     }));
   });
 

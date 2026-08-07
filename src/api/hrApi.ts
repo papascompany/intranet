@@ -183,6 +183,24 @@ export class HrApi {
       .filter((record) => visibleEmployeeIds.has(record.employeeId))
       .map((record) => attendanceWithAttention(record, employees.find((employee) => employee.id === record.employeeId), settings, asOf));
     const leaveRequests = leaveRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
+    const leaveCalendarEntries = leaveRequestRecords
+      .filter((request) => request.status === "APPROVED" || request.status === "PENDING")
+      .filter((request) => !session || isAdminSession(session) || request.status === "APPROVED" || visibleEmployeeIds.has(request.employeeId))
+      .flatMap((request) => {
+        const employee = employees.find((item) => item.id === request.employeeId);
+        return employee ? [{
+          id: request.id,
+          employeeId: request.employeeId,
+          employeeName: employee.name,
+          department: employee.department,
+          type: request.type,
+          startsOn: request.startsOn,
+          endsOn: request.endsOn,
+          halfDayPeriod: request.halfDayPeriod,
+          status: request.status as "PENDING" | "APPROVED",
+          isOwn: request.employeeId === session?.employeeId
+        }] : [];
+      });
     const overtimeRequests = overtimeRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
     const corrections = correctionRecords.filter((correction) => visibleEmployeeIds.has(correction.employeeId));
     const correctionRequests = correctionRequestRecords.filter((request) => visibleEmployeeIds.has(request.employeeId));
@@ -206,6 +224,7 @@ export class HrApi {
       attendanceRecords: attendance,
       leaveRequests,
       pendingLeaveRequests: leaveRequests.filter((request) => request.status === "PENDING"),
+      leaveCalendarEntries,
       overtimeRequests,
       corrections,
       correctionRequests,
@@ -774,7 +793,6 @@ export class HrApi {
     const settings = await this.db.getSettings();
     const leaveRequests = await this.db.listLeaveRequests();
     const normalized = this.assertLeaveRequest(input, employee, leaveRequests, settings);
-    const reason = requiredText(input.reason, "Leave request reason");
 
     const request: LeaveRequest = {
       id: await this.db.nextId("leave"),
@@ -784,7 +802,7 @@ export class HrApi {
       endsOn: normalized.endsOn,
       days: normalized.days,
       halfDayPeriod: normalized.halfDayPeriod,
-      reason,
+      reason: normalized.reason,
       status: "PENDING"
     };
     const saved = await this.db.addLeaveRequest(request);
@@ -1965,7 +1983,9 @@ export class HrApi {
     if (endsOn < startsOn) throw new Error("Leave period is invalid");
     if (startsOn < employee.hireDate) throw new Error("Leave date cannot be before the hire date");
     if (startsOn < koreaDate(this.clock())) throw new Error("Past leave usage must be recorded by an administrator");
-    requiredText(input.reason, "Leave request reason");
+    const reason = settings.leaveReasonRequired
+      ? requiredText(input.reason, "Leave request reason")
+      : typeof input.reason === "string" ? input.reason.trim() : "";
     if (input.type === "HALF_DAY" && (!settings.partialLeaveAllowed || (input.halfDayPeriod !== "AM" && input.halfDayPeriod !== "PM"))) {
       throw new Error("Half-day leave is not allowed by the current policy");
     }
@@ -1989,7 +2009,7 @@ export class HrApi {
     if (input.days !== undefined && (!Number.isFinite(input.days) || Math.abs(input.days - expectedDays) > 0.0001)) {
       throw new Error("휴가 일수가 근무일·공휴일 기준 자동 계산 결과와 일치하지 않습니다.");
     }
-    const normalized = { startsOn, endsOn, days: expectedDays, halfDayPeriod: input.type === "HALF_DAY" ? input.halfDayPeriod : undefined };
+    const normalized = { startsOn, endsOn, days: expectedDays, halfDayPeriod: input.type === "HALF_DAY" ? input.halfDayPeriod : undefined, reason };
     if (input.type !== "ANNUAL" && input.type !== "HALF_DAY") return normalized;
 
     const requestedDateSet = new Set(requestedDates);
@@ -2096,6 +2116,9 @@ function assertSystemPolicy(settings: import("./types.js").SystemPolicy) {
   }
   if (settings.annualLeaveUnit !== 0.5 && settings.annualLeaveUnit !== 1) {
     throw new Error("Annual leave unit must be 0.5 or 1 day");
+  }
+  if (typeof settings.leaveReasonRequired !== "boolean") {
+    throw new Error("Leave reason requirement must be enabled or disabled");
   }
 }
 

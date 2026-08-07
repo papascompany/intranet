@@ -60,7 +60,7 @@ import {
   updateRequestStatus,
   updateAttendanceCorrectionRequestStatus
 } from "./api/hrHttpClient";
-import { defaultSystemPolicy, type Dashboard, type EmployeeAccountState, type EmployeeSnapshot, type SystemPolicy } from "./api/types";
+import { defaultSystemPolicy, type Dashboard, type EmployeeAccountState, type EmployeeSnapshot, type LeaveCalendarEntry, type SystemPolicy } from "./api/types";
 import { isAdminSession, type AuthSession } from "./api/auth";
 import { changeAuthenticatedPassword, getAuthenticatedSession, loginWithLoginId, logoutAuthenticatedSession } from "./api/authHttpClient";
 import { koreaDate } from "./domain/koreaTime";
@@ -104,6 +104,7 @@ const AuditLogExplorer = lazy(() => import("./components/auditLogExplorer").then
 const DailyWorkPlanManager = lazy(() => import("./components/dailyWorkPlanManager").then((module) => ({ default: module.DailyWorkPlanManager })));
 const EmployeeAccountManager = lazy(() => import("./components/employeeAccountManager").then((module) => ({ default: module.EmployeeAccountManager })));
 const EmployeeDirectory = lazy(() => import("./components/employeeDirectory").then((module) => ({ default: module.EmployeeDirectory })));
+const LeaveCalendar = lazy(() => import("./components/leaveCalendar").then((module) => ({ default: module.LeaveCalendar })));
 const PayrollStatementManager = lazy(() => import("./components/payrollStatementManager").then((module) => ({ default: module.PayrollStatementManager })));
 const PushNotificationSettings = lazy(() => import("./components/pushNotificationSettings").then((module) => ({ default: module.PushNotificationSettings })));
 const RecognizedWorkStats = lazy(() => import("./components/recognizedWorkStats").then((module) => ({ default: module.RecognizedWorkStats })));
@@ -776,8 +777,9 @@ function App() {
     const actionEmployee = employees.find((employee) => employee.id === authSession?.employeeId);
     if (!actionEmployee || employeeSnapshot?.employee.id !== actionEmployee.id) return;
 
-    if (!leaveDraft.startsOn || !leaveDraft.endsOn || !leaveDraft.reason.trim()) {
-      setRequestError("휴가 유형, 기간과 사유를 모두 입력해 주세요.");
+    const leaveReasonRequired = dashboard?.settings?.leaveReasonRequired ?? defaultSystemPolicy.leaveReasonRequired;
+    if (!leaveDraft.startsOn || !leaveDraft.endsOn || (leaveReasonRequired && !leaveDraft.reason.trim())) {
+      setRequestError(leaveReasonRequired ? "휴가 유형, 기간과 사유를 모두 입력해 주세요." : "휴가 유형과 기간을 모두 입력해 주세요.");
       return;
     }
     if (requestedLeaveDays <= 0) {
@@ -811,7 +813,19 @@ function App() {
       setDashboard((current) => current ? {
         ...current,
         leaveRequests: [result.request, ...current.leaveRequests],
-        pendingLeaveRequests: [result.request, ...current.pendingLeaveRequests]
+        pendingLeaveRequests: [result.request, ...current.pendingLeaveRequests],
+        leaveCalendarEntries: [{
+          id: result.request.id,
+          employeeId: actionEmployee.id,
+          employeeName: actionEmployee.name,
+          department: actionEmployee.department,
+          type: result.request.type,
+          startsOn: result.request.startsOn,
+          endsOn: result.request.endsOn,
+          halfDayPeriod: result.request.halfDayPeriod,
+          status: "PENDING",
+          isOwn: true
+        }, ...current.leaveCalendarEntries]
       } : current);
       setRequestDialog(null);
       setLeaveDraft({ type: "ANNUAL", startsOn: "", endsOn: "", halfDayPeriod: "AM", reason: "" });
@@ -1620,6 +1634,7 @@ function App() {
                 onSelectEmployee: handleEmployeeChange,
                 dailyWorkTasks: employeeSnapshot?.dailyWorkTasks ?? [],
                 leaveRequests: dashboard?.leaveRequests ?? [],
+                leaveCalendarEntries: dashboard?.leaveCalendarEntries ?? [],
                 correctionRequests: dashboard?.correctionRequests ?? [],
                 leaveBalance: employeeSnapshot?.leaveBalance,
                 leaveBalanceAdjustments: employeeSnapshot?.leaveBalanceAdjustments ?? [],
@@ -1653,7 +1668,7 @@ function App() {
           void submitLeave();
         }}
         open={requestDialog === "leave"}
-        submitDisabled={leaveBalanceInsufficient || requestedLeaveDays <= 0}
+        submitDisabled={leaveBalanceInsufficient || requestedLeaveDays <= 0 || ((dashboard?.settings?.leaveReasonRequired ?? defaultSystemPolicy.leaveReasonRequired) && !leaveDraft.reason.trim())}
         submitLabel="휴가 신청"
         title="휴가 신청"
         description="승인 전까지는 대기 상태로 표시됩니다."
@@ -1695,7 +1710,9 @@ function App() {
           <span>신청 요약</span>
           <strong>{leaveTypeLabel(leaveDraft.type)}{leaveDraft.type === "HALF_DAY" ? `(${leaveDraft.halfDayPeriod === "AM" ? "오전" : "오후"})` : ""} · {leaveDraft.startsOn || "시작일"}{leaveDraft.endsOn && leaveDraft.endsOn !== leaveDraft.startsOn ? ` ~ ${leaveDraft.endsOn}` : ""} · {formatLeaveDays(requestedLeaveDays)}</strong>
         </div>
-        <RequestField label="사유"><textarea required rows={3} value={leaveDraft.reason} onChange={(event) => setLeaveDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
+        {(dashboard?.settings?.leaveReasonRequired ?? defaultSystemPolicy.leaveReasonRequired) ? (
+          <RequestField label="사유"><textarea required rows={3} value={leaveDraft.reason} onChange={(event) => setLeaveDraft((current) => ({ ...current, reason: event.target.value }))} /></RequestField>
+        ) : null}
       </FormDialog>
       {selectedEmployee ? (
         <EmployeeCardEditor
@@ -2057,6 +2074,7 @@ function renderSection(props: {
   isRevealingEmployeeSensitiveData: boolean;
   isEmployeeSensitiveDataRevealed: boolean;
   leaveRequests: import("./domain/types").LeaveRequest[];
+  leaveCalendarEntries: LeaveCalendarEntry[];
   correctionRequests: import("./domain/types").AttendanceCorrectionRequest[];
   leaveBalance?: LeaveBalance;
   leaveBalanceAdjustments: import("./domain/types").LeaveBalanceAdjustment[];
@@ -2070,7 +2088,7 @@ function renderSection(props: {
 }) {
   switch (props.activeSection) {
     case "overview":
-      return <AdminOverviewSection erpViewModel={props.erpViewModel} isLoading={props.isLoading} />;
+      return <AdminOverviewSection employeeSnapshot={props.employeeSnapshot} entries={props.leaveCalendarEntries} erpViewModel={props.erpViewModel} isLoading={props.isLoading} systemPolicy={props.systemPolicy} />;
     case "self-service":
       return <SelfServiceSection {...props} />;
     case "employee-card":
@@ -2094,9 +2112,10 @@ function renderSection(props: {
   }
 }
 
-function AdminOverviewSection(props: { erpViewModel: ErpViewModel; isLoading: boolean }) {
+function AdminOverviewSection(props: { employeeSnapshot: EmployeeSnapshot; entries: LeaveCalendarEntry[]; erpViewModel: ErpViewModel; isLoading: boolean; systemPolicy: SystemPolicy }) {
   return (
     <div className="erp-two-column admin-overview">
+      <LeaveCalendar asOf={props.employeeSnapshot.asOf} entries={props.entries} mode="admin" policy={props.systemPolicy} />
       <DetailPanel title="미처리 큐" description="승인·인증 예외·증빙 회신·퇴근 누락처럼 관리자 확인이 필요한 업무를 우선 표시합니다.">
         <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="처리할 업무가 없습니다." />} />
       </DetailPanel>
@@ -2163,6 +2182,7 @@ function SelfServiceSection(props: {
   clockingType: ClockType | null;
   employeeViewModel: EmployeeViewModel | null;
   employeeSnapshot: EmployeeSnapshot;
+  leaveCalendarEntries: LeaveCalendarEntry[];
   erpViewModel: ErpViewModel;
   isLoading: boolean;
   taskUpdateError: string | null;
@@ -2243,6 +2263,8 @@ function SelfServiceSection(props: {
           <div><dt>상태</dt><dd>{attendance?.statusLabel ?? "기록 준비 중"}</dd></div>
         </dl>
       </section>
+
+      <LeaveCalendar asOf={props.employeeSnapshot.asOf} entries={props.leaveCalendarEntries} mode="employee" policy={props.systemPolicy} />
 
       <Toolbar title="오늘의 업무" description="필요한 일만 빠르게 확인하고 처리하세요." />
 

@@ -103,6 +103,7 @@ export function SystemPolicyEditor({ busy = false, error, onSave, settings }: Sy
             <PolicyToggle checked={draft.annualLeaveAutoAccrual} label="연차/월차 자동 생성" onChange={(checked) => update("annualLeaveAutoAccrual", checked)} />
             <PolicyToggle checked={draft.partialLeaveAllowed} label="부분휴가 사용 허용" onChange={(checked) => update("partialLeaveAllowed", checked)} />
             <PolicyToggle checked={draft.annualLeaveOveruseAllowed} label="연차 초과 사용 허용" onChange={(checked) => update("annualLeaveOveruseAllowed", checked)} />
+            <PolicyToggle checked={draft.leaveReasonRequired} label="휴가 신청 사유 필수 입력" onChange={(checked) => update("leaveReasonRequired", checked)} />
           </div>
           <label className="system-policy-editor__holiday-field">
             <span>회사 휴일</span>

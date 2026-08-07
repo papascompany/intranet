@@ -504,6 +504,28 @@ describe("hr api", () => {
     );
   });
 
+  it("allows an empty leave reason by default and enforces it when an administrator enables the policy", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({ leaveRequests: [] }), () => fixedNow);
+    const input = {
+      employeeId: employeeSession.employeeId,
+      type: "ANNUAL" as const,
+      startsOn: "2026-07-20",
+      endsOn: "2026-07-20",
+      session: employeeSession
+    };
+
+    await expect(hrApi.submitLeaveRequest(input)).resolves.toMatchObject({ request: { reason: "", status: "PENDING" } });
+    await hrApi.updateSettings({
+      actorId: adminSession.employeeId,
+      session: adminSession,
+      settings: { leaveReasonRequired: true }
+    });
+    await expect(hrApi.submitLeaveRequest({ ...input, startsOn: "2026-07-21", endsOn: "2026-07-21" }))
+      .rejects.toThrow("Leave request reason");
+    await expect(hrApi.submitLeaveRequest({ ...input, startsOn: "2026-07-21", endsOn: "2026-07-21", reason: "개인 일정" }))
+      .resolves.toMatchObject({ request: { reason: "개인 일정" } });
+  });
+
   it("lets an administrator record past leave usage as an approved ledger entry", async () => {
     const hrApi = createHrApi(new InMemoryDatabase({ leaveRequests: [] }), () => fixedNow);
 
@@ -1125,6 +1147,30 @@ describe("hr api", () => {
       true
     );
     expect(dashboard.attendanceRecords?.every((record) => record.employeeId === employeeSession.employeeId)).toBe(true);
+  });
+
+  it("exposes only calendar-safe approved absences and the employee's own pending request", async () => {
+    const hrApi = createHrApi(new InMemoryDatabase({
+      leaveRequests: [
+        { id: "approved-other", employeeId: "emp-ops-2", type: "ANNUAL", startsOn: "2026-07-20", endsOn: "2026-07-20", days: 1, reason: "외부에 노출하면 안 되는 사유", status: "APPROVED" },
+        { id: "pending-other", employeeId: "emp-ops-2", type: "HALF_DAY", startsOn: "2026-07-21", endsOn: "2026-07-21", days: 0.5, halfDayPeriod: "AM", reason: "다른 직원 대기 사유", status: "PENDING" },
+        { id: "pending-own", employeeId: employeeSession.employeeId, type: "HALF_DAY", startsOn: "2026-07-22", endsOn: "2026-07-22", days: 0.5, halfDayPeriod: "PM", reason: "내 사유", status: "PENDING" }
+      ]
+    }), () => fixedNow);
+
+    const employeeDashboard = await hrApi.getDashboard({ asOf: fixedNow, session: employeeSession });
+    expect(employeeDashboard.leaveCalendarEntries.map((entry) => entry.id)).toEqual(["approved-other", "pending-own"]);
+    expect(employeeDashboard.leaveCalendarEntries.find((entry) => entry.id === "approved-other")).toMatchObject({
+      employeeName: "이정산",
+      type: "ANNUAL",
+      status: "APPROVED",
+      isOwn: false
+    });
+    expect(JSON.stringify(employeeDashboard.leaveCalendarEntries)).not.toContain("외부에 노출하면 안 되는 사유");
+    expect(JSON.stringify(employeeDashboard.leaveCalendarEntries)).not.toContain("reason");
+
+    const adminDashboard = await hrApi.getDashboard({ asOf: fixedNow, session: adminSession });
+    expect(adminDashboard.leaveCalendarEntries.map((entry) => entry.id)).toEqual(["approved-other", "pending-other", "pending-own"]);
   });
 
   it("rejects employee access to another employee snapshot", async () => {

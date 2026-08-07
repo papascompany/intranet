@@ -1,0 +1,106 @@
+.leave-calendar {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--color-silver);
+  border-radius: 8px;
+  padding: 18px;
+  background: var(--color-white);
+  box-shadow: var(--shadow-card);
+}
+
+.leave-calendar__header,
+.leave-calendar__heading,
+.leave-calendar__controls,
+.leave-calendar__summary,
+.leave-calendar__legend {
+  display: flex;
+  align-items: center;
+}
+
+.leave-calendar__header { justify-content: space-between; gap: 16px; }
+.leave-calendar__heading { align-items: flex-start; gap: 9px; min-width: 0; }
+.leave-calendar__heading > svg { flex: 0 0 auto; margin-top: 2px; }
+.leave-calendar__heading h2,
+.leave-calendar__heading p { margin: 0; }
+.leave-calendar__heading h2 { font: 600 18px var(--font-cal-sans); }
+.leave-calendar__heading p { margin-top: 3px; color: var(--color-slate); font: 12px/1.45 var(--font-inter); }
+
+.leave-calendar__controls { flex: 0 0 auto; gap: 6px; }
+.leave-calendar__controls strong { min-width: 92px; text-align: center; font: 600 14px var(--font-inter); }
+.leave-calendar__controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--color-silver);
+  border-radius: 6px;
+  color: var(--color-graphite);
+  background: var(--color-white);
+}
+.leave-calendar__controls button:hover { background: var(--color-paper); }
+.leave-calendar__controls button:disabled { cursor: default; opacity: .45; }
+.leave-calendar__controls .leave-calendar__today { width: auto; padding: 0 10px; font: 600 12px var(--font-inter); }
+
+.leave-calendar__summary { flex-wrap: wrap; gap: 8px 18px; border-top: 1px solid var(--color-silver); padding-top: 12px; }
+.leave-calendar__summary span { color: var(--color-slate); font: 12px var(--font-inter); }
+.leave-calendar__summary strong { color: var(--color-graphite); font-size: 14px; }
+.leave-calendar__legend { flex-wrap: wrap; gap: 7px 12px; }
+.leave-calendar__legend span { display: inline-flex; align-items: center; gap: 5px; color: var(--color-slate); font: 11px var(--font-inter); }
+.leave-calendar__legend span::before { width: 8px; height: 8px; border-radius: 2px; background: var(--leave-color); content: ""; }
+.leave-calendar__legend .is-annual { --leave-color: #facc15; }
+.leave-calendar__legend .is-half-day { --leave-color: #60a5fa; }
+.leave-calendar__legend .is-special { --leave-color: #34a853; }
+.leave-calendar__legend .is-unpaid { --leave-color: #898989; }
+.leave-calendar__legend .is-pending::before { border: 1px dashed #a16207; background: #fffaf0; }
+
+.leave-calendar__desktop { min-width: 0; overflow: hidden; border: 1px solid var(--color-silver); border-radius: 8px; }
+.leave-calendar__weekdays,
+.leave-calendar__month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.leave-calendar__weekdays { border-bottom: 1px solid var(--color-silver); background: var(--color-paper); }
+.leave-calendar__weekdays span { padding: 8px 6px; color: var(--color-slate); font: 600 11px var(--font-inter); text-align: center; }
+.leave-calendar__day { min-width: 0; min-height: 108px; border-right: 1px solid var(--color-silver); border-bottom: 1px solid var(--color-silver); padding: 7px; background: var(--color-white); }
+.leave-calendar__day:nth-child(7n) { border-right: 0; }
+.leave-calendar__day:nth-last-child(-n + 7) { border-bottom: 0; }
+.leave-calendar__day.is-outside { background: #fafafa; }
+.leave-calendar__day > time { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; color: var(--color-slate); font: 600 11px var(--font-inter); }
+.leave-calendar__day.is-outside > time { opacity: .42; }
+.leave-calendar__day.is-today > time { color: var(--color-ink); background: var(--color-brand-yellow); }
+.leave-calendar__events { display: grid; gap: 4px; margin-top: 3px; }
+.leave-calendar__event { min-width: 0; border-left: 3px solid var(--leave-color); border-radius: 4px; padding: 5px 6px; background: var(--leave-bg); }
+.leave-calendar__event strong,
+.leave-calendar__event span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-inter); }
+.leave-calendar__event strong { color: var(--color-graphite); font-size: 11px; font-weight: 600; }
+.leave-calendar__event span { margin-top: 1px; color: var(--color-slate); font-size: 10px; }
+.leave-calendar__event.is-annual { --leave-color: #eab308; --leave-bg: #fffbdf; }
+.leave-calendar__event.is-half-day { --leave-color: #3b82f6; --leave-bg: #eff6ff; }
+.leave-calendar__event.is-special { --leave-color: #188038; --leave-bg: #eef9f1; }
+.leave-calendar__event.is-unpaid { --leave-color: #737373; --leave-bg: #f5f5f5; }
+.leave-calendar__event.is-pending { border-top: 1px dashed #d6a025; border-right: 1px dashed #d6a025; border-bottom: 1px dashed #d6a025; }
+.leave-calendar__event.is-own strong::after { margin-left: 4px; color: #1d4ed8; content: "내 일정"; font-size: 9px; font-weight: 500; }
+
+.leave-calendar__agenda { display: none; }
+.leave-calendar__empty { margin: 0; border: 1px dashed var(--color-silver); border-radius: 8px; padding: 28px 14px; color: var(--color-slate); font: 13px var(--font-inter); text-align: center; }
+
+@container erp-shell (max-width: 760px) {
+  .leave-calendar { padding: 14px; }
+  .leave-calendar__header { align-items: stretch; flex-direction: column; }
+  .leave-calendar__controls { justify-content: space-between; }
+  .leave-calendar__controls strong { flex: 1; }
+  .leave-calendar__desktop { display: none; }
+  .leave-calendar__agenda { display: grid; gap: 0; border-top: 1px solid var(--color-silver); }
+  .leave-calendar__agenda article { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 10px; border-bottom: 1px solid var(--color-silver); padding: 10px 0; }
+  .leave-calendar__agenda article > time { display: grid; align-content: start; gap: 2px; color: var(--color-slate); font: 11px var(--font-inter); }
+  .leave-calendar__agenda article > time strong { color: var(--color-graphite); font-size: 20px; }
+  .leave-calendar__agenda article > div { display: grid; gap: 5px; min-width: 0; }
+  .leave-calendar__event strong,
+  .leave-calendar__event span { white-space: normal; }
+}
+
+@media (max-width: 560px) {
+  .leave-calendar { padding: 12px; }
+  .leave-calendar__heading p { max-width: 280px; }
+  .leave-calendar__summary { gap: 7px 12px; }
+}

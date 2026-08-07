@@ -309,7 +309,7 @@ function leaveRow(request: LeaveRequest, employees: Employee[]): ErpViewModelRow
     id: request.id,
     label: employeeName(employees, request.employeeId),
     value: `${formatDateRange(request.startsOn, request.endsOn)} · ${formatDays(request.days)}일${halfDayLabel}`,
-    meta: request.reason,
+    meta: request.reason || requestStatusLabels[request.status],
     status: request.status
   };
 }

@@ -91,6 +91,7 @@ const dashboard: Dashboard = {
       status: "PENDING"
     }
   ],
+  leaveCalendarEntries: [],
   overtimeRequests: [
     {
       id: "ot-1",

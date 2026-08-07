@@ -202,7 +202,7 @@ export function ApprovalQueue({
                     <div><dt>요청 시각</dt><dd>{selectedItem.request.requestedValue}</dd></div>
                   </>
                 )}
-                <div className="approval-queue__detail-reason"><dt>신청 사유</dt><dd>{selectedItem.request.reason}</dd></div>
+                <div className="approval-queue__detail-reason"><dt>신청 사유</dt><dd>{selectedItem.request.reason || "입력 안 함"}</dd></div>
               </dl>
               {selectedItem.request.status === "PENDING" ? (
                 <div className="approval-queue__actions">
