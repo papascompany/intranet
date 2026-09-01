@@ -439,6 +439,30 @@ describe("hr api", () => {
     expect(result.verification.note).toBe("GPS수신실패");
   });
 
+  it("records an employee button click without a workplace or GPS review", async () => {
+    const db = new InMemoryDatabase({
+      employees: employees.map((employee) => employee.id === employeeSession.employeeId
+        ? { ...employee, workplaceId: undefined }
+        : employee),
+      attendanceRecords: []
+    });
+    const hrApi = createHrApi(db, () => fixedNow);
+
+    const result = await hrApi.clockAttendance({
+      employeeId: employeeSession.employeeId,
+      type: "CLOCK_IN",
+      method: "MANUAL_CLICK",
+      now: "2026-09-01T08:00:00+09:00",
+      session: employeeSession
+    });
+
+    expect(result).toMatchObject({
+      verification: { status: "CLICK_CONFIRMED", method: "MANUAL_CLICK" },
+      attendance: { status: "CLICK_CONFIRMED", reviewStatus: "NOT_REQUIRED" }
+    });
+    await expect(hrApi.getDashboard({ session: adminSession })).resolves.toMatchObject({ attendanceReviewQueue: [] });
+  });
+
   it("lets an administrator resolve an actionable attendance review while preserving its audit trail", async () => {
     const db = new InMemoryDatabase({
       attendanceRecords: [{
