@@ -81,7 +81,7 @@ export function WorkplaceManager({ busy = false, workplaces, onCreate, onUpdate,
         <div>
           <p className="workplace-manager__eyebrow"><MapPinned aria-hidden="true" /> 출퇴근 기준</p>
           <h2 id="workplace-manager-title">근무지 관리</h2>
-          <p>직원카드에 배정할 사업장 좌표와 QR 경로를 관리합니다. GPS 허용 반경은 운영 정책이 우선 적용됩니다.</p>
+          <p>직원카드에 배정할 사업장 정보와 좌표를 관리합니다. 좌표와 QR 경로는 참고용으로 보관됩니다.</p>
         </div>
         <button className="workplace-manager__new" disabled={busy} onClick={() => { setError(null); setIsCreating(true); setSelectedId(null); setDraft(emptyDraft); }} type="button">
           <Plus aria-hidden="true" size={15} /> 새 근무지

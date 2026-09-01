@@ -88,6 +88,7 @@ const navLabels = {
 } satisfies Record<ErpActiveSection, string>;
 
 const statusLabels = {
+  CLICK_CONFIRMED: "직접 처리",
   GPS_PASSED: "GPS 정상",
   GPS_FAILED_ALLOWED: "대체 인증 완료",
   GPS_FAILED_QR_ALLOWED: "QR 대체 인증 완료",
@@ -189,7 +190,7 @@ export function buildErpViewModel({
       isPilot: selectedEmployee.pilot,
       pilotLabel: selectedEmployee.pilot ? "파일럿 대상" : "일반 대상"
     },
-    decisionChecks: buildDecisionChecks(dashboard.settings)
+    decisionChecks: buildDecisionChecks()
   };
 }
 
@@ -354,22 +355,20 @@ function correctionRequestRow(request: AttendanceCorrectionRequest, employees: E
   };
 }
 
-function buildDecisionChecks(settings: Dashboard["settings"]): ErpViewModelRow[] {
-  const gpsRadius = settings?.gpsAllowedRadiusMeters ?? 300;
-
+function buildDecisionChecks(): ErpViewModelRow[] {
   return [
     {
-      id: "policy-gps-radius",
-      label: "GPS 허용 반경",
-      value: `${gpsRadius}m 기본 적용`,
-      meta: "관리자 설정에서 변경 가능",
+      id: "policy-attendance-click",
+      label: "출퇴근 인증",
+      value: "직원 버튼 클릭 자동 처리",
+      meta: "GPS·QR 없이 서버 시각으로 저장",
       status: "ACTIVE"
     },
     {
-      id: "policy-fixed-qr",
-      label: "GPS 실패 대체 인증",
-      value: "QR과 수동 클릭 동등 허용",
-      meta: "두 방식 모두 감사 로그 보존",
+      id: "policy-workplace-reference",
+      label: "근무지 정보",
+      value: "직원카드 배정 정보로 관리",
+      meta: "좌표는 참고용으로 보관",
       status: "ACTIVE"
     },
     {

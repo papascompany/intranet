@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CalendarDays, Clock3, MapPin, ShieldCheck } from "lucide-react";
+import { CalendarDays, Clock3, ShieldCheck } from "lucide-react";
 import type { SystemPolicy } from "../api/types";
 import { InlineNotice } from "./operational";
 import "./systemPolicyEditor.css";
@@ -11,8 +11,6 @@ export interface SystemPolicyEditorProps {
   settings: SystemPolicy;
 }
 
-const minimumGpsRadius = 50;
-const maximumGpsRadius = 5_000;
 const weekdays: Array<{ label: string; value: SystemPolicy["workDays"][number] }> = [
   { label: "월", value: "MON" }, { label: "화", value: "TUE" }, { label: "수", value: "WED" },
   { label: "목", value: "THU" }, { label: "금", value: "FRI" }, { label: "토", value: "SAT" }, { label: "일", value: "SUN" }
@@ -22,15 +20,12 @@ export function SystemPolicyEditor({ busy = false, error, onSave, settings }: Sy
   const [draft, setDraft] = useState<SystemPolicy>(settings);
   const [submitted, setSubmitted] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const radiusValid = Number.isInteger(draft.gpsAllowedRadiusMeters)
-    && draft.gpsAllowedRadiusMeters >= minimumGpsRadius
-    && draft.gpsAllowedRadiusMeters <= maximumGpsRadius;
   const scheduleValid = draft.workDays.length > 0
     && draft.workStartTime < draft.workEndTime
     && draft.breakStartTime < draft.breakEndTime
     && draft.breakStartTime >= draft.workStartTime
     && draft.breakEndTime <= draft.workEndTime;
-  const formValid = radiusValid && scheduleValid;
+  const formValid = scheduleValid;
 
   useEffect(() => {
     setDraft(settings);
@@ -117,16 +112,11 @@ export function SystemPolicyEditor({ busy = false, error, onSave, settings }: Sy
           </label>
         </section>
 
-        <section aria-labelledby="gps-policy-title" className="system-policy-editor__setting">
-          <div className="system-policy-editor__setting-heading"><MapPin aria-hidden="true" /><div><h3 id="gps-policy-title">GPS 출퇴근 허용 반경</h3><p>사업장 기준 좌표에서 이 거리 안이면 GPS 출퇴근을 인정합니다.</p></div></div>
-          <label className="system-policy-editor__compact-field"><span>허용 반경</span><span className="system-policy-editor__radius-input"><input aria-invalid={submitted && !radiusValid ? "true" : undefined} aria-label="허용 반경" inputMode="numeric" max={maximumGpsRadius} min={minimumGpsRadius} onChange={(event) => update("gpsAllowedRadiusMeters", Number(event.target.value))} type="number" value={draft.gpsAllowedRadiusMeters} /><span>m</span></span></label>
-          {submitted && !radiusValid ? <p className="system-policy-editor__field-error" role="alert">GPS 허용 반경은 50m부터 5,000m 사이의 정수로 입력해 주세요.</p> : null}
-        </section>
-
         <section aria-labelledby="fixed-policy-title" className="system-policy-editor__setting">
           <div className="system-policy-editor__setting-heading"><ShieldCheck aria-hidden="true" /><div><h3 id="fixed-policy-title">확정 운영 정책</h3><p>보안과 결재 권한에 관한 고정 기준입니다.</p></div></div>
           <dl className="system-policy-editor__fixed-list">
-            <div><dt>GPS 확인 실패</dt><dd>QR 인증과 수동 출퇴근을 동등하게 허용</dd></div>
+            <div><dt>출퇴근 기록</dt><dd>직원 버튼 클릭으로 즉시 처리하고 서버 시각을 기록</dd></div>
+            <div><dt>근무지 좌표</dt><dd>직원카드 배정과 관리 참고용으로 보관하며 승인에는 사용하지 않음</dd></div>
             <div><dt>급여명세서</dt><dd>직원은 열람만 가능, 관리자는 소프트 삭제만 가능</dd></div>
             <div><dt>야근 수당 인정</dt><dd>관리자로 지정된 계정만 승인 가능</dd></div>
             <div><dt>선사용 휴가 예외</dt><dd>휴직·장기결근은 HR 보정으로 처리</dd></div>

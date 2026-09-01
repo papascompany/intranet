@@ -339,15 +339,15 @@ describe("buildErpViewModel", () => {
     const viewModel = buildViewModel("settings");
 
     expect(viewModel.decisionChecks.map((check) => check.label)).toEqual([
-      "GPS 허용 반경",
-      "GPS 실패 대체 인증",
+      "출퇴근 인증",
+      "근무지 정보",
       "급여명세서 접근",
       "야근 수당 인정",
       "휴직/장기결근 선사용휴가 예외"
     ]);
     expect(viewModel.decisionChecks[0]).toMatchObject({
-      value: "300m 기본 적용",
-      meta: "관리자 설정에서 변경 가능",
+      value: "직원 버튼 클릭 자동 처리",
+      meta: "GPS·QR 없이 서버 시각으로 저장",
       status: "ACTIVE"
     });
   });

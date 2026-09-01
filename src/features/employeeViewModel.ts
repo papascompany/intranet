@@ -78,6 +78,7 @@ const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
 });
 
 const statusLabels: Record<VerificationStatus, string> = {
+  CLICK_CONFIRMED: "직접 처리 완료",
   GPS_PASSED: "GPS 확인 완료",
   GPS_FAILED_ALLOWED: "대체 인증 완료",
   GPS_FAILED_QR_ALLOWED: "QR 대체 인증 완료",

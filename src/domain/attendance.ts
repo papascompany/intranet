@@ -38,6 +38,21 @@ export function evaluateVerification(params: {
   const id = `ver-${Date.parse(params.now)}-${params.employeeId}`;
   const fallback = params.workplaces[0];
 
+  // The employee button is the authoritative attendance action. Location data is
+  // intentionally not required because browser GPS is unreliable indoors and on
+  // mobile devices. GPS/QR statuses remain supported for historical records.
+  if (params.method === "MANUAL_CLICK") {
+    return {
+      id,
+      employeeId: params.employeeId,
+      workplaceId: fallback?.id,
+      method: params.method,
+      status: "CLICK_CONFIRMED",
+      attemptedAt: params.now,
+      note: "직원 출퇴근 버튼 클릭으로 처리"
+    };
+  }
+
   if (!params.coordinate || params.gpsError) {
     const status: VerificationStatus =
       params.method === "QR" ? "GPS_FAILED_QR_ALLOWED" : "GPS_FAILED_ALLOWED";

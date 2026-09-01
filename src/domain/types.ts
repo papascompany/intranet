@@ -62,6 +62,7 @@ export type Workplace = {
 export type ClockType = "CLOCK_IN" | "CLOCK_OUT";
 export type VerificationMethod = "GPS" | "QR" | "WIFI_IP" | "MANUAL_CLICK";
 export type VerificationStatus =
+  | "CLICK_CONFIRMED"
   | "GPS_PASSED"
   | "GPS_FAILED_ALLOWED"
   | "GPS_FAILED_QR_ALLOWED"

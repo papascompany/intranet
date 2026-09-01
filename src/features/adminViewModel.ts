@@ -39,6 +39,7 @@ export type AdminViewModel = {
 };
 
 const statusLabels = {
+  CLICK_CONFIRMED: "직접 처리",
   GPS_PASSED: "GPS 정상",
   GPS_FAILED_ALLOWED: "GPS수신실패+수동클릭",
   GPS_FAILED_QR_ALLOWED: "GPS수신실패+QR",

@@ -11,11 +11,12 @@ function renderEditor(overrides: Partial<React.ComponentProps<typeof SystemPolic
 describe("SystemPolicyEditor", () => {
   afterEach(cleanup);
 
-  it("renders the editable GPS setting and every fixed operating policy", () => {
+  it("renders the fixed operating policy without an editable GPS gate", () => {
     renderEditor();
 
-    expect(screen.getByLabelText("허용 반경")).toHaveValue(300);
-    expect(screen.getByText("QR 인증과 수동 출퇴근을 동등하게 허용")).toBeVisible();
+    expect(screen.queryByLabelText("허용 반경")).not.toBeInTheDocument();
+    expect(screen.getByText("직원 버튼 클릭으로 즉시 처리하고 서버 시각을 기록")).toBeVisible();
+    expect(screen.getByText("직원카드 배정과 관리 참고용으로 보관하며 승인에는 사용하지 않음")).toBeVisible();
     expect(screen.getByText("직원은 열람만 가능, 관리자는 소프트 삭제만 가능")).toBeVisible();
     expect(screen.getByText("관리자로 지정된 계정만 승인 가능")).toBeVisible();
     expect(screen.getByText("휴직·장기결근은 HR 보정으로 처리")).toBeVisible();
@@ -36,28 +37,6 @@ describe("SystemPolicyEditor", () => {
     expect(screen.getByLabelText("연차 초과 사용 허용")).not.toBeChecked();
     expect(screen.getByLabelText("휴가 신청 사유 필수 입력")).not.toBeChecked();
     expect(screen.getByLabelText("회사 휴일")).toHaveValue("");
-  });
-
-  it("validates the GPS radius before invoking save", () => {
-    const onSave = vi.fn();
-    renderEditor({ onSave });
-
-    fireEvent.change(screen.getByLabelText("허용 반경"), { target: { value: "20" } });
-    fireEvent.click(screen.getByRole("button", { name: "근무·연차 정책 저장" }));
-
-    expect(onSave).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("50m부터 5,000m 사이의 정수");
-    expect(screen.getByLabelText("허용 반경")).toHaveAttribute("aria-invalid", "true");
-  });
-
-  it("saves a complete settings object with the validated GPS radius", () => {
-    const onSave = vi.fn();
-    renderEditor({ onSave });
-
-    fireEvent.change(screen.getByLabelText("허용 반경"), { target: { value: "450" } });
-    fireEvent.click(screen.getByRole("button", { name: "근무·연차 정책 저장" }));
-
-    expect(onSave).toHaveBeenCalledWith({ ...defaultSystemPolicy, gpsAllowedRadiusMeters: 450 });
   });
 
   it("saves edited work schedule, leave options, and workdays as one complete policy", () => {

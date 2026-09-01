@@ -35,6 +35,21 @@ describe("attendance verification policy", () => {
     expect(result.note).toBe("GPS수신실패");
   });
 
+  it("confirms an employee button click without requiring GPS or a workplace", () => {
+    const result = evaluateVerification({
+      employeeId: "emp-ops-1",
+      workplaces: [],
+      method: "MANUAL_CLICK",
+      now: "2026-09-01T08:00:00+09:00"
+    });
+
+    expect(result).toMatchObject({
+      method: "MANUAL_CLICK",
+      status: "CLICK_CONFIRMED",
+      note: "직원 출퇴근 버튼 클릭으로 처리"
+    });
+  });
+
   it("preserves an unresolved clock-in review when the clock-out GPS succeeds", () => {
     const result = buildAttendanceRecord({
       employeeId: "emp-ops-1",

@@ -18,7 +18,6 @@ import {
   ListChecks,
   LayoutDashboard,
   MapPin,
-  QrCode,
   Quote,
   RefreshCw,
   Settings,
@@ -83,7 +82,7 @@ import { EmployeeCardEditor, type EmployeeCardEditorSubmit } from "./components/
 import type { EmployeeAccountCreateInput, EmployeeAccountRoleManagement } from "./components/employeeAccountManager";
 import { ForcePasswordChange } from "./components/forcePasswordChange";
 import type { ApprovalQueueItem } from "./components/approvalQueue";
-import type { AttendanceRecord, AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, HalfDayPeriod, LeaveBalance, LeaveType, PayrollStatement, VerificationMethod, Workplace } from "./domain/types";
+import type { AttendanceRecord, AuditLog, ClockType, CorrectionType, DailyWorkTask, Employee, HalfDayPeriod, LeaveBalance, LeaveType, PayrollStatement, Workplace } from "./domain/types";
 import { calculateLeaveDays, getLeaveBalance } from "./domain/leave";
 import { isPayrollNoticeDay, payrollNoticeDate } from "./domain/payroll";
 import { buildEmployeeViewModel, type EmployeeViewModel } from "./features/employeeViewModel";
@@ -632,7 +631,7 @@ function App() {
     setNotice(nextMode === "ADMIN" ? "관리자모드로 전환했습니다." : "직원모드로 전환했습니다.");
   }
 
-  async function clock(type: ClockType, method: VerificationMethod, gpsError = false) {
+  async function clock(type: ClockType) {
     const actionEmployee = employees.find((employee) => employee.id === authSession?.employeeId);
     if (!actionEmployee || employeeSnapshot?.employee.id !== actionEmployee.id || clockingType) return;
 
@@ -641,27 +640,14 @@ function App() {
     setClockFeedback(null);
     try {
       const now = koreaTimestamp();
-      let coordinate: { accuracyMeters?: number; latitude: number; longitude: number } | undefined;
-      let verificationFailed = gpsError;
-
-      if (method === "GPS" && !gpsError) {
-        try {
-          coordinate = await getBrowserCoordinate();
-        } catch {
-          verificationFailed = true;
-        }
-      }
       const result = await clockAttendance({
         employeeId: actionEmployee.id,
         type,
-        method,
+        method: "MANUAL_CLICK",
         session: authSession ?? undefined,
-        now,
-        gpsError: verificationFailed,
-        coordinate
+        now
       });
 
-      const fallbackNotice = method === "GPS" && verificationFailed ? " · 위치 확인 실패로 대체 인증 처리" : "";
       const recordedAt = type === "CLOCK_IN" ? result.attendance.clockInAt : result.attendance.clockOutAt;
       const encouragement = type === "CLOCK_IN"
         ? (await import("./content/attendanceMessages")).pickAttendanceMessage()
@@ -686,7 +672,7 @@ function App() {
         status: verificationStatusLabel(result.verification.status),
         time: formatKoreaTime(recordedAt ?? now)
       });
-      setNotice(`${actionEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 · ${result.verification.status}${fallbackNotice}`);
+      setNotice(`${actionEmployee.name} ${type === "CLOCK_IN" ? "출근" : "퇴근"} 처리 완료`);
     } catch (error) {
       setClockError(error instanceof Error ? error.message : "출퇴근 기록을 처리하지 못했습니다.");
     } finally {
@@ -1368,7 +1354,7 @@ function App() {
 
   async function updateSystemPolicy(settings: SystemPolicy) {
     if (!selectedEmployee || !isAdminAccount) {
-      setNotice("GPS 허용 반경은 관리자 지정 계정만 변경할 수 있습니다.");
+      setNotice("운영 정책은 관리자 지정 계정만 변경할 수 있습니다.");
       return;
     }
 
@@ -1378,7 +1364,7 @@ function App() {
       settings
     });
 
-    setNotice(`운영 정책 저장 · GPS 허용 반경 ${result.settings.gpsAllowedRadiusMeters}m`);
+    setNotice("운영 정책을 저장했습니다.");
     await refresh(selectedEmployee.id);
   }
 
@@ -1923,6 +1909,7 @@ function formatKoreaTime(value: string) {
 
 function verificationStatusLabel(status: string) {
   return {
+    CLICK_CONFIRMED: "직접 처리 완료",
     GPS_PASSED: "GPS 확인 완료",
     GPS_FAILED_ALLOWED: "대체 인증 완료 · 정상 저장",
     GPS_FAILED_QR_ALLOWED: "QR 대체 인증 완료 · 정상 저장",
@@ -1999,24 +1986,6 @@ function buildAdminSelectionSnapshot(
   };
 }
 
-function getBrowserCoordinate(): Promise<{ accuracyMeters?: number; latitude: number; longitude: number }> {
-  if (!("geolocation" in navigator)) {
-    return Promise.reject(new Error("Geolocation is not supported."));
-  }
-
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) => resolve({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracyMeters: position.coords.accuracy
-      }),
-      reject,
-      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 5_000 }
-    );
-  });
-}
-
 function renderSection(props: {
   activeSection: ErpActiveSection;
   employeeSnapshot: EmployeeSnapshot;
@@ -2044,7 +2013,7 @@ function renderSection(props: {
   onCancelLeave: (requestId?: string) => void | Promise<void>;
   onCancelOvertime: (requestId?: string) => void | Promise<void>;
   onCancelAttendanceCorrection: (requestId?: string) => void | Promise<void>;
-  onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
+  onClock: (type: ClockType) => void;
   onCreateDailyTaskPlan: (draft: DailyWorkPlanDraft) => Promise<void>;
   onCreateEmployeeAccount: (input: EmployeeAccountCreateInput) => Promise<{ temporaryPassword: string }>;
   onChangeEmployeeRole: (employeeId: string, role: Employee["role"], reason: string) => Promise<void>;
@@ -2187,7 +2156,7 @@ function SelfServiceSection(props: {
   isLoading: boolean;
   taskUpdateError: string | null;
   updatingTaskId: string | null;
-  onClock: (type: ClockType, method: VerificationMethod, gpsError?: boolean) => void;
+  onClock: (type: ClockType) => void;
   onUpdateDailyTask: (task: DailyWorkTask) => void;
   onSubmitLeave: () => void;
   onSubmitOvertime: () => void;
@@ -2219,11 +2188,11 @@ function SelfServiceSection(props: {
               className="attendance-check"
               disabled={props.isLoading || props.clockingType !== null}
               onFocus={() => void import("./content/attendanceMessages")}
-              onClick={() => props.onClock(nextClockAction.type, "GPS")}
+              onClick={() => props.onClock(nextClockAction.type)}
               onMouseEnter={() => void import("./content/attendanceMessages")}
             >
               <CircleCheck size={24} />
-              <span>{props.clockingType ? "위치와 시간을 확인하는 중" : nextClockAction.label}</span>
+              <span>{props.clockingType ? "출퇴근을 저장하는 중" : nextClockAction.label}</span>
             </button>
           ) : (
             <div className="attendance-complete"><Check size={20} /> 오늘 근태 완료</div>
@@ -2235,17 +2204,6 @@ function SelfServiceSection(props: {
                 <span>오늘의 한 문장</span>
                 <blockquote>{props.clockFeedback.encouragement}</blockquote>
               </div>
-            </div>
-          ) : null}
-          {nextClockAction ? (
-            <div className="attendance-alternatives">
-              <span>GPS가 어렵다면</span>
-              <button disabled={props.isLoading || props.clockingType !== null} onClick={() => props.onClock(nextClockAction.type, "QR", true)} title="QR 인증">
-                <QrCode size={15} /> QR
-              </button>
-              <button disabled={props.isLoading || props.clockingType !== null} onClick={() => props.onClock(nextClockAction.type, "MANUAL_CLICK", true)} title="수동 인증">
-                <TimerReset size={15} /> 수동
-              </button>
             </div>
           ) : null}
           {props.clockFeedback ? (
@@ -2551,7 +2509,7 @@ function AttendanceSection(props: {
       <div className="erp-two-column">
       <DetailPanel
         title="출퇴근 인증 내역"
-        description="GPS 실패 시 QR과 수동 클릭을 동등하게 허용하고 이력을 남깁니다."
+        description="직원 버튼 클릭으로 출퇴근을 즉시 기록하고, 서버 시각과 처리 이력을 남깁니다."
         actions={!props.canAdmin ? (
           <InlineActions>
             {pendingCorrectionRequest ? <button disabled={props.isLoading} onClick={() => void props.onCancelAttendanceCorrection(pendingCorrectionRequest.id)}>대기 신청 취소</button> : null}
