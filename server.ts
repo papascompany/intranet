@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import authHandler from "./api/auth.js";
+import calendarHandler from "./api/calendar.js";
 import healthHandler from "./api/health.js";
 import hrHandler from "./api/hr.js";
 import payrollHandler from "./api/payroll.js";
@@ -25,6 +26,7 @@ type ApiHandler = (request: AugmentedRequest, response: ServerResponse) => unkno
 
 const API_ROUTES: Record<string, ApiHandler> = {
   "/api/auth": authHandler,
+  "/api/calendar": calendarHandler,
   "/api/health": healthHandler,
   "/api/hr": hrHandler,
   "/api/payroll": payrollHandler,

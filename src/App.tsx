@@ -104,7 +104,7 @@ const AuditLogExplorer = lazy(() => import("./components/auditLogExplorer").then
 const DailyWorkPlanManager = lazy(() => import("./components/dailyWorkPlanManager").then((module) => ({ default: module.DailyWorkPlanManager })));
 const EmployeeAccountManager = lazy(() => import("./components/employeeAccountManager").then((module) => ({ default: module.EmployeeAccountManager })));
 const EmployeeDirectory = lazy(() => import("./components/employeeDirectory").then((module) => ({ default: module.EmployeeDirectory })));
-const LeaveCalendar = lazy(() => import("./components/leaveCalendar").then((module) => ({ default: module.LeaveCalendar })));
+const SchedulePanel = lazy(() => import("./components/schedulePanel").then((module) => ({ default: module.SchedulePanel })));
 const PayrollStatementManager = lazy(() => import("./components/payrollStatementManager").then((module) => ({ default: module.PayrollStatementManager })));
 const PushNotificationSettings = lazy(() => import("./components/pushNotificationSettings").then((module) => ({ default: module.PushNotificationSettings })));
 const RecognizedWorkStats = lazy(() => import("./components/recognizedWorkStats").then((module) => ({ default: module.RecognizedWorkStats })));
@@ -2115,7 +2115,7 @@ function renderSection(props: {
 function AdminOverviewSection(props: { employeeSnapshot: EmployeeSnapshot; entries: LeaveCalendarEntry[]; erpViewModel: ErpViewModel; isLoading: boolean; systemPolicy: SystemPolicy }) {
   return (
     <div className="erp-two-column admin-overview">
-      <LeaveCalendar asOf={props.employeeSnapshot.asOf} entries={props.entries} mode="admin" policy={props.systemPolicy} />
+      <SchedulePanel asOf={props.employeeSnapshot.asOf} entries={props.entries} mode="admin" policy={props.systemPolicy} />
       <DetailPanel title="미처리 큐" description="승인·인증 예외·증빙 회신·퇴근 누락처럼 관리자 확인이 필요한 업무를 우선 표시합니다.">
         <DataTable columns={rowColumns} rows={props.erpViewModel.workQueueRows} emptyState={<EmptyState title="처리할 업무가 없습니다." />} />
       </DetailPanel>
@@ -2264,7 +2264,7 @@ function SelfServiceSection(props: {
         </dl>
       </section>
 
-      <LeaveCalendar asOf={props.employeeSnapshot.asOf} entries={props.leaveCalendarEntries} mode="employee" policy={props.systemPolicy} />
+      <SchedulePanel asOf={props.employeeSnapshot.asOf} entries={props.leaveCalendarEntries} mode="employee" policy={props.systemPolicy} />
 
       <Toolbar title="오늘의 업무" description="필요한 일만 빠르게 확인하고 처리하세요." />
 

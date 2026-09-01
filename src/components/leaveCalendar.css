@@ -10,6 +10,21 @@
   box-shadow: var(--shadow-card);
 }
 
+.leave-calendar--embedded {
+  grid-column: auto;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.leave-calendar--embedded .leave-calendar__heading {
+  display: none;
+}
+
+.leave-calendar--embedded .leave-calendar__header {
+  justify-content: flex-end;
+}
+
 .leave-calendar__header,
 .leave-calendar__heading,
 .leave-calendar__controls,

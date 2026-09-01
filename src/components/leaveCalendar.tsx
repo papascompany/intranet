@@ -8,13 +8,14 @@ import "./leaveCalendar.css";
 type LeaveCalendarProps = {
   asOf: string;
   entries: LeaveCalendarEntry[];
+  embedded?: boolean;
   mode: "employee" | "admin";
   policy: Pick<SystemPolicy, "workDays" | "payrollHolidayDates">;
 };
 
 const weekdayLabels = ["월", "화", "수", "목", "금", "토", "일"];
 
-export function LeaveCalendar({ asOf, entries, mode, policy }: LeaveCalendarProps) {
+export function LeaveCalendar({ asOf, entries, embedded = false, mode, policy }: LeaveCalendarProps) {
   const today = koreaDate(asOf);
   const todayMonth = today.slice(0, 7);
   const [visibleMonth, setVisibleMonth] = useState(todayMonth);
@@ -31,7 +32,11 @@ export function LeaveCalendar({ asOf, entries, mode, policy }: LeaveCalendarProp
   const employeeCount = new Set(monthlyEntries.map((entry) => entry.employeeId)).size;
 
   return (
-    <section className={`leave-calendar leave-calendar--${mode}`} aria-labelledby={`leave-calendar-title-${mode}`}>
+    <section
+      aria-label={embedded ? "휴가 일정" : undefined}
+      aria-labelledby={embedded ? undefined : `leave-calendar-title-${mode}`}
+      className={`leave-calendar leave-calendar--${mode}${embedded ? " leave-calendar--embedded" : ""}`}
+    >
       <header className="leave-calendar__header">
         <div className="leave-calendar__heading">
           <CalendarDays aria-hidden="true" size={19} />
