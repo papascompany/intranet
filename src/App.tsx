@@ -61,7 +61,7 @@ import {
 } from "./api/hrHttpClient";
 import { defaultSystemPolicy, type Dashboard, type EmployeeAccountState, type EmployeeSnapshot, type LeaveCalendarEntry, type SystemPolicy } from "./api/types";
 import { isAdminSession, type AuthSession } from "./api/auth";
-import { changeAuthenticatedPassword, getAuthenticatedSession, loginWithLoginId, logoutAuthenticatedSession } from "./api/authHttpClient";
+import { changeAuthenticatedPassword, getAuthenticatedSession, loginWithLoginId, logoutAuthenticatedSession, requestPasswordRecovery } from "./api/authHttpClient";
 import { koreaDate } from "./domain/koreaTime";
 import {
   DataTable,
@@ -1408,6 +1408,7 @@ function App() {
         authError={authError}
         isLoading={isAuthenticating}
         onLogin={handleLogin}
+        onRequestPasswordRecovery={requestPasswordRecovery}
         onRememberChange={setRememberLogin}
         rememberLogin={rememberLogin}
       />
@@ -2100,11 +2101,33 @@ function LoginScreen(props: {
   authError: string | null;
   isLoading: boolean;
   onLogin: (loginId: string, password: string) => void;
+  onRequestPasswordRecovery: (employeeName: string, employeeNumber: string) => Promise<void>;
   onRememberChange: (remember: boolean) => void;
   rememberLogin: boolean;
 }) {
   const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [recoveryName, setRecoveryName] = useState("");
+  const [recoveryNumber, setRecoveryNumber] = useState("");
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoverySubmitted, setRecoverySubmitted] = useState(false);
+
+  const submitRecoveryRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (recoveryBusy) return;
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try {
+      await props.onRequestPasswordRecovery(recoveryName, recoveryNumber);
+      setRecoverySubmitted(true);
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : "요청을 접수하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
 
   return (
     <div className="app-shell login-shell">
@@ -2139,8 +2162,22 @@ function LoginScreen(props: {
               {props.isLoading ? "로그인 확인 중..." : "로그인"}
             </button>
           </div>
+          <button className="login-form__recovery" onClick={() => { setRecoveryOpen(true); setRecoverySubmitted(false); setRecoveryError(null); }} type="button">아이디 또는 비밀번호를 잊으셨나요?</button>
         </form>
       </DetailPanel>
+      <FormDialog
+        busy={recoveryBusy}
+        description="이름과 사번으로 요청하면 관리자가 확인 후 임시 비밀번호를 발급합니다. 계정 존재 여부는 화면에 표시되지 않습니다."
+        error={recoveryError ?? undefined}
+        onClose={() => { if (!recoveryBusy) setRecoveryOpen(false); }}
+        onSubmit={submitRecoveryRequest}
+        open={recoveryOpen}
+        submitDisabled={!recoveryName.trim() || !recoveryNumber.trim() || recoverySubmitted}
+        submitLabel={recoverySubmitted ? "요청 접수됨" : "복구 요청"}
+        title="계정 복구 요청"
+      >
+        {recoverySubmitted ? <InlineNotice title="요청을 접수했습니다" tone="success">관리자가 본인 확인 후 비밀번호를 초기화합니다. 임시 비밀번호는 관리자에게 직접 전달받아 주세요.</InlineNotice> : <div className="login-form__recovery-fields"><RequestField label="이름"><input autoComplete="name" maxLength={120} required value={recoveryName} onChange={(event) => setRecoveryName(event.target.value)} /></RequestField><RequestField label="사번"><input autoComplete="off" maxLength={80} required value={recoveryNumber} onChange={(event) => setRecoveryNumber(event.target.value)} /></RequestField></div>}
+      </FormDialog>
     </div>
   );
 }

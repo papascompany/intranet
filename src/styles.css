@@ -1054,6 +1054,9 @@ h3 {
   background: var(--color-paper);
 }
 
+.login-form__recovery { justify-self: end; border: 0; padding: 4px 0; color: var(--color-slate); background: transparent; font: inherit; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.login-form__recovery-fields { display: grid; gap: 12px; }
+
 .checkbox-label {
   min-height: 40px;
   color: var(--color-graphite);

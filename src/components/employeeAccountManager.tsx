@@ -1,7 +1,8 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { KeyRound, ShieldCheck, Upload, UserPlus, Users } from "lucide-react";
 import type { ImportEmployeeAccountsResult } from "../api/types";
 import type { Employee, Role, Workplace } from "../domain/types";
+import { completePasswordRecoveryRequest, getPasswordRecoveryRequests, type PasswordRecoveryRequest } from "../api/authHttpClient";
 import { parseEmployeeCsv, type EmployeeImportRow } from "../features/employeeCsv";
 import { FormDialog, InlineNotice } from "./operational";
 import "./employeeAccountManager.css";
@@ -93,9 +94,50 @@ export function EmployeeAccountManager({ accountStates, busy = false, currentEmp
   const [importRows, setImportRows] = useState<EmployeeImportRow[]>([]);
   const [importFileName, setImportFileName] = useState("");
   const [importedCredentials, setImportedCredentials] = useState<ImportEmployeeAccountsResult["created"]>([]);
+  const [recoveryRequests, setRecoveryRequests] = useState<PasswordRecoveryRequest[]>([]);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const isBusy = busy || isSubmitting;
   const availableRoles = roleManagement === "SYSTEM" ? roles : roles.filter((role) => role.value === "EMPLOYEE" || role.value === "APPROVER");
   const roleChangeOptions = changeableRoles(roleManagement);
+
+  const refreshRecoveryRequests = async () => {
+    setRecoveryError(null);
+    setRecoveryLoading(true);
+    try {
+      setRecoveryRequests(await getPasswordRecoveryRequests());
+    } catch (caught) {
+      setRecoveryError(caught instanceof Error ? caught.message : "복구 요청을 불러오지 못했습니다.");
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (roleManagement === "HR" || roleManagement === "SYSTEM") void refreshRecoveryRequests();
+  }, [roleManagement]);
+
+  const completeRecoveryRequest = async (request: PasswordRecoveryRequest) => {
+    const employee = employees.find((item) => (item.employeeNumber ?? "").toUpperCase() === request.employee_number.toUpperCase());
+    if (employee && !stateByEmployeeId.get(employee.id)?.enabled) {
+      setRecoveryError("계정이 사용 중지 상태입니다. 먼저 계정 상태를 확인해 주세요.");
+      return;
+    }
+    if (!employee) {
+      setRecoveryError("직원 계정을 찾지 못했습니다. 사번과 직원명부를 확인해 주세요.");
+      return;
+    }
+    setRecoveryError(null);
+    setIsSubmitting(true);
+    try {
+      await completePasswordRecoveryRequest(request.id);
+      setRecoveryRequests((current) => current.filter((item) => item.id !== request.id));
+    } catch (caught) {
+      setRecoveryError(caught instanceof Error ? caught.message : "요청을 완료하지 못했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const stateByEmployeeId = useMemo(() => new Map(accountStates.map((state) => [state.employeeId, state])), [accountStates]);
 
@@ -129,7 +171,10 @@ export function EmployeeAccountManager({ accountStates, busy = false, currentEmp
     event.preventDefault();
     if (isBusy || !resetEmployee || resetPassword.length < 12 || resetPassword !== resetPasswordConfirmation) return;
     const completed = await runAction(() => onResetPassword(resetEmployee.id, resetPassword));
-    if (completed) closeResetPassword();
+    if (completed) {
+      closeResetPassword();
+      await refreshRecoveryRequests();
+    }
   };
 
   const closeCreate = () => {
@@ -250,6 +295,18 @@ export function EmployeeAccountManager({ accountStates, busy = false, currentEmp
       ) : null}
 
       <div aria-label={`직원 계정 ${employees.length}명`} className="employee-account-manager__summary"><Users aria-hidden="true" /> 등록 계정 {employees.length}명</div>
+      {(roleManagement === "HR" || roleManagement === "SYSTEM") ? (
+        <section aria-labelledby="employee-account-recovery-title" className="employee-account-recovery">
+          <header><div><h3 id="employee-account-recovery-title">계정 복구 요청</h3><p>요청자 본인을 확인한 뒤 비밀번호 재설정을 진행하고 완료 처리하세요.</p></div><button disabled={recoveryLoading || isBusy} onClick={() => void refreshRecoveryRequests()} type="button">새로고침</button></header>
+          {recoveryError ? <InlineNotice title="복구 요청 처리" tone="warning">{recoveryError}</InlineNotice> : null}
+          {recoveryLoading ? <p className="employee-account-recovery__empty">요청을 불러오는 중입니다.</p> : recoveryRequests.length ? recoveryRequests.map((request) => {
+            const employee = employees.find((item) => (item.employeeNumber ?? "").toUpperCase() === request.employee_number.toUpperCase());
+            const account = employee ? stateByEmployeeId.get(employee.id) : undefined;
+            const canReset = Boolean(employee && account?.enabled && (roleManagement === "SYSTEM" || employee.role === "EMPLOYEE" || employee.role === "APPROVER"));
+            return <article className="employee-account-recovery__row" key={request.id}><div><strong>{request.employee_name} · {request.employee_number}</strong><span>{new Date(request.requested_at).toLocaleString("ko-KR")} 요청</span>{employee ? <small>{account?.loginId ?? "아이디 확인 필요"} · {account?.enabled ? "사용 중" : "사용 중지"}</small> : <small>현재 직원 계정과 일치하지 않음</small>}{canReset && !request.reset_after_request ? <small className="employee-account-recovery__hint">요청 접수 후 비밀번호를 초기화해야 합니다.</small> : null}</div><div>{canReset ? <><button disabled={isBusy} onClick={() => openResetPassword(employee!)} type="button">비밀번호 재설정</button><button disabled={isBusy || !request.reset_after_request} onClick={() => void completeRecoveryRequest(request)} type="button">완료 처리</button></> : <span className="employee-account-recovery__hint">직원/계정 상태 확인 필요</span>}</div></article>;
+          }) : <p className="employee-account-recovery__empty">대기 중인 계정 복구 요청이 없습니다.</p>}
+        </section>
+      ) : null}
       {employees.length ? (
         <div className="employee-account-manager__list" role="list">
           {employees.map((employee) => {

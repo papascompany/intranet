@@ -29,6 +29,17 @@
 .employee-account-row__actions .is-disable { border-color: #fecaca; color: #b91c1c; background: #fef2f2; }
 .employee-account-row__actions .is-enable { border-color: #bbf7d0; color: #166534; background: #f0fdf4; }
 .employee-account-manager__empty { border: 1px dashed var(--color-silver); border-radius: 6px; padding: 32px; color: var(--color-slate); text-align: center; font-size: 13px; }
+.employee-account-recovery { display: grid; gap: 10px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 14px; background: var(--color-paper); }
+.employee-account-recovery > header, .employee-account-recovery__row, .employee-account-recovery__row > div:last-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.employee-account-recovery h3, .employee-account-recovery p { margin: 0; }
+.employee-account-recovery h3 { font-size: 15px; }
+.employee-account-recovery header p, .employee-account-recovery__row span, .employee-account-recovery__row small, .employee-account-recovery__hint { color: var(--color-slate); font-size: 12px; }
+.employee-account-recovery button { min-height: 34px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 0 10px; color: var(--color-graphite); background: var(--color-white); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.employee-account-recovery button:disabled { cursor: not-allowed; opacity: .55; }
+.employee-account-recovery__row { border-top: 1px solid var(--color-silver); padding-top: 10px; }
+.employee-account-recovery__row > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.employee-account-recovery__row strong { font-size: 13px; }
+.employee-account-recovery__empty { padding: 16px 0; color: var(--color-slate); text-align: center; font-size: 13px; }
 .employee-account-manager__form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .employee-account-manager__form label { display: grid; gap: 6px; color: var(--color-graphite); font-size: 13px; font-weight: 600; }
 .employee-account-manager__form input, .employee-account-manager__form select, .employee-account-manager__form textarea { width: 100%; min-height: 40px; border: 1px solid var(--color-silver); border-radius: 6px; padding: 8px 10px; color: var(--color-graphite); background: var(--color-white); font: inherit; font-weight: 400; }
@@ -44,5 +55,5 @@
 .employee-account-manager__import-result code { color: #166534; font-family: ui-monospace, monospace; font-weight: 700; }
 .employee-account-manager__import-preview { display: grid; gap: 10px; }
 .employee-account-manager__import-table-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--color-silver); border-radius: 6px; }
-@media (max-width: 720px) { .employee-account-manager__header { align-items: stretch; flex-direction: column; } .employee-account-row { grid-template-columns: minmax(0, 1fr) auto; } .employee-account-row__actions { grid-column: 1 / -1; justify-content: flex-start; } }
+@media (max-width: 720px) { .employee-account-manager__header { align-items: stretch; flex-direction: column; } .employee-account-row { grid-template-columns: minmax(0, 1fr) auto; } .employee-account-row__actions { grid-column: 1 / -1; justify-content: flex-start; } .employee-account-recovery > header, .employee-account-recovery__row { align-items: stretch; flex-direction: column; } .employee-account-recovery__row > div:last-child { justify-content: flex-start; flex-wrap: wrap; } }
 @media (max-width: 480px) { .employee-account-manager__header-actions { display: grid; } .employee-account-manager__import, .employee-account-manager__create, .employee-account-row__actions button { width: 100%; } .employee-account-row__actions { display: grid; grid-template-columns: 1fr; } .employee-account-manager__form { grid-template-columns: 1fr; } }

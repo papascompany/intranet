@@ -8,6 +8,14 @@ type AuthError = {
   error?: string;
 };
 
+export type PasswordRecoveryRequest = {
+  id: string;
+  employee_name: string;
+  employee_number: string;
+  requested_at: string;
+  reset_after_request: boolean;
+};
+
 export async function getAuthenticatedSession() {
   const response = await fetch("/api/auth", { credentials: "same-origin" });
   return await parseAuthResponse(response);
@@ -60,6 +68,30 @@ export async function logoutAuthenticatedSession() {
   if (!response.ok) {
     throw new Error(await responseError(response));
   }
+}
+
+export async function requestPasswordRecovery(employeeName: string, employeeNumber: string) {
+  await postAuthAction("requestPasswordRecovery", { employeeName, employeeNumber });
+}
+
+export async function getPasswordRecoveryRequests() {
+  const body = await postAuthAction<{ requests: PasswordRecoveryRequest[] }>("getPasswordRecoveryRequests");
+  return body.requests;
+}
+
+export async function completePasswordRecoveryRequest(requestId: string) {
+  await postAuthAction("completePasswordRecoveryRequest", { requestId });
+}
+
+async function postAuthAction<T = unknown>(action: string, payload: Record<string, string> = {}) {
+  const response = await fetch("/api/auth", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...payload })
+  });
+  if (!response.ok) throw new Error(await responseError(response));
+  return await response.json() as T;
 }
 
 async function parseAuthResponse(response: Response) {
