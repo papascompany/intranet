@@ -108,17 +108,24 @@ export async function checkProductionHealth(
   return { release: "self-hosted-2026-07-20", ok, checks, repository: getPersistenceStatusFromEnv(env) };
 }
 
-export default async function handler(request: VercelRequest, response: ServerResponse) {
-  if (request.method && request.method !== "GET") {
-    response.statusCode = 405;
-    response.setHeader("Allow", "GET");
-    response.end(JSON.stringify({ error: "Method not allowed" }));
-    return;
-  }
+// HEAD is accepted so external uptime monitors (UptimeRobot free plan sends HEAD only)
+// get the same 200/503 status as GET, without the body.
+export function createHealthHandler(check: () => Promise<ProductionHealth> = () => checkProductionHealth()) {
+  return async function handler(request: VercelRequest, response: ServerResponse): Promise<void> {
+    const method = request.method ?? "GET";
+    if (method !== "GET" && method !== "HEAD") {
+      response.statusCode = 405;
+      response.setHeader("Allow", "GET, HEAD");
+      response.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
 
-  const health = await checkProductionHealth();
-  response.statusCode = health.ok ? 200 : 503;
-  response.setHeader("Cache-Control", "no-store");
-  response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.end(JSON.stringify(health));
+    const health = await check();
+    response.statusCode = health.ok ? 200 : 503;
+    response.setHeader("Cache-Control", "no-store");
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.end(method === "HEAD" ? undefined : JSON.stringify(health));
+  };
 }
+
+export default createHealthHandler();

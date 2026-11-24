@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { checkProductionHealth } from "./health";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { checkProductionHealth, createHealthHandler, type ProductionHealth } from "./health";
+
+type CapturedResponse = { statusCode: number; headers: Record<string, string>; body: string | undefined };
+
+async function callHandler(method: string, health: Pick<ProductionHealth, "ok">): Promise<CapturedResponse> {
+  const captured: CapturedResponse = { statusCode: 0, headers: {}, body: undefined };
+  const response = {
+    set statusCode(value: number) { captured.statusCode = value; },
+    get statusCode() { return captured.statusCode; },
+    setHeader(name: string, value: string) { captured.headers[name.toLowerCase()] = value; },
+    end(chunk?: string) { captured.body = chunk; }
+  } as unknown as ServerResponse;
+  const handler = createHealthHandler(async () => ({ ...health } as ProductionHealth));
+  await handler({ method } as IncomingMessage, response);
+  return captured;
+}
 
 const baseEnv = {
   DATABASE_URL: "postgres://example",
@@ -55,5 +71,29 @@ describe("production health", () => {
     expect(health.ok).toBe(false);
     expect(health.checks.database).toBe("unreachable");
     expect(JSON.stringify(health)).not.toContain("connection string");
+  });
+});
+
+describe("health handler methods", () => {
+  it("answers HEAD with the GET status code and no body", async () => {
+    const head = await callHandler("HEAD", { ok: true });
+    expect(head.statusCode).toBe(200);
+    expect(head.body).toBeUndefined();
+    expect(head.headers["cache-control"]).toBe("no-store");
+
+    const headDown = await callHandler("HEAD", { ok: false });
+    expect(headDown.statusCode).toBe(503);
+  });
+
+  it("returns the JSON body for GET", async () => {
+    const get = await callHandler("GET", { ok: true });
+    expect(get.statusCode).toBe(200);
+    expect(JSON.parse(get.body ?? "{}")).toMatchObject({ ok: true });
+  });
+
+  it("rejects other methods with Allow: GET, HEAD", async () => {
+    const post = await callHandler("POST", { ok: true });
+    expect(post.statusCode).toBe(405);
+    expect(post.headers.allow).toBe("GET, HEAD");
   });
 });
